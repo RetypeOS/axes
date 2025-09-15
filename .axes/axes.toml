@@ -1,0 +1,21 @@
+name = "Axes"
+version = "0.1.0"
+description = "A new project managed by axes."
+
+[commands]
+hello = "echo 'Hello from {name}!'"
+pause = "pause"
+build = "{v_build}"
+replace = "{v_replace}"
+br = ["{v_build}", "{v_replace}", "echo 'Todo listo!'"]
+testime = "Measure-Command {var_t}}" # Para correjir, solo para powershell.
+migrate_to_i18n = {run="python -m scripts.i18n_migrator", desc="Migrar todas las antiguas definiciones a las nuevas definiciones."}
+
+[options]
+
+[vars]
+v_build = "cargo build --release"
+v_replace = "copy /Y {root}\\target\\release\\axes.exe C:\\scripts\\axes.exe"
+var_t = "{ axes axes hello "
+
+[env]

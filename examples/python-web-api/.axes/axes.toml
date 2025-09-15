@@ -1,0 +1,80 @@
+# ./axes/axes.toml
+
+version = "1.0.0"
+description = "Un ejemplo de API web en Python gestionada con axes."
+
+# --- Opciones de Comportamiento y Hooks ---
+[options]
+# El hook `at_start` es la característica más importante para proyectos Python.
+# Se ejecuta CADA VEZ que inicias una sesión con `axes <contexto> start`.
+# Su trabajo es activar el entorno virtual, haciendo que `python`, `pip`, `flask`, etc.,
+# estén disponibles en el PATH de la sesión.
+#
+# NOTA: Este comando es dependiente de la shell. El usuario debería ajustarlo
+# para su sistema operativo (ej. `call .venv\\Scripts\\activate.bat` en cmd de Windows).
+at_start = "source ./.venv/bin/activate"
+
+# El hook `at_exit` se ejecuta al salir de la sesión. Es ideal para la limpieza.
+at_exit = "echo 'Saliendo de la sesión de la API...'"
+
+# Definimos cómo se abre este proyecto. `default` es un puntero a "vsc".
+[options.open_with]
+default = "vsc"
+vsc = "code '{path}'"
+explorer = "-explorer '{path}'" # El '-' ignora el código de error de explorer.exe
+
+# --- Variables de Entorno ---
+# Estas variables se inyectan en el entorno ANTES de ejecutar CUALQUIER comando
+# a través de `axes` (tanto `run` como `start`).
+[env]
+# Le dice a Flask dónde encontrar nuestra aplicación.
+FLASK_APP = "app.py"
+# Configura Flask para que se ejecute en modo de desarrollo (con recarga en caliente).
+FLASK_ENV = "development"
+# Una variable personalizada que nuestra app.py leerá.
+API_GREETING = "Hello from the axes-powered API!"
+
+# --- Comandos Personalizados ---
+[commands]
+# El comando de configuración inicial. Es una secuencia de pasos.
+# El usuario solo necesita ejecutar `axes <contexto> setup` una vez.
+[commands.setup.platform]
+desc = "Crea el entorno virtual e instala las dependencias."
+# Versión para Windows
+windows = [
+    "echo Creando entorno virtual...",
+    "python -m venv .venv",
+    "echo Instalando dependencias desde requirements.txt...",
+    "call .venv\\Scripts\\pip install -r requirements.txt"
+]
+# Versión para Linux/macOS (será el default)
+default = [
+    "echo Creando entorno virtual...",
+    "python3 -m venv .venv",
+    "echo Instalando dependencias desde requirements.txt...",
+    ".venv/bin/pip install -r requirements.txt"
+]
+
+# El comando para iniciar el servidor de desarrollo.
+[commands.dev]
+desc = "Inicia el servidor de desarrollo de Flask."
+run = "flask run"
+
+# El comando para ejecutar las pruebas.
+[commands.test]
+desc = "Ejecuta la suite de pruebas con pytest."
+run = "pytest"
+
+# El comando para verificar el estilo del código.
+[commands.lint]
+desc = "Ejecuta el linter flake8."
+run = "flake8 ."
+
+# Un comando compuesto. Demuestra cómo los comandos de `axes` pueden llamar a otros.
+# Esto crea flujos de trabajo complejos a partir de bloques simples.
+[commands.check]
+desc = "Ejecuta el linter y las pruebas."
+run = [
+    "axes run lint", # Ejecuta el comando `lint` de este mismo proyecto.
+    "axes run test"  # Luego, ejecuta el comando `test`.
+]

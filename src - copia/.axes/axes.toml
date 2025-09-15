@@ -1,0 +1,13 @@
+version = "0.1.0"
+description = "A new project managed by axes."
+
+[commands]
+
+[options.open_with]
+vsc = "code {root}"
+explorer = "-explorer '{root}'"
+default = "explorer"
+
+[vars]
+
+[env]
