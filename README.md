@@ -4,7 +4,7 @@
 
 [![CI/CD Status](https://img.shields.io/badge/build-passing-brightgreen)](#)
 [![Version](https://img.shields.io/badge/version-v0.1.3--alpha-blue)](#)
-[![License](https://img.shields.io/badge/license-MIT-lightgrey)](https://github.com/Retype15/axes/blob/main/LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-lightgrey)](https://github.com/RetypeOS/axes/blob/main/LICENSE)
 
 ¿Alguna vez has sentido esa micro-pausa al cambiar de un proyecto a otro? Esa fracción de segundo en la que tu cerebro intenta recordar: *«Espera, ¿en este proyecto el comando para levantar el entorno era `npm run dev`, `docker-compose up`, o `source .venv/bin/activate && flask run`?»*.
 
@@ -55,7 +55,7 @@ Vamos a crear y gestionar un pequeño monorepo para ver el poder de `axes` en ac
 #### Pasos Recomendados
 
 1. **Descarga el Binario:**
-    - Ve a la página de [**Releases de `axes` en GitHub**](https://github.com/Retype15/axes/releases).
+    - Ve a la página de [**Releases de `axes` en GitHub**](https://github.com/RetypeOS/axes/releases).
     - Busca la última versión (`v0.1.3-alpha` o superior).
     - Descarga el archivo apropiado para tu sistema:
         - Para **Windows**: `axes-x86_64-pc-windows-msvc.zip`
@@ -90,7 +90,7 @@ Vamos a crear y gestionar un pequeño monorepo para ver el poder de `axes` en ac
 Si tienes [Rust](https://www.rust-lang.org/tools/install) instalado, también puedes compilar `axes` desde el código fuente:
 
 ```sh
-git clone https://github.com/Retype15/axes.git
+git clone https://github.com/RetypeOS/axes.git
 cd axes
 cargo build --release # O si ya tiene el proyecto en su ordenador, puede simplemente compilar con `axes build .` (puede revisar el .axes/axes.toml del propio proyecto, no tiene mucho, pero puede usarlo para testear.)
 # El ejecutable estará en ./target/release/axes
@@ -280,7 +280,7 @@ Es la experiencia de desarrollo más fluida posible, diseñada para que te olvid
 
 ## Ejemplos de Uso Práctico
 
-La mejor forma de entender el poder de `axes` es verlo en acción. Hemos preparado una serie de proyectos de ejemplo en el directorio [`/examples`](https://github.com/Retype15/axes/tree/main/examples) del repositorio para demostrar cómo `axes` puede orquestar diferentes tipos de flujos de trabajo.
+La mejor forma de entender el poder de `axes` es verlo en acción. Hemos preparado una serie de proyectos de ejemplo en el directorio [`/examples`](https://github.com/RetypeOS/axes/tree/main/examples) del repositorio para demostrar cómo `axes` puede orquestar diferentes tipos de flujos de trabajo.
 
 ### Ejemplo 1: API Web con Python y Flask (`python-web-api`)
 
@@ -322,7 +322,7 @@ check = [
 ]
 ```
 
-> 👉 **Explora el [código completo del ejemplo `python-web-api`](https://github.com/Retype15/axes/tree/main/examples/python-web-api) para ver todos los detalles.**
+> 👉 **Explora el [código completo del ejemplo `python-web-api`](https://github.com/RetypeOS/axes/tree/main/examples/python-web-api) para ver todos los detalles.**
 
 . *(A medida que se añadan más ejemplos, se listarán aquí. Por ejemplo: Monorepo con Node.js, Proyecto de Rust, Infraestructura con Docker-Compose, etc.)*
 
@@ -498,4 +498,4 @@ Puedes usar tokens en casi cualquier valor de string en tu `axes.toml`.
 
 ## Licencia
 
-Este proyecto está licenciado bajo la Licencia [MIT](https://github.com/Retype15/axes/blob/main/LICENSE).
+Este proyecto está licenciado bajo la Licencia [MIT](https://github.com/RetypeOS/axes/blob/main/LICENSE).

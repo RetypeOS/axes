@@ -102,4 +102,4 @@ Estas son características más ambiciosas que se considerarán una vez que el n
     - Usa `*` y `**` en tus flujos de trabajo diarios. ¿Son útiles? ¿Se actualizan correctamente?
 
 **¿Cómo reportar feedback?**
-Por favor, abre un "Issue" en nuestro [repositorio de GitHub](https://github.com/Retype15/axes/issues), describiendo el problema que encontraste o la sugerencia que tienes. ¡Cualquier feedback es increíblemente valioso en esta etapa!
+Por favor, abre un "Issue" en nuestro [repositorio de GitHub](https://github.com/RetypeOS/axes/issues), describiendo el problema que encontraste o la sugerencia que tienes. ¡Cualquier feedback es increíblemente valioso en esta etapa!
