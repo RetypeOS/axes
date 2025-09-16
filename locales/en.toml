@@ -1,0 +1,67 @@
+# EN: locales/en.toml
+
+# Common terms
+"common.success" = "✔ Success!"
+"common.prompt.continue" = "Continue?"
+"common.info.operation_cancelled" = "Operation cancelled."
+"common.info.caches_will_regenerate" = "Note: Caches will be automatically regenerated on next resolve."
+
+# Errors
+"error.context_required" = "This action requires a project context."
+"error.saving_global_index" = "Could not save updated global index."
+"error.local_ref_failed" = "Could not get or create the local project reference (`project_ref.bin`)."
+
+# Link command
+"link.error.missing_parent_context" = "The 'link' command requires the context of the new parent."
+"link.error.empty_parent_context" = "New parent context cannot be empty."
+"link.info.attempting" = "Attempting to move '{name}' to be a child of '{new_parent}'..."
+"link.error.cannot_resolve_parent" = "Could not resolve new parent context '{parent}'."
+"link.error.link_failed" = "Failed to link project '{name}'."
+"link.warning.local_ref_update_failed" = "Warning: Project was linked in global index, but local reference file `project_ref.bin` could not be updated: {error}"
+"link.success.header" = "Project '{old_name}' is now a child of '{new_parent}'."
+
+# Start command
+"start.info.starting_session" = "Starting session for '{name}'..."
+"start.error.session_failed" = "Could not start session for project '{name}'."
+
+# Run command
+"run.error.missing_script" = "You must specify a script to execute with 'run'."
+"run.error.script_not_found" = "Script '{script}' not found in project configuration."
+"run.info.executing_sequence" = "Executing script sequence for '{script}'..."
+"run.success.sequence_completed" = "✔ Sequence completed successfully."
+
+# Info command
+"info.header" = "Information for"
+"info.label.uuid" = "UUID:"
+"info.label.root_path" = "Root Path:"
+"info.label.config_file" = "Config File:"
+"info.label.version" = "Version:"
+"info.label.description" = "Description:"
+"info.label.available_commands" = "Available Commands"
+"info.label.no_commands" = "No commands defined."
+
+# Open command
+"open.error.with_requires_app" = "'open with' command requires an application name (e.g. 'vsc', 'explorer')."
+"open.error.no_app_no_default" = "No application specified and no 'default' key in [options.open_with]."
+"open.error.default_must_point" = "The 'default' key must point to the name of another open action (e.g. default = \"vsc\")."
+"open.error.action_not_found" = "No open action found for '{key}' in [options.open_with]."
+
+# Rename command
+"rename.error.missing_name" = "The 'rename' command requires a new name for the project."
+"rename.info.renaming" = "Renaming '{old_name}' to '{new_name}'..."
+"rename.success.header" = "Project '{old_name}' has been renamed to '{new_name}'."
+
+# Unregister command
+"unregister.success.projects_unregistered" = "projects unregistered."
+
+# Delete command
+"delete.warning.destructive" = "WARNING: DESTRUCTIVE OPERATION!"
+"delete.prompt.are_you_sure" = "ARE YOU SURE?"
+"delete.success.header" = "Deleted {purged} `.axes` directories and unregistered {unregistered} projects."
+
+# Register command
+"register.error.failed" = "Could not register project at '{path}'."
+"register.info.finished" = "Registration operation finished."
+
+# Alias command
+"alias.success.set" = "Alias '{alias}!' set to point to"

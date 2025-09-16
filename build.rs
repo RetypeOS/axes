@@ -49,8 +49,6 @@ fn main() {
         let line = format!("    (\"{}\") => {{ \"{}\" }};\n", key, escaped_value);
         macro_code.push_str(&line);
     }
-    // Branch for argument formatting
-    macro_code.push_str("    ($key:expr, $($args:tt)*) => {{ format!(t!($key), $($args)*) }};\n");
     // Compile-time error branch for missing keys. This is crucial for robustness!
     macro_code.push_str(
         "    ($key:expr) => {{ compile_error!(concat!(\"Missing translation key: \", $key)) }};\n",

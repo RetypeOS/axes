@@ -8,6 +8,7 @@ build = "{v_build}"
 replace = "{v_replace}"
 br = ["{v_build}", "{v_replace}", "echo 'Todo listo!'"]
 testime = "Measure-Command {var_t}}" # Only powershell
+collect = "collect --extensions .rs,.md,.toml --exclude examples,locales --content --output project_content_text.txt"
 
 [options]
 

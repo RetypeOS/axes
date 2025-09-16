@@ -3,6 +3,8 @@
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
+
+use axes::t;
 use clap::Parser;
 use std::{env, fs, path::PathBuf};
 use uuid::Uuid;
@@ -59,135 +61,143 @@ fn main() {
 fn run_cli(cli: Cli) -> Result<()> {
     log::debug!("CLI args parsed: {:?}", cli);
 
-    const SYSTEM_PROJECT_ACTIONS: &[&str] = &[
-        "tree",
-        "info",
-        "open",
-        "rename",
-        "link",
-        "unregister",
-        "delete",
-        "run",
-        "start",
+    // Unify all known system actions.
+    const SYSTEM_ACTIONS: &[&str] = &[
+        "tree", "info", "open", "rename", "link", "unregister",
+        "delete", "run", "start", "init", "register", "alias",
     ];
-    const SYSTEM_GLOBAL_ACTIONS: &[&str] = &["init", "register", "alias"];
 
-    // 1. Initial Parsing
+    // --- 1. Mode Detection: Session vs. Script ---
+    if let Ok(project_uuid_str) = env::var("AXES_PROJECT_UUID") {
+        // --- SESSION MODE ---  
+        // Syntax is strict: `axes <action_or_script> [args...]`
+        let action_or_script = cli.context_or_action.ok_or_else(|| {
+            anyhow!("Session mode: an action is required. (e.g., `axes tree`, `axes my_script`)")
+        })?;
+        
+        let mut args = Vec::new();
+        if let Some(arg) = cli.action_or_context_or_arg {
+            args.push(arg);
+        }
+        args.extend(cli.args);
+
+        return handle_session_mode(project_uuid_str, action_or_script, args, SYSTEM_ACTIONS);
+    }
+    
+    // --- SCRIPT MODE ---
     let arg1 = match cli.context_or_action {
         Some(a) => a,
         None => {
-            println!("TODO: Lanzar la TUI.");
+            // No arguments, launch TUI (future)
+            println!("TODO: Launch TUI.");
             return Ok(());
         }
     };
-
+    
     let mut remaining_args = Vec::new();
     if let Some(arg2) = cli.action_or_context_or_arg {
         remaining_args.push(arg2);
     }
     remaining_args.extend(cli.args);
 
-    // 2. Global Actions Filter
-    if SYSTEM_GLOBAL_ACTIONS.contains(&arg1.as_str()) {
-        let action = arg1;
-        let sub_command_or_context = remaining_args.first().cloned();
+    // --- 2. Dispatch Logic for Script Mode ---
+    if remaining_args.is_empty() {
+        // Case: `axes <arg1>`
+        if SYSTEM_ACTIONS.contains(&arg1.as_str()) {
+            // It's an action without context.
+            dispatch_action(arg1, None, Vec::new(), SYSTEM_ACTIONS)
+        } else {
+            // It's a context with an implicit 'start' action
+            dispatch_action("start".to_string(), Some(arg1), Vec::new(), SYSTEM_ACTIONS)
+        }
+    } else {
+        // Case: `axes <arg1> <arg2> [args...]`
+        let arg2 = remaining_args.first().unwrap().clone();
         let final_args = remaining_args.into_iter().skip(1).collect();
 
-        return match action.as_str() {
-            "init" => handle_init(sub_command_or_context, final_args),
-            "register" => handle_register(sub_command_or_context, final_args),
-            "alias" => handle_alias(sub_command_or_context, final_args),
-            _ => unreachable!(),
-        };
-    }
-
-    // 3. Mode Detection and Execution
-    if let Ok(project_uuid_str) = std::env::var("AXES_PROJECT_UUID") {
-        // --- SESSION MODE ---
-        let action = arg1;
-        let args = remaining_args;
-
-        let project_uuid = Uuid::parse_str(&project_uuid_str)?;
-        let index = index_manager::load_and_ensure_global_project()?;
-        let qualified_name = index_manager::build_qualified_name(project_uuid, &index)
-            .ok_or_else(|| anyhow!("Could not reconstruct project name from session."))?;
-        let config =
-            config_resolver::resolve_config_for_uuid(project_uuid, qualified_name, &index)?;
-
-        // Call the project action dispatcher
-        execute_project_action(config, action, args, SYSTEM_PROJECT_ACTIONS)?;
-    } else {
-        // --- SCRIPT MODE ---
-        let arg2 = remaining_args.first();
-
-        let (context_str, action_str, final_args) =
-            if SYSTEM_PROJECT_ACTIONS.contains(&arg1.as_str()) {
-                // Format: `axes <action> <context> [args...]`
-                let context = arg2
-                    .cloned()
-                    .ok_or_else(|| anyhow!("Action '{}' requires a project context.", arg1))?;
-                (context, arg1, remaining_args.into_iter().skip(1).collect())
-            } else {
-                // Format: `axes <context> [action?] [args...]`
-                let context = arg1;
-                let action = arg2.cloned().unwrap_or_else(|| "start".to_string());
-                let args = remaining_args.into_iter().skip(1).collect();
-                (context, action, args)
-            };
-
-        // `tree` without context (or with `global`) is a special case
-        if action_str == "tree" && (context_str == "global" || context_str.is_empty()) {
-            return handle_tree(None);
+        if SYSTEM_ACTIONS.contains(&arg2.as_str()) {
+            // Format: `axes <context> <action> [args...]`
+            dispatch_action(arg2, Some(arg1), final_args, SYSTEM_ACTIONS)
+        } else if SYSTEM_ACTIONS.contains(&arg1.as_str()) {
+            // Format: `axes <action> <context> [args...]`
+            dispatch_action(arg1, Some(arg2), final_args, SYSTEM_ACTIONS)
+        } else {
+            // Format: `axes <context> <script> [args...]` (shortcut for 'run')
+            let mut run_args = vec![arg2];
+            run_args.extend(final_args);
+            dispatch_action("run".to_string(), Some(arg1), run_args, SYSTEM_ACTIONS)
         }
-
-        let index = index_manager::load_and_ensure_global_project()?;
-        let (uuid, qualified_name) = context_resolver::resolve_context(&context_str, &index)?;
-        let config = config_resolver::resolve_config_for_uuid(uuid, qualified_name, &index)?;
-
-        execute_project_action(config, action_str, final_args, SYSTEM_PROJECT_ACTIONS)?;
     }
-
-    Ok(())
 }
 
-/// Executes an action that operates on an already resolved project configuration.
-fn execute_project_action(
-    config: ResolvedConfig,
+fn dispatch_action(
     action: String,
+    context: Option<String>,
     args: Vec<String>,
-    system_actions: &[&str],
+    _system_actions: &[&str],
 ) -> Result<()> {
     log::debug!(
-        "Executing action '{}' for project '{}'",
-        action,
-        config.qualified_name
+        "Dispatching action: '{}' with context: {:?} and args: {:?}",
+        action, context, args
     );
 
     match action.as_str() {
-        "tree" => handle_tree(Some(config)),
-        "start" => handle_start(&config),
-        "info" => handle_info(&config),
-        "open" => handle_open(&config, args),
-        "rename" => handle_rename(&config, args),
-        "link" => handle_link(&config, args),
-        "unregister" => handle_unregister(&config, args),
-        "delete" => handle_delete(&config, args),
-        "run" => {
-            let script_name = args.first().cloned();
-            let params = args.into_iter().skip(1).collect();
-            handle_run(&config, script_name, params)
-        }
-        // Shortcut for `run`
-        script_name if !system_actions.contains(&script_name) => {
-            handle_run(&config, Some(action), args)
-        }
+        "init" => handle_init(context, args),
+        "register" => handle_register(context, args),
+        "alias" => handle_alias(context, args),
+        "tree" => handle_tree(context),
+        "start" => handle_start(context),
+        "info" => handle_info(context),
+        "open" => handle_open(context, args),
+        "rename" => handle_rename(context, args),
+        "link" => handle_link(context, args),
+        "unregister" => handle_unregister(context, args),
+        "delete" => handle_delete(context, args),
+        "run" => handle_run(context, args),
         _ => {
-            anyhow::bail!(
-                "System action '{}' is valid but has no implemented handler.",
-                action
-            );
+            // This case should no longer occur if the dispatcher's logic is correct.
+            anyhow::bail!("Unknown action: '{}'.", action)
         }
     }
+}
+
+/// Dispatcher from the session mode.
+fn handle_session_mode(
+    project_uuid_str: String,
+    action_or_script: String,
+    args: Vec<String>,
+    system_actions: &[&str],
+) -> Result<()> {
+    // 1. Load configuration from the environment UUID.
+    let project_uuid = Uuid::parse_str(&project_uuid_str)?;
+    let index = index_manager::load_and_ensure_global_project()?;
+    let qualified_name = index_manager::build_qualified_name(project_uuid, &index)
+        .ok_or_else(|| anyhow!(t!("session.error.cannot_reconstruct_project_name")))?;
+    let config =
+        config_resolver::resolve_config_for_uuid(project_uuid, qualified_name, &index)?;
+    
+    let context_for_handlers = Some(config.qualified_name.clone());
+
+    // 2. Determine if it's a system action or a 'run' script.
+    if system_actions.contains(&action_or_script.as_str()) {
+        // It's a system action.
+        // We call the same dispatcher, but the handlers that resolve
+        // the context will do so from `context_for_handlers` which will always be `Some`.
+        dispatch_action(action_or_script, context_for_handlers, args, system_actions)
+    } else {
+        // It's a shortcut for 'run'.
+        let mut run_args = vec![action_or_script];
+        run_args.extend(args);
+        handle_run(context_for_handlers, run_args)
+    }
+}
+
+// Helper function to reduce duplication
+fn resolve_project_config(context_str: Option<String>) -> Result<ResolvedConfig> {
+    let context = context_str.ok_or_else(|| anyhow!("This action requires a project context."))?;
+    let index = index_manager::load_and_ensure_global_project()?;
+    let (uuid, qualified_name) = context_resolver::resolve_context(&context, &index)?;
+    Ok(config_resolver::resolve_config_for_uuid(uuid, qualified_name, &index)?)
 }
 
 // --- ACTION HANDLERS (Implementations) ---
@@ -254,23 +264,23 @@ fn handle_init(name_arg: Option<String>, args: Vec<String>) -> Result<()> {
     // 5. Create and save the local reference file (`project_ref.bin`)
     let project_ref = ProjectRef {
         self_uuid: new_uuid,
-        parent_uuid: Some(final_parent_uuid), // The definitive parent
+        parent_uuid: Some(final_parent_uuid),
         name: project_name.clone(),
     };
     index_manager::write_project_ref(&canonical_path, &project_ref)
-        .context("No se pudo escribir el archivo de referencia del proyecto (project_ref.bin).")?;
+        .context("Could not write the project reference file (project_ref.bin).")?;
 
     // 6. Save the updated global index
     index_manager::save_global_index(&index).context("Could not save updated global index.")?;
 
     println!("\n✔ Success!");
     println!(
-        "  Proyecto '{}' creado con UUID: {}",
+        "  Project '{}' created with UUID: {}",
         project_name, new_uuid
     );
     println!("  Configuration created at: {}", config_path.display());
     println!(
-        "  Identidad local guardada en: .axes/{}",
+        "  Local identity saved in: .axes/{}",
         axes::constants::PROJECT_REF_FILENAME
     );
     println!("  Successfully registered in global index.");
@@ -278,48 +288,51 @@ fn handle_init(name_arg: Option<String>, args: Vec<String>) -> Result<()> {
     Ok(())
 }
 
-fn handle_link(config: &ResolvedConfig, args: Vec<String>) -> Result<()> {
+fn handle_link(context: Option<String>, args: Vec<String>) -> Result<()> {
     // 1. Get the context of the new parent.
     let new_parent_context = args
         .first()
-        .ok_or_else(|| anyhow!("El comando 'link' requiere el contexto del nuevo padre."))?
+        .ok_or_else(|| anyhow!(t!("link.error.missing_parent_context")))? // 
         .trim();
 
     if new_parent_context.is_empty() {
-        return Err(anyhow!("New parent context cannot be empty."));
+        return Err(anyhow!(t!("link.error.empty_parent_context"))); // "New parent context cannot be empty."
     }
     // We do not validate path characters here because it is a context, not a direct name.
 
+    let config = resolve_project_config(context)?;
+
+
     println!(
-        "Intentando mover '{}' a ser hijo de '{}'...",
-        config.qualified_name, new_parent_context
+        t!("link.info.attempting"),
+        name = config.qualified_name,
+        new_parent = new_parent_context
     );
 
     // 2. Load the global index and resolve the UUID of the new parent.
     let mut index = index_manager::load_and_ensure_global_project()?;
     let (new_parent_uuid, new_parent_qualified_name) =
-        context_resolver::resolve_context(new_parent_context, &index).context(format!(
-            "No se pudo resolver el contexto del nuevo padre '{}'.",
-            new_parent_context
-        ))?;
+        context_resolver::resolve_context(new_parent_context, &index).with_context(|| {
+            anyhow!(
+                t!("link.error.cannot_resolve_parent"),
+                parent = new_parent_context
+            )
+        })?;
 
     // 3. Critical validations (in the `index_manager`):
     //    a. Anti-Cycles
     //    b. Anti-Sibling Name Collision
-    index_manager::link_project(&mut index, config.uuid, new_parent_uuid).context(format!(
-        "No se pudo establecer el enlace para el proyecto '{}'.",
-        config.qualified_name
-    ))?;
+    index_manager::link_project(&mut index, config.uuid, new_parent_uuid)
+        .with_context(|| anyhow!(t!("link.error.link_failed"), name = config.qualified_name))?;
 
     // 4. Save the modified global index.
-    index_manager::save_global_index(&index).context("Could not save updated global index.")?;
+    index_manager::save_global_index(&index)
+        .with_context(|| t!("error.saving_global_index"))?;
 
     // 5. Update the local `project_ref.bin` (using `get_or_create_project_ref`)
     let mut project_ref =
         index_manager::get_or_create_project_ref(&config.project_root, config.uuid, &index)
-            .context(
-                "No se pudo obtener o crear la referencia local del proyecto (`project_ref.bin`).",
-            )?;
+            .with_context(|| t!("error.local_ref_failed"))?;
 
     project_ref.parent_uuid = Some(new_parent_uuid);
     if let Err(e) = index_manager::write_project_ref(&config.project_root, &project_ref) {
@@ -331,7 +344,7 @@ fn handle_link(config: &ResolvedConfig, args: Vec<String>) -> Result<()> {
 
     println!("\n✔ Success!");
     println!(
-        "El proyecto '{}' ahora es hijo de '{}'.",
+        "Project '{}' is now a child of '{}'.",
         config.qualified_name, new_parent_qualified_name
     );
     println!("Note: Caches will be automatically regenerated on next resolve.");
@@ -340,12 +353,13 @@ fn handle_link(config: &ResolvedConfig, args: Vec<String>) -> Result<()> {
 }
 
 /// Starts an interactive terminal session for the project.
-fn handle_start(config: &ResolvedConfig) -> Result<()> {
+fn handle_start(context: Option<String>) -> Result<()> {
+    let config = resolve_project_config(context)?;
     println!("\nStarting session for '{}'...", config.qualified_name);
 
     // We simply call our new function.
     // We use `with_context` to add useful information to the error if it occurs.
-    shell::launch_interactive_shell(config).with_context(|| {
+    shell::launch_interactive_shell(&config).with_context(|| {
         format!(
             "Could not start session for project '{}'",
             config.qualified_name
@@ -354,19 +368,18 @@ fn handle_start(config: &ResolvedConfig) -> Result<()> {
 }
 
 /// Executes a command defined in the project's `axes.toml`.
-fn handle_run(
-    config: &ResolvedConfig,
-    script_name: Option<String>,
-    params: Vec<String>,
-) -> Result<()> {
-    let script_key = script_name
-        .ok_or_else(|| anyhow!("Debe especificar un script para ejecutar con 'run'."))?;
+fn handle_run(context: Option<String>, args: Vec<String>) -> Result<()> {
+    let config = resolve_project_config(context)?;
+
+    let script_key = args
+        .first()
+        .cloned()
+        .ok_or_else(|| anyhow!(t!("run.error.missing_script")))?;
+
+    let params = &args[1..];
 
     let command_def = config.commands.get(&script_key).ok_or_else(|| {
-        anyhow!(
-            "Script '{}' not found in project configuration.",
-            script_key
-        )
+        anyhow!(t!("run.error.script_not_found"), script = script_key)
     })?;
 
     // 1. Get the `Runnable` from the command definition.
@@ -398,7 +411,7 @@ fn handle_run(
     };
 
     // 2. Execute the `Runnable`.
-    let interpolator = axes::core::interpolator::Interpolator::new(config, &params);
+    let interpolator = axes::core::interpolator::Interpolator::new(&config, params);
 
     match runnable_template {
         Runnable::Single(command_template) => {
@@ -413,7 +426,7 @@ fn handle_run(
         }
         Runnable::Sequence(command_templates) => {
             println!(
-                "\nEjecutando secuencia de comandos para '{}'...",
+                "\nExecuting script for '{}'...",
                 script_key
             );
             for (i, command_template) in command_templates.iter().enumerate() {
@@ -441,7 +454,8 @@ fn handle_run(
 }
 
 /// Displays detailed information about the resolved project configuration.
-fn handle_info(config: &ResolvedConfig) -> Result<()> {
+fn handle_info(context: Option<String>) -> Result<()> {
+    let config = resolve_project_config(context)?;
     let config_file_path = config
         .project_root
         .join(AXES_DIR)
@@ -513,8 +527,9 @@ fn handle_info(config: &ResolvedConfig) -> Result<()> {
 }
 
 /// Opens the project with a configured application.
-fn handle_open(config: &ResolvedConfig, args: Vec<String>) -> Result<()> {
+fn handle_open(context: Option<String>, args: Vec<String>) -> Result<()> {
     // 1. Determine the key for the open action.
+    let config = resolve_project_config(context)?;
     let open_key = if !args.is_empty() && args[0] == "with" {
         // Case: `axes ... open with vsc`
         args.get(1) // Get the app name
@@ -555,7 +570,7 @@ fn handle_open(config: &ResolvedConfig, args: Vec<String>) -> Result<()> {
     })?;
 
     // 3. Interpolate and execute. For now, {root} and {path} are the same.
-    let interpolator = axes::core::interpolator::Interpolator::new(config, &[]);
+    let interpolator = axes::core::interpolator::Interpolator::new(&config, &[]);
     let final_command = interpolator.interpolate(command_template);
 
     println!("\n> {}", final_command);
@@ -564,7 +579,7 @@ fn handle_open(config: &ResolvedConfig, args: Vec<String>) -> Result<()> {
         .map_err(|e| anyhow!(e))
 }
 
-fn handle_rename(config: &ResolvedConfig, args: Vec<String>) -> Result<()> {
+fn handle_rename(context: Option<String>, args: Vec<String>) -> Result<()> {
     let new_name = args
         .first()
         .ok_or_else(|| anyhow!("El comando 'rename' requiere un nuevo nombre para el proyecto."))?
@@ -584,6 +599,8 @@ fn handle_rename(config: &ResolvedConfig, args: Vec<String>) -> Result<()> {
             new_name
         ));
     }
+
+    let config = resolve_project_config(context)?;
 
     println!(
         "Renombrando '{}' a '{}'...",
@@ -632,9 +649,11 @@ fn handle_rename(config: &ResolvedConfig, args: Vec<String>) -> Result<()> {
 }
 
 ///Register existing project.
-fn handle_unregister(config: &ResolvedConfig, args: Vec<String>) -> Result<()> {
+fn handle_unregister(context: Option<String>, args: Vec<String>) -> Result<()> {
     let unregister_children = args.iter().any(|arg| arg == "--children");
     let mut index = index_manager::load_and_ensure_global_project()?;
+
+    let config = resolve_project_config(context)?;
 
     let mut uuids_to_unregister = vec![config.uuid];
     if unregister_children {
@@ -684,9 +703,11 @@ fn handle_unregister(config: &ResolvedConfig, args: Vec<String>) -> Result<()> {
 }
 
 /// Deletes a project from the index.
-fn handle_delete(config: &ResolvedConfig, args: Vec<String>) -> Result<()> {
+fn handle_delete(context: Option<String>, args: Vec<String>) -> Result<()> {
     let delete_children = args.iter().any(|arg| arg == "--children");
     let mut index = index_manager::load_and_ensure_global_project()?;
+
+    let config = resolve_project_config(context)?;
 
     let mut uuids_to_process = vec![config.uuid];
     if delete_children {
@@ -804,20 +825,24 @@ fn handle_register(path_arg: Option<String>, args: Vec<String>) -> Result<()> {
     Ok(())
 }
 
-fn handle_tree(config: Option<ResolvedConfig>) -> Result<()> {
+fn handle_tree(context: Option<String>) -> Result<()> {
     let index = index_manager::load_and_ensure_global_project()?;
-    match config {
-        Some(conf) => {
-            println!("\nShowing tree from: '{}'", conf.qualified_name);
-            let start_node = if conf.uuid == index_manager::GLOBAL_PROJECT_UUID {
-                None
+
+    match context {
+        Some(context_str) => {
+            // A context was provided, resolve it to find the starting node.
+            let (start_uuid, qualified_name) =
+                context_resolver::resolve_context(&context_str, &index)?;
+            println!("\nShowing tree from: '{}'", qualified_name);
+            let start_node = if start_uuid == index_manager::GLOBAL_PROJECT_UUID {
+                None // If context is 'global', show the full tree.
             } else {
-                Some(conf.uuid)
+                Some(start_uuid)
             };
             graph_display::display_project_tree(&index, start_node);
         }
         None => {
-            // Global Case
+            // No context provided, show the entire tree from the roots.
             graph_display::display_project_tree(&index, None);
         }
     }
@@ -825,9 +850,9 @@ fn handle_tree(config: Option<ResolvedConfig>) -> Result<()> {
 }
 
 /// Manages project aliases.
-fn handle_alias(subcommand: Option<String>, args: Vec<String>) -> Result<()> {
+fn handle_alias(context: Option<String>, args: Vec<String>) -> Result<()> {
     // If there is no subcommand, the default is `list`.
-    let subcommand = subcommand.as_deref().unwrap_or("list");
+    let subcommand = context.as_deref().unwrap_or("list");
 
     let mut index = index_manager::load_and_ensure_global_project()?;
 

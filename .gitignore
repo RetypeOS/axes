@@ -4,6 +4,9 @@ debug
 target
 scripts/
 
+# These are cache files and unnecesary to use the project.
+**/*.cache.bin
+
 # Git
 .github/
 
