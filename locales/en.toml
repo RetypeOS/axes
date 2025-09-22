@@ -5,11 +5,24 @@
 "common.prompt.continue" = "Continue?"
 "common.info.operation_cancelled" = "Operation cancelled."
 "common.info.caches_will_regenerate" = "Note: Caches will be automatically regenerated on next resolve."
+"common.prompt.are_you_sure" = "Are you sure you want to proceed?"
+
+# Common Messages
+"common.info.tui_placeholder" = "Interactive mode is not yet implemented. Please provide a command."
+"common.info.cancellation_requested" = "Cancellation requested. Please wait for the current operation to finish gracefully..."
+"common.info.cancellation_requested_interactive" = "Cancellation requested. Press Enter or Esc to exit the current prompt."
+"common.error.operation_cancelled" = "Operation cancelled by user."
 
 # Errors
 "error.context_required" = "This action requires a project context."
 "error.saving_global_index" = "Could not save updated global index."
 "error.local_ref_failed" = "Could not get or create the local project reference (`project_ref.bin`)."
+
+# Validation errors
+"validation.error.empty_name" = "Project name cannot be empty."
+"validation.error.contains_whitespace" = "Project names cannot contain whitespace. Use '-' or '_' instead."
+"validation.error.invalid_chars" = "Project name cannot contain path characters ('/' or '\\')."
+"validation.error.reserved_name" = "The name '{name}' is reserved for navigation and cannot be used for a project."
 
 # Link command
 "link.error.missing_parent_context" = "The 'link' command requires the context of the new parent."
@@ -30,38 +43,87 @@
 "run.info.executing_sequence" = "Executing script sequence for '{script}'..."
 "run.success.sequence_completed" = "✔ Sequence completed successfully."
 
-# Info command
-"info.header" = "Information for"
-"info.label.uuid" = "UUID:"
-"info.label.root_path" = "Root Path:"
-"info.label.config_file" = "Config File:"
-"info.label.version" = "Version:"
-"info.label.description" = "Description:"
-"info.label.available_commands" = "Available Commands"
-"info.label.no_commands" = "No commands defined."
-
 # Open command
-"open.error.with_requires_app" = "'open with' command requires an application name (e.g. 'vsc', 'explorer')."
-"open.error.no_app_no_default" = "No application specified and no 'default' key in [options.open_with]."
-"open.error.default_must_point" = "The 'default' key must point to the name of another open action (e.g. default = \"vsc\")."
-"open.error.action_not_found" = "No open action found for '{key}' in [options.open_with]."
+"open.error.too_many_args" = "'open' command accepts at most one argument (the application key)."
+"open.error.default_is_reserved" = "The key 'default' is reserved and cannot be run directly. It must point to another key (e.g., default = \"vsc\")."
+"open.error.action_not_found" = "No open action found for key '{key}' in [options.open_with]."
+"open.error.no_app_no_default" = "No application specified and no 'default' key found in [options.open_with]."
+"open.error.default_key_invalid" = "The default open key is set to '{key}', but no corresponding action was found."
 
 # Rename command
-"rename.error.missing_name" = "The 'rename' command requires a new name for the project."
-"rename.info.renaming" = "Renaming '{old_name}' to '{new_name}'..."
-"rename.success.header" = "Project '{old_name}' has been renamed to '{new_name}'."
+"rename.error.invalid_args" = "'rename' command requires exactly one argument: the new name."
+"rename.error.empty_name" = "The new project name cannot be empty."
+"rename.error.contains_whitespace" = "Project names cannot contain whitespace. Use '-' or '_' instead."
+"rename.error.invalid_chars" = "The new project name cannot contain path characters ('/' or '\\')."
+"rename.error.reserved_name" = "The name '{name}' is reserved for navigation and cannot be used for a project."
+"rename.warning.renaming_global_header" = "⚠️ You are about to rename the special 'global' project."
+"rename.warning.renaming_global_docs" = "All system documentation and community examples refer to it as 'global'."
+"rename.warning.renaming_global_community" = "This can make it harder to get help or share configurations."
+"rename.error.rename_failed" = "Failed to rename project '{name}'. A sibling with the same name might already exist."
+"rename.info.renaming" = "Renaming project '{old_name}' to '{new_name}'..."
+"rename.warning.local_ref_update_failed" = "Warning: Project was renamed in the global index, but the local reference file at '{path}' could not be updated: {error}"
+"rename.success.header" = "Project '{old_name}' has been successfully renamed to '{new_name}'."
 
 # Unregister command
-"unregister.success.projects_unregistered" = "projects unregistered."
+"unregister.error.cannot_unregister_global" = "The root project cannot be unregistered."
+"unregister.info.header" = "The following projects will be unregistered:"
+"unregister.info.header_recursive" = "The following project and all its descendants will be unregistered (project files will NOT be deleted):"
+"unregister.info.header_reparent" = "Project '{name}' will be unregistered and its direct children will be moved to '{new_parent}'."
+"unregister.success.header" = "{count} project(s) have been unregistered."
+"unregister.success.reparented" = "Project '{name}' has been unregistered and its children have been reparented."
 
 # Delete command
-"delete.warning.destructive" = "WARNING: DESTRUCTIVE OPERATION!"
-"delete.prompt.are_you_sure" = "ARE YOU SURE?"
-"delete.success.header" = "Deleted {purged} `.axes` directories and unregistered {unregistered} projects."
+"delete.error.cannot_delete_global" = "The root project cannot be deleted. To reset `axes`, remove the `~/.config/axes` directory manually."
+"delete.error.reparent_collision" = "Cannot delete: Reparenting child '{child_name}' would conflict with an existing project in '{root_name}'. Please rename one of them first."
+"delete.warning.destructive_header" = "☢️  WARNING: DESTRUCTIVE OPERATION! ☢️"
+"delete.info.header_single" = "The following project's `.axes` directory will be deleted and it will be unregistered. Its children will be moved to '{root_name}'."
+"delete.info.header_recursive" = "The following project and ALL its descendants will have their `.axes` directories deleted and will be unregistered."
+"delete.prompt.are_you_sure" = "This action is irreversible. Are you sure?"
+"delete.success.header" = "Deleted {purged} `.axes` directories and unregistered {unregistered} project(s)."
+"delete.info.files_to_be_deleted" = "The following `.axes` directories will be IRREVERSIBLY DELETED:"
+
+# Shared Plan Summary
+"plan.summary.unregister_recursive" = "This project and all its descendants will be affected."
+"plan.summary.unregister_single" = "Only project '{name}' will be affected."
+"plan.summary.reparent_to" = "Direct children will be moved to project '{name}'."
+"plan.error.reparent_collision" = "Cannot proceed: Reparenting would cause name collisions for the following children: '{conflicts}'. Please resolve them manually first."
+"plan.error.recursive_and_reparent" = "The '--recursive' and '--reparent-to' flags are mutually exclusive."
 
 # Register command
 "register.error.failed" = "Could not register project at '{path}'."
 "register.info.finished" = "Registration operation finished."
 
+# Tree command
+"tree.header.all_projects" = "Registered Project Tree:"
+"tree.header.from_project" = "Project Sub-Tree from '{name}':"
+"tree.info.no_projects" = "No projects are registered. Use `axes init <name>` to start."
+"tree.error.project_not_found" = "Error: The specified starting project was not found in the index."
+"tree.error.root_project_missing" = "Warning: The root project is missing, but other projects are registered. The index may be inconsistent."
+
 # Alias command
-"alias.success.set" = "Alias '{alias}!' set to point to"
+"alias.error.not_in_session" = "'alias' command is not available inside a project session."
+"alias.error.empty_name" = "Alias name cannot be empty."
+"alias.error.invalid_chars" = "Alias name '{name}' cannot contain whitespace or path separators ('/' or '\\')."
+"alias.error.reserved_name" = "The name '{name}' is reserved for navigation and cannot be used as an alias."
+"alias.error.not_found" = "Alias '{name}!' not found."
+"alias.warning.modifying_g" = "⚠️ You are about to modify or remove the special 'g!' alias, which is a system default for the root project. This may break common workflows."
+"alias.success.set" = "Alias set:"
+"alias.success.removed" = "Alias '{name}!' removed."
+"alias.info.no_aliases" = "No aliases are defined. Use `axes alias set <name> <context>` to create one."
+"alias.info.header" = "Defined Aliases"
+"alias.info.broken_link" = "<broken link>"
+
+# Info command
+"info.header" = "Information for"
+"info.label.uuid" = "UUID"
+"info.label.root_path" = "Root Path"
+"info.label.config_file" = "Config File"
+"info.label.version" = "Version"
+"info.label.description" = "Description"
+"info.label.available_scripts" = "Available Scripts"
+"info.label.no_scripts" = "No scripts defined for this project."
+"info.label.vars" = "Merged Variables ([vars])"
+"info.label.env" = "Merged Environment ([env])"
+"info.script_type.platform" = "Platform specific"
+"info.script_type.sequence" = "Sequence"
+"info.error.unexpected_args" = "'info' command does not take any additional arguments."

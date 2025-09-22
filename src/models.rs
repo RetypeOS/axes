@@ -61,6 +61,7 @@ pub struct OptionsConfig {
 /// Only needs `Deserialize`.
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct ProjectConfig {
+    pub name: Option<String>,
     pub version: Option<String>,
     pub description: Option<String>,
     #[serde(default)]
@@ -74,39 +75,130 @@ pub struct ProjectConfig {
 }
 
 impl ProjectConfig {
+    /// Creates a new, default ProjectConfig. This is used to generate
+    /// the initial `axes.toml` for the global project and for `axes init`.
     pub fn new() -> Self {
-        let mut commands = HashMap::new();
-        commands.insert(
-            "hello".to_string(),
-            Command::Simple("echo 'Hello from axes!'".to_string()),
-        );
         let mut open_with_defaults = HashMap::new();
+
+        // --- Editor Commands ---
+        // Uses a variable `<axes::vars::editor_cmd>` so the user can easily
+        // override it (e.g., to "code-insiders" or "vim").
+        open_with_defaults.insert(
+            "editor".to_string(),
+            "<axes::vars::editor_cmd> \"<axes::path>\"".to_string(),
+        );
+        open_with_defaults.insert(
+            "idea".to_string(),
+            "<axes::vars::idea_cmd> \"<axes::path>\"".to_string(),
+        );
+
+        // --- OS-Specific File Explorer Commands ---
         if cfg!(target_os = "windows") {
-            open_with_defaults.insert("explorer".to_string(), "-explorer '{root}'".to_string());
-            open_with_defaults.insert("vsc".to_string(), "code {root}".to_string());
+            open_with_defaults.insert(
+                "explorer".to_string(),
+                "-explorer \"<axes::path>\"".to_string(),
+            );
+            // The default action on Windows is to open the file explorer.
             open_with_defaults.insert("default".to_string(), "explorer".to_string());
         } else if cfg!(target_os = "macos") {
-            open_with_defaults.insert("finder".to_string(), "open {root}".to_string());
-            open_with_defaults.insert("vsc".to_string(), "code {root}".to_string());
+            open_with_defaults.insert("finder".to_string(), "open \"<axes::path>\"".to_string());
             open_with_defaults.insert("default".to_string(), "finder".to_string());
         } else {
-            // Linux y otros
-            open_with_defaults.insert("xdg".to_string(), "xdg-open {root}".to_string());
-            open_with_defaults.insert("nautilus".to_string(), "nautilus {root}".to_string());
-            open_with_defaults.insert("vsc".to_string(), "code {root}".to_string());
-            open_with_defaults.insert("default".to_string(), "xdg".to_string());
+            // Linux and other Unix-like systems.
+            open_with_defaults.insert("files".to_string(), "xdg-open \"<axes::path>\"".to_string());
+            open_with_defaults.insert("default".to_string(), "files".to_string());
         }
+
+        // --- Terminal/Shell Command ---
+        // This is useful for quickly opening a new terminal session at the project root.
+        // It doesn't start an `axes` session, just a native terminal.
+        if cfg!(target_os = "windows") {
+            open_with_defaults.insert(
+                "shell".to_string(),
+                "start cmd.exe /K \"cd /D <axes::path>\"".to_string(),
+            );
+        } else {
+            // This is more complex on Linux/macOS as it depends on the terminal emulator.
+            // We provide a common default that users can override.
+            open_with_defaults.insert(
+                "shell".to_string(),
+                "<axes::vars::terminal_cmd>".to_string(),
+            );
+        }
+
+        // --- Default Variables ---
+        let mut vars_defaults = HashMap::new();
+        vars_defaults.insert("editor_cmd".to_string(), "code".to_string());
+        vars_defaults.insert("idea_cmd".to_string(), "idea".to_string());
+
+        // A sensible default for terminal command on non-Windows systems.
+        // The user is expected to change this to their preferred terminal (e.g., "kitty", "alacritty").
+        vars_defaults.insert(
+            "terminal_cmd".to_string(),
+            "gnome-terminal --working-directory=<axes::path>".to_string(),
+        );
+
         Self {
+            // For `init`, these provide a nice starting point.
+            // For `global`, they serve as documentation.
+            name: Some("global".to_string()),
             version: Some("0.1.0".to_string()),
-            description: Some("A new project managed by axes.".to_string()),
+            description: Some("A new project managed by `axes`.".to_string()),
+
+            // `commands` is empty by default. `init` could add a "hello" script,
+            // but the `global` project itself doesn't need it.
             commands: HashMap::new(),
+
             options: OptionsConfig {
                 open_with: open_with_defaults,
                 at_start: None,
                 at_exit: None,
                 shell: None,
             },
+
+            vars: vars_defaults,
+
+            env: HashMap::new(),
+        }
+    }
+
+    /// Creates a minimal yet structurally complete ProjectConfig for `axes init`.
+    /// It acts as a scaffold, guiding the user without being prescriptive.
+    pub fn new_for_init(name: &str, version: &str, description: &str) -> Self {
+        let mut commands = HashMap::new();
+        let mut vars = HashMap::new();
+
+        // --- A single, simple command to verify the setup ---
+        commands.insert(
+            "test".to_string(),
+            Command::Extended(ExtendedCommand {
+                desc: Some("Run a simple test echo command.".to_string()),
+                run: Runnable::Single("echo \"Test for '<axes::name>' successful!\"".to_string()),
+            }),
+        );
+
+        // --- A placeholder variable ---
+        vars.insert("GREETING".to_string(), "Hello from there!".to_string());
+
+        // --- Placeholders for session hooks in [options] ---
+        // We use a command that is unlikely to exist to prevent accidental execution,
+        // but shows the user where to put their real commands.
+        // A commented-out example is even better, but TOML serialization
+        // of comments is not standard. An empty string is the cleanest approach.
+        let options = OptionsConfig {
+            at_start: Some("".to_string()), // Placeholder for environment setup (e.g., `source .venv/bin/activate`)
+            at_exit: Some("".to_string()),  // Placeholder for cleanup (e.g., `docker-compose down`)
             ..Default::default()
+        };
+
+        Self {
+            name: Some(name.to_string()),
+            version: Some(version.to_string()),
+            description: Some(description.to_string()),
+            commands,
+            vars,
+            options,
+            env: HashMap::new(),
         }
     }
 }

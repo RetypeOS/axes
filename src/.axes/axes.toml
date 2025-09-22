@@ -1,13 +1,18 @@
+name = "src"
 version = "0.1.0"
-description = "A new project managed by axes."
+description = "A new project named 'src', managed by `axes`."
 
-[commands]
+[commands.test]
+run = """echo "Test for '<axes::name>' successful!""""
+desc = "Run a simple test echo command."
+
+[options]
+at_start = ""
+at_exit = ""
 
 [options.open_with]
-vsc = "code {root}"
-explorer = "-explorer '{root}'"
-default = "explorer"
 
 [vars]
+GREETING = "Hello from there!"
 
 [env]

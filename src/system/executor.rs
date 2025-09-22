@@ -17,6 +17,12 @@ pub enum ExecutionError {
     CommandFailed(String, std::io::Error),
     #[error("Command '{0}' exited with a non-zero error code.")]
     NonZeroExitStatus(String),
+    #[error("Command '{command}' produced output that was not valid UTF-8")]
+    InvalidUtf8Output {
+        command: String,
+        #[source]
+        source: std::string::FromUtf8Error,
+    },
 }
 
 /// Executes a system command robustly and predictably.
@@ -109,4 +115,46 @@ pub fn execute_command(
     Ok(())
 }
 
-// The `is_windows_shell_builtin` function is no longer needed and has been removed.
+/// Executes a command and captures its standard output.
+/// Stderr is passed through to the user's terminal.
+pub fn execute_and_capture_output(
+    command_line: &str,
+    cwd: &Path,
+    env_vars: &HashMap<String, String>,
+) -> Result<String, ExecutionError> {
+    let trimmed_command = command_line.trim();
+    if trimmed_command.is_empty() {
+        return Err(ExecutionError::EmptyCommand);
+    }
+
+    let parts = shlex::split(trimmed_command)
+        .ok_or_else(|| ExecutionError::CommandParse(trimmed_command.to_string()))?;
+    if parts.is_empty() {
+        return Err(ExecutionError::EmptyCommand);
+    }
+
+    let program = &parts[0];
+    let args = &parts[1..];
+    let clean_cwd = dunce::simplified(cwd);
+
+    let command_output = StdCommand::new(program)
+        .args(args)
+        .current_dir(clean_cwd)
+        .envs(env_vars)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .output()
+        .map_err(|e| ExecutionError::CommandFailed(trimmed_command.to_string(), e))?;
+
+    if !command_output.status.success() {
+        return Err(ExecutionError::NonZeroExitStatus(
+            trimmed_command.to_string(),
+        ));
+    }
+
+    String::from_utf8(command_output.stdout).map_err(|e| ExecutionError::InvalidUtf8Output {
+        command: trimmed_command.to_string(),
+        source: e,
+    })
+}

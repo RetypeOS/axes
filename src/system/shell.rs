@@ -9,6 +9,8 @@ use std::{env, fs};
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
+use crate::core::interpolator::Interpolator;
+
 #[derive(Error, Debug)]
 pub enum ShellError {
     #[error("Filesystem Error: {0}")]
@@ -25,6 +27,8 @@ pub enum ShellError {
     TomlParse(#[from] toml::de::Error),
     #[error("Error serializing shells config to TOML: {0}")]
     TomlSerialize(#[from] toml::ser::Error),
+    #[error("Failed to expand tokens in command: {0}")]
+    InterpolationFailed(String),
 }
 
 /// Launches an interactive sub-shell for a project.
@@ -90,22 +94,24 @@ pub fn launch_interactive_shell(config: &ResolvedConfig) -> Result<(), ShellErro
         );
     }
 
-    // 5. **NEW LOGIC**: Execute the `at_exit` hook
-    if let Some(at_exit_command) = &config.options.at_exit
-        && !at_exit_command.trim().is_empty()
-    {
-        //println!("\nExecuting 'at_exit' hook...");
+    // 5. Execute the `at_exit` hook
+    if let Some(at_exit_command) = &config.options.at_exit {
+        if !at_exit_command.trim().is_empty() {
+            println!("\nExecuting 'at_exit' hook...");
 
-        // We use our standard command executor.
-        // We don't pass parameters, but we do pass the project's environment.
-        let interpolator = crate::core::interpolator::Interpolator::new(config, &[]);
-        let final_command = interpolator.interpolate(at_exit_command);
+            // NOTE: CORRECTED API USAGE
+            // 1. Create a mutable interpolator instance.
+            let mut interpolator = Interpolator::new(config);
+            // 2. Call the new method `expand_string`, which returns a Result.
+            let final_command = interpolator
+                .expand_string(at_exit_command)
+                .map_err(|e| ShellError::InterpolationFailed(e.to_string()))?;
 
-        if let Err(e) = executor::execute_command(&final_command, &config.project_root, &config.env)
-        {
-            // If `at_exit` fails, we don't want the entire `axes` operation to fail.
-            // It's a cleanup operation, so we only show a warning.
-            eprintln!("\nWarning: 'at_exit' hook failed to execute: {}", e);
+            if let Err(e) =
+                executor::execute_command(&final_command, &config.project_root, &config.env)
+            {
+                eprintln!("\nWarning: 'at_exit' hook failed to execute: {}", e);
+            }
         }
     }
 

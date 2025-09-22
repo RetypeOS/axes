@@ -3,6 +3,7 @@
 use crate::constants::PROJECT_REF_FILENAME;
 use crate::core::paths;
 use crate::models::{GlobalIndex, IndexEntry, ProjectRef};
+
 use std::collections::HashSet;
 use std::error::Error;
 use std::io::ErrorKind;
@@ -55,7 +56,7 @@ pub fn load_and_ensure_global_project() -> IndexResult<GlobalIndex> {
 
         let global_entry = IndexEntry {
             name: "global".to_string(),
-            path: config_dir.clone(), // Clone to use it later
+            path: config_dir.clone(),
             parent: None,
         };
         e.insert(global_entry.clone());
@@ -75,7 +76,6 @@ pub fn load_and_ensure_global_project() -> IndexResult<GlobalIndex> {
         if !config_path.exists() {
             let default_config = crate::models::ProjectConfig::new();
             // Add default configuration for 'open'
-            // NOTE: This will require models to be updated first. We will do that later.
             let toml_string = toml::to_string_pretty(&default_config)?;
             fs::write(config_path, toml_string)?;
         }
@@ -103,13 +103,10 @@ pub fn add_project_to_index(
 ) -> IndexResult<(Uuid, IndexEntry)> {
     let final_parent_uuid = parent_uuid.unwrap_or(GLOBAL_PROJECT_UUID);
 
-    let name_exists = index.projects.values().any(|entry| {
-        if name == "global" {
-            false
-        } else {
-            entry.parent == Some(final_parent_uuid) && entry.name == name
-        }
-    });
+    let name_exists = index
+        .projects
+        .values()
+        .any(|entry| entry.parent == Some(final_parent_uuid) && entry.name == name);
 
     if name_exists {
         return Err(IndexError::NameAlreadyExists { name });
@@ -395,32 +392,9 @@ pub fn get_all_descendants(index: &GlobalIndex, start_uuid: Uuid) -> Vec<Uuid> {
     descendants
 }
 
-pub fn remove_from_index(
-    index: &mut GlobalIndex,
-    uuids_to_remove: &[Uuid],
-    should_reparent_orphans: bool,
-) -> usize {
+pub fn remove_from_index(index: &mut GlobalIndex, uuids_to_remove: &[Uuid]) -> usize {
     let mut removed_count = 0;
     let remove_set: std::collections::HashSet<Uuid> = uuids_to_remove.iter().cloned().collect();
-
-    if should_reparent_orphans {
-        let children_to_reparent: Vec<Uuid> = index
-            .projects
-            .iter()
-            .filter(|(_, entry)| {
-                entry
-                    .parent
-                    .is_some_and(|p_uuid| remove_set.contains(&p_uuid))
-            })
-            .map(|(uuid, _)| *uuid)
-            .collect();
-
-        for child_uuid in children_to_reparent {
-            if let Some(child_entry) = index.projects.get_mut(&child_uuid) {
-                child_entry.parent = Some(GLOBAL_PROJECT_UUID);
-            }
-        }
-    }
 
     index.projects.retain(|uuid, _| {
         if remove_set.contains(uuid) {
@@ -432,6 +406,63 @@ pub fn remove_from_index(
     });
 
     removed_count
+}
+
+/// Reparents the direct children of a project, handling name collisions automatically.
+/// Returns a list of warnings for any automatic renames that occurred.
+pub fn reparent_children(
+    index: &mut GlobalIndex,
+    old_parent_uuid: Uuid,
+    new_parent_uuid: Uuid,
+) -> Result<Vec<String>, IndexError> {
+    let mut warnings = Vec::new();
+    let old_parent_name = index.projects.get(&old_parent_uuid).unwrap().name.clone();
+
+    // Collect children to avoid borrowing issues
+    let children_uuids: Vec<Uuid> = index
+        .projects
+        .values()
+        .filter(|e| e.parent == Some(old_parent_uuid))
+        .map(|e| index.projects.iter().find(|(_, val)| *val == e).unwrap().0) // Find UUID for entry
+        .cloned()
+        .collect();
+
+    for child_uuid in children_uuids {
+        let mut child_name = index.projects.get(&child_uuid).unwrap().name.clone();
+
+        // Check for initial collision
+        let sibling_names: HashSet<String> = index
+            .projects
+            .values()
+            .filter(|e| e.parent == Some(new_parent_uuid))
+            .map(|e| e.name.clone())
+            .collect();
+
+        if sibling_names.contains(&child_name) {
+            // Collision detected, try automatic rename
+            let new_child_name = format!("{}_{}", old_parent_name, child_name);
+            if sibling_names.contains(&new_child_name) {
+                // Automatic rename also fails, abort entire operation
+                return Err(IndexError::NameAlreadyExists {
+                    name: new_child_name,
+                });
+            }
+
+            // Automatic rename is safe, update name and add a warning
+            warnings.push(format!(
+                "Child '{}' was automatically renamed to '{}' to avoid collision.",
+                child_name, new_child_name
+            ));
+            child_name = new_child_name;
+        }
+
+        // Apply changes
+        let child_entry = index.projects.get_mut(&child_uuid).unwrap();
+        child_entry.name = child_name;
+        child_entry.parent = Some(new_parent_uuid);
+    }
+
+    Ok(warnings)
 }
 
 /// Reconstructs a project's qualified name by traversing up the parent tree.
@@ -466,10 +497,5 @@ pub fn set_alias(index: &mut GlobalIndex, name: String, target_uuid: Uuid) {
 
 /// Deletes an alias from the index. Returns `true` if the alias existed.
 pub fn remove_alias(index: &mut GlobalIndex, name: &str) -> bool {
-    // Protect the alias 'g'
-    if name.to_lowercase() == "g" {
-        log::warn!("No se puede eliminar el alias protegido 'g'.");
-        return false;
-    }
     index.aliases.remove(name).is_some()
 }

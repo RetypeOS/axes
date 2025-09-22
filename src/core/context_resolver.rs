@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::constants::AXES_DIR;
 use crate::core::index_manager::{self, GLOBAL_PROJECT_UUID};
-
+use crate::CancellationToken;
 use crate::constants::LAST_USED_CACHE_FILENAME;
 
 use bincode::error::DecodeError;
@@ -61,7 +61,7 @@ pub enum ContextError {
 type ContextResult<T> = Result<T, ContextError>;
 
 /// Resolves a project path to a UUID and a qualified name.
-pub fn resolve_context(context: &str, index: &GlobalIndex) -> ContextResult<(Uuid, String)> {
+pub fn resolve_context(context: &str, index: &GlobalIndex, cancellation_token: &CancellationToken) -> ContextResult<(Uuid, String)> {
     let parts: Vec<&str> = context.split('/').filter(|s| !s.is_empty()).collect();
     if parts.is_empty() {
         return Err(ContextError::EmptyContext);
@@ -115,7 +115,7 @@ pub fn resolve_context(context: &str, index: &GlobalIndex) -> ContextResult<(Uui
 
 /// Resolves the first part of the path, which has special rules.
 fn resolve_first_part(part: &str, index: &GlobalIndex) -> ContextResult<(Uuid, Option<Uuid>)> {
-    // 1. Check if it's an alias.
+    // 1. Alias check remains the highest priority.
     if let Some(alias_name) = part.strip_suffix('!') {
         let uuid = index
             .aliases
@@ -123,33 +123,55 @@ fn resolve_first_part(part: &str, index: &GlobalIndex) -> ContextResult<(Uuid, O
             .ok_or_else(|| ContextError::AliasNotFound {
                 name: alias_name.to_string(),
             })?;
-
-        let entry = index.projects.get(uuid).unwrap(); // It's safe if the index is consistent.
+        let entry = index.projects.get(uuid).unwrap(); // Safe if index is consistent.
         return Ok((*uuid, entry.parent));
     }
 
-    // 2. If it's not an alias, use keyword and root name logic.
-    let uuid = match part {
-        "**" => index.last_used.ok_or(ContextError::NoLastUsedProject)?,
+    // 2. Handle special keywords.
+    match part {
+        "**" => {
+            let uuid = index.last_used.ok_or(ContextError::NoLastUsedProject)?;
+            let entry = index.projects.get(&uuid).unwrap();
+            return Ok((uuid, entry.parent));
+        }
         "*" => {
-            let global_entry = index
-                .projects
-                .get(&GLOBAL_PROJECT_UUID)
-                .expect("El proyecto global debe existir siempre.");
-            resolve_last_used_child(GLOBAL_PROJECT_UUID, global_entry, index)?
+            let global_entry = index.projects.get(&GLOBAL_PROJECT_UUID).unwrap();
+            let uuid = resolve_last_used_child(GLOBAL_PROJECT_UUID, global_entry, index)?;
+            let entry = index.projects.get(&uuid).unwrap();
+            return Ok((uuid, entry.parent));
         }
-        "." => find_project_from_path(&env::current_dir()?, true, index)?,
-        "_" => find_project_from_path(&env::current_dir()?, false, index)?,
-        // **"global" is an explicit name, the rest are implicit children of `global`.
-        "global" => GLOBAL_PROJECT_UUID,
-        name => {
-            // It's an implicit path, search as a child of `global`.
-            let global_entry = index.projects.get(&GLOBAL_PROJECT_UUID).unwrap(); // It's safe.
-            find_child_by_name(GLOBAL_PROJECT_UUID, global_entry, name, index)?
+        "." => {
+            let uuid = find_project_from_path(&env::current_dir()?, true, index)?;
+            let entry = index.projects.get(&uuid).unwrap();
+            return Ok((uuid, entry.parent));
         }
-    };
-    let entry = index.projects.get(&uuid).unwrap();
-    Ok((uuid, entry.parent))
+        "_" => {
+            let uuid = find_project_from_path(&env::current_dir()?, false, index)?;
+            let entry = index.projects.get(&uuid).unwrap();
+            return Ok((uuid, entry.parent));
+        }
+        _ => {
+            // It's a name, not a keyword. Proceed to the main logic.
+        }
+    }
+
+    // --- 3. Main Name Resolution Logic ---
+    let root_entry = index
+        .projects
+        .get(&GLOBAL_PROJECT_UUID)
+        .expect("Fatal: Global project with predefined UUID not found in index.");
+
+    if part == root_entry.name {
+        // Case 1: The user explicitly wrote the root project's current name (e.g., "global" or "main").
+        // The current node is the root itself.
+        Ok((GLOBAL_PROJECT_UUID, None))
+    } else {
+        // Case 2: The user wrote something else (e.g., "my-project").
+        // Assume it's an implicit child of the root project.
+        let child_uuid = find_child_by_name(GLOBAL_PROJECT_UUID, root_entry, part, index)?;
+        let child_entry = index.projects.get(&child_uuid).unwrap();
+        Ok((child_uuid, child_entry.parent))
+    }
 }
 
 /// Resolves '*' for a child, with interactive fallback.

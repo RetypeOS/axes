@@ -1,0 +1,400 @@
+// EN: src/cli/handlers/commons.rs
+
+// This module contains shared functions used by multiple handlers.
+
+use anyhow::{Context, Result, anyhow};
+use std::collections::{HashMap, HashSet};
+use std::env;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use uuid::Uuid;
+
+use crate::{
+    core::{
+        config_resolver, context_resolver,
+        index_manager::{self},
+    },
+    models::{GlobalIndex, IndexEntry, ResolvedConfig},
+    CancellationToken,
+};
+
+use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
+
+use colored::Colorize;
+
+/// Represents a calculated plan for an unregister or delete operation.
+/// It contains all the necessary information to present to the user and execute.
+#[derive(Debug, Default)]
+pub struct UnregisterPlan {
+    pub uuids_to_remove: Vec<Uuid>,
+    pub reparent_warnings: Vec<String>,
+    pub summary_lines: Vec<String>,
+}
+
+#[inline]
+pub fn check_for_cancellation(cancellation_token: &Arc<AtomicBool>) -> Result<()> {
+    if !cancellation_token.load(Ordering::SeqCst) {
+        Err(anyhow!(t!("common.error.operation_cancelled")))
+    } else {
+        Ok(())
+    }
+}
+
+/// Prepares a plan for unregistering projects. This function is a "dry run"
+/// and does not modify the index; it only calculates the effects.
+pub fn prepare_unregister_plan(
+    index: &GlobalIndex,
+    config: &ResolvedConfig,
+    recursive: bool,
+    reparent_to: Option<String>,
+    cancellation_token: &CancellationToken,
+) -> Result<UnregisterPlan> {
+    let mut uuids_to_remove = vec![config.uuid];
+    let mut reparent_warnings = Vec::new();
+    let mut summary_lines = Vec::new();
+
+    let new_parent_uuid = if let Some(ctx) = &reparent_to {
+        let (uuid, _) = context_resolver::resolve_context(ctx, index, cancellation_token)?;
+        Some(uuid)
+    } else {
+        None
+    };
+
+    if recursive {
+        if reparent_to.is_some() {
+            return Err(anyhow!(t!("plan.error.recursive_and_reparent")));
+        }
+        uuids_to_remove.extend(index_manager::get_all_descendants(index, config.uuid));
+        summary_lines.push(t!("plan.summary.unregister_recursive").to_string());
+    } else {
+        summary_lines.push(
+            format!(
+                t!("plan.summary.unregister_single"),
+                name = config.qualified_name
+            )
+            .to_string(),
+        );
+
+        let final_parent_uuid = new_parent_uuid.unwrap_or(index_manager::GLOBAL_PROJECT_UUID);
+        let final_parent_entry = index.projects.get(&final_parent_uuid).unwrap();
+
+        summary_lines.push(
+            format!(
+                t!("plan.summary.reparent_to"),
+                name = final_parent_entry.name
+            )
+            .to_string(),
+        );
+
+        let (warnings, conflicts) =
+            check_reparent_collisions(index, config.uuid, final_parent_uuid)?;
+        if !conflicts.is_empty() {
+            let conflict_str = conflicts.join("', '");
+            return Err(anyhow!(
+                t!("plan.error.reparent_collision"),
+                conflicts = conflict_str
+            ));
+        }
+        reparent_warnings = warnings;
+    }
+
+    Ok(UnregisterPlan {
+        uuids_to_remove,
+        reparent_warnings,
+        summary_lines,
+    })
+}
+
+/// Checks for potential name collisions when reparenting children.
+/// Returns a tuple of (warnings_for_automatic_renames, hard_conflicts).
+fn check_reparent_collisions(
+    index: &GlobalIndex,
+    old_parent_uuid: Uuid,
+    new_parent_uuid: Uuid,
+) -> Result<(Vec<String>, Vec<String>)> {
+    let mut warnings = Vec::new();
+    let mut conflicts = Vec::new();
+
+    let old_parent_name = &index.projects.get(&old_parent_uuid).unwrap().name;
+    let children_to_move: Vec<_> = index
+        .projects
+        .values()
+        .filter(|e| e.parent == Some(old_parent_uuid))
+        .collect();
+
+    if children_to_move.is_empty() {
+        return Ok((warnings, conflicts));
+    }
+
+    let new_sibling_names: HashSet<_> = index
+        .projects
+        .values()
+        .filter(|e| e.parent == Some(new_parent_uuid))
+        .map(|e| e.name.clone())
+        .collect();
+
+    for child in children_to_move {
+        if new_sibling_names.contains(&child.name) {
+            // Initial collision detected
+            let suggested_name = format!("{}_{}", old_parent_name, child.name);
+            if new_sibling_names.contains(&suggested_name) {
+                // Automatic rename also conflicts. This is a hard conflict.
+                conflicts.push(format!(
+                    "'{}' (also conflicts as '{}')",
+                    child.name, suggested_name
+                ));
+            } else {
+                // Automatic rename is possible. This is a warning.
+                warnings.push(format!(
+                    "Child '{}' will be renamed to '{}' to avoid collision.",
+                    child.name, suggested_name
+                ));
+            }
+        }
+    }
+
+    Ok((warnings, conflicts))
+}
+
+/// Helper function to resolve a project's configuration from a context string.
+pub fn resolve_config_from_context_or_session(
+    context_str: Option<String>,
+    cancellation_token: &CancellationToken,
+) -> Result<ResolvedConfig> {
+    let index = index_manager::load_and_ensure_global_project()?;
+
+    match context_str {
+        Some(context) => {
+            // Contexto explícito, tiene prioridad
+            let (uuid, qualified_name) = context_resolver::resolve_context(&context, &index, cancellation_token)?;
+            Ok(config_resolver::resolve_config_for_uuid(
+                uuid,
+                qualified_name,
+                &index,
+            )?)
+        }
+        None => {
+            // Sin contexto explícito, intentar modo sesión
+            if let Ok(uuid_str) = env::var("AXES_PROJECT_UUID") {
+                let uuid = Uuid::parse_str(&uuid_str)
+                    .with_context(|| "Invalid UUID found in AXES_PROJECT_UUID.")?;
+                let qualified_name =
+                    index_manager::build_qualified_name(uuid, &index).ok_or_else(|| {
+                        anyhow!("Could not build qualified name for session project.")
+                    })?;
+                Ok(config_resolver::resolve_config_for_uuid(
+                    uuid,
+                    qualified_name,
+                    &index,
+                )?)
+            } else {
+                // Ni explícito ni implícito
+                Err(anyhow!(t!("error.context_required")))
+            }
+        }
+    }
+}
+
+/// Interactive, multi-modal parent selector.
+pub fn choose_parent_interactive(index: &GlobalIndex, cancellation_token: &CancellationToken) -> Result<Uuid> {
+    loop {
+        let items = &[
+            "Enter a context path (e.g., 'my-app/api', 'g!', '*')",
+            "Browse projects visually",
+            "Use 'global' as the parent (default)",
+        ];
+
+        let selection = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt("How would you like to select the parent project?")
+            .items(items)
+            .default(2) // Default to 'global'
+            .interact()?;
+
+        match selection {
+            0 => {
+                // Enter a context path
+                if let Some(uuid) = select_parent_by_context(index, cancellation_token)? {
+                    return Ok(uuid);
+                }
+                // If it returns None, the user cancelled, so we loop again.
+            }
+            1 => {
+                // Browse projects visually
+                return select_parent_by_browsing(index);
+            }
+            2 => {
+                // Use 'global'
+                return Ok(index_manager::GLOBAL_PROJECT_UUID);
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+/// Handles the "Enter context" workflow. Returns `Ok(Some(Uuid))` on success,
+/// `Ok(None)` if the user cancels, and `Err` on I/O failure.
+fn select_parent_by_context(index: &GlobalIndex, cancellation_token: &CancellationToken) -> Result<Option<Uuid>> {
+    loop {
+        let input: String = Input::with_theme(&ColorfulTheme::default())
+            .with_prompt("Enter context path (leave empty to go back)")
+            .interact_text()?;
+
+        if input.is_empty() {
+            return Ok(None); // User wants to go back to the main menu
+        }
+
+        match context_resolver::resolve_context(&input, index, cancellation_token) {
+            Ok((uuid, qualified_name)) => {
+                let prompt = format!("Resolved to '{}'. Use this as the parent?", qualified_name);
+                if Confirm::with_theme(&ColorfulTheme::default())
+                    .with_prompt(prompt)
+                    .default(true)
+                    .interact()?
+                {
+                    return Ok(Some(uuid));
+                }
+                // If user says no, the loop continues to ask for another context.
+            }
+            Err(e) => {
+                // Inform the user of the error and let them try again.
+                println!("Error: {}", e);
+            }
+        }
+    }
+}
+
+/// Handles the visual browsing workflow.
+fn select_parent_by_browsing(index: &GlobalIndex) -> Result<Uuid> {
+    let mut current_uuid_opt = None; // Start at the root view
+
+    loop {
+        let (current_name, current_uuid, children) = match current_uuid_opt {
+            Some(uuid) => {
+                let entry = index.projects.get(&uuid).unwrap();
+                let children_vec: Vec<&IndexEntry> = index
+                    .projects
+                    .values()
+                    .filter(|e| e.parent == Some(uuid))
+                    .collect();
+                (entry.name.clone(), uuid, children_vec)
+            }
+            None => {
+                let root_entry = index
+                    .projects
+                    .get(&index_manager::GLOBAL_PROJECT_UUID)
+                    .expect("Fatal: Root project not found during browsing.");
+
+                let children_vec: Vec<&IndexEntry> = index
+                    .projects
+                    .values()
+                    .filter(|e| e.parent == Some(index_manager::GLOBAL_PROJECT_UUID))
+                    .collect();
+                (
+                    root_entry.name.clone(),
+                    index_manager::GLOBAL_PROJECT_UUID,
+                    children_vec,
+                )
+            }
+        };
+
+        let mut items = Vec::new();
+        items.push(format!("✅ [ Select '{}' as parent ]", current_name));
+
+        // The option to go back is only available if we are not at the root view.
+        if current_uuid_opt.is_some() {
+            items.push("⬆️  [ Go up to parent project ]".to_string());
+        }
+
+        let mut child_map = HashMap::new();
+        for child in children.iter() {
+            // Store the mapping from the display name to the actual entry.
+            let display_name = format!("  └─ {}", child.name);
+            items.push(display_name.clone());
+            child_map.insert(display_name, *child);
+        }
+
+        let prompt = format!("Browsing children of '{}'", current_name);
+        let selection_idx = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt(&prompt)
+            .items(&items)
+            .default(0)
+            .interact()?;
+
+        let selection_str = &items[selection_idx];
+
+        if selection_str.starts_with("✅") {
+            return Ok(current_uuid);
+        } else if selection_str.starts_with("⬆️") {
+            let current_entry = index.projects.get(&current_uuid).unwrap();
+            current_uuid_opt = if current_entry.parent == Some(index_manager::GLOBAL_PROJECT_UUID) {
+                None // Go back to the root view
+            } else {
+                current_entry.parent
+            };
+        } else {
+            // A child was selected
+            if let Some(selected_child) = child_map.get(selection_str) {
+                // Find the UUID of the selected child
+                let child_uuid = index
+                    .projects
+                    .iter()
+                    .find(|(_, entry)| entry.path == selected_child.path) // Path is a reliable unique identifier
+                    .map(|(uuid, _)| *uuid);
+
+                if let Some(uuid) = child_uuid {
+                    current_uuid_opt = Some(uuid);
+                }
+            }
+        }
+    }
+}
+
+/// Validates a project name against axes' naming rules.
+/// Returns a sanitized `String` on success.
+/// Prints non-blocking warnings for stylistic issues.
+/// Returns a blocking `Err` for critical issues.
+pub fn validate_project_name(raw_name: &str) -> Result<String> {
+    let name = raw_name.trim();
+
+    // --- Strict, Blocking Errors ---
+    if name.is_empty() {
+        return Err(anyhow!(t!("validation.error.empty_name")));
+    }
+    if name.contains(char::is_whitespace) {
+        return Err(anyhow!(t!("validation.error.contains_whitespace")));
+    }
+    if name.contains('/') || name.contains('\\') {
+        return Err(anyhow!(t!("validation.error.invalid_chars")));
+    }
+    let reserved_nav_names = ["..", "*", "**", "_"];
+    if reserved_nav_names.contains(&name.to_lowercase().as_str()) {
+        return Err(anyhow!(t!("validation.error.reserved_name"), name = name));
+    }
+
+    // --- Soft, Non-Blocking Warnings ---
+    let first_char = name.chars().next().unwrap(); // Safe due to is_empty check
+    let last_char = name.chars().last().unwrap();
+
+    if !first_char.is_alphanumeric() {
+        println!(
+            "{}",
+            format!(
+                "Warning: The name '{}' starts with a non-alphanumeric character. This is allowed but may cause confusion.",
+                name
+            )
+            .yellow()
+        );
+    }
+    if !last_char.is_alphanumeric() && last_char != '_' {
+        println!(
+            "{}",
+            format!(
+                "Warning: The name '{}' ends with a special character. This is allowed but not recommended.",
+                name
+            )
+            .yellow()
+        );
+    }
+
+    Ok(name.to_string())
+}
