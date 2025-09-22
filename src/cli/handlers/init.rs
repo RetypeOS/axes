@@ -213,7 +213,7 @@ fn resolve_project_version(
                 check_for_cancellation(cancellation_token)?;
                 Ok(i)
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => Err(e),
         }
     } else {
         Ok("0.1.0".to_string())
@@ -241,7 +241,7 @@ fn resolve_project_description(
                 check_for_cancellation(cancellation_token)?;
                 Ok(i)
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => Err(e),
         }
     } else {
         Ok(default_desc)

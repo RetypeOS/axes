@@ -9,12 +9,8 @@ use colored::*;
 use std::env;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio;
 
 // --- Command Definition and Registry ---
-
-/// A token representing the cancellation state of the application.
-/// It is shared between the `ctrlc` handler and the command handlers.
 
 /// Defines a system command, its aliases, and its handler function.
 /// The handler now accepts a `CancellationToken` to allow for safe interruption.
@@ -110,7 +106,7 @@ async fn main() -> Result<()> {
         // Tarea A: La lógica principal de la aplicación.
         result = run_cli_wrapper(cli, main_logic_token) => {
             if let Err(e) = result {
-                if cancellation_token.load(Ordering::SeqCst) == false {
+                if !cancellation_token.load(Ordering::SeqCst) {
                     std::process::exit(130);
                 } else {
                     eprintln!("\n{}: {}", "Error".red().bold(), e);

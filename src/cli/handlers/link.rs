@@ -80,7 +80,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
         // NOTE: The qualified name of the *moved project* will change.
         // We can't easily show the new name without rebuilding it, but we can
         // show what happened in a clear way.
-        format!(
+        format_args!(
             t!("link.success.header"),
             old_name = config.qualified_name,
             new_parent = new_parent_qualified_name

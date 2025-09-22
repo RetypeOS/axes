@@ -255,7 +255,7 @@ fn select_parent_by_context(
         match context_resolver::resolve_context(&input, index, cancellation_token) {
             Ok((uuid, qualified_name)) => {
                 let prompt = format!("Resolved to '{}'. Use this as the parent?", qualified_name);
-                let result = if Confirm::with_theme(&ColorfulTheme::default())
+                if Confirm::with_theme(&ColorfulTheme::default())
                     .with_prompt(prompt)
                     .default(true)
                     .interact()?
@@ -263,7 +263,7 @@ fn select_parent_by_context(
                     return Ok(Some(uuid));
                 };
                 check_for_cancellation(cancellation_token)?;
-                result
+
                 // If user says no, the loop continues to ask for another context.
             }
             Err(e) => {

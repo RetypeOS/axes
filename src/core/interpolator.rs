@@ -106,7 +106,7 @@ impl<'a> Interpolator<'a> {
         parts: &[&str],
         cancellation_token: &CancellationToken,
     ) -> Result<String> {
-        match parts.get(0) {
+        match parts.first() {
             Some(&"vars") => {
                 let key = parts
                     .get(1)
@@ -223,7 +223,7 @@ impl<'a> Interpolator<'a> {
         cancellation_token: &CancellationToken,
     ) -> Result<String> {
         let command_to_run =
-            if sub_path.get(0) == Some(&"commands") || sub_path.get(0) == Some(&"scripts") {
+            if sub_path.first() == Some(&"commands") || sub_path.first() == Some(&"scripts") {
                 // Case: <axes::run::scripts::my_script>
                 let script_name = sub_path
                     .get(1)

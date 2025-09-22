@@ -106,7 +106,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     println!(
         "\n{} {}",
         t!("common.success"),
-        format!(
+        format_args!(
             t!("delete.success.header"),
             purged = purged_count,
             unregistered = removed_count

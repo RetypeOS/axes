@@ -134,7 +134,7 @@ fn print_variables(config: &ResolvedConfig, key: &str, title: &str) {
 
     for k in sorted_keys {
         if let Some(val) = map.get(k) {
-            println!("    - {} = {}", k.cyan(), format!("\"{}\"", val));
+            println!("    - {} = {}", k.cyan(), format_args!("\"{}\"", val));
         }
     }
 }

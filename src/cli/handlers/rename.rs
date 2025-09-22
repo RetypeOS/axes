@@ -33,7 +33,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     let simple_name = config
         .qualified_name
         .split('/')
-        .last()
+        .next_back()
         .unwrap_or(&config.qualified_name);
 
     let new_name = commons::validate_project_name(&rename_args.new_name)?;
@@ -89,7 +89,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     println!("\n{}", t!("common.success"));
     println!(
         "  {}",
-        format!(
+        format_args!(
             t!("rename.success.header"),
             old_name = simple_name,
             new_name = new_name

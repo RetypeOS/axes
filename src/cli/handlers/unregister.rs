@@ -85,7 +85,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     println!(
         "\n{} {}",
         t!("common.success"),
-        format!(t!("unregister.success.header"), count = removed_count)
+        format_args!(t!("unregister.success.header"), count = removed_count)
     );
     for warning in plan.reparent_warnings {
         println!("  - {}", warning.yellow());

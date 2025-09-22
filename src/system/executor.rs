@@ -109,7 +109,7 @@ pub fn execute_command(
             }
             Ok(None) => {
                 // Process is still running. Check for cancellation signal.
-                if let Err(_) = commons::check_for_cancellation(cancellation_token) {
+                if commons::check_for_cancellation(cancellation_token).is_err() {
                     log::debug!(
                         "Cancellation requested, killing child process (PID: {})...",
                         child.id()
@@ -146,7 +146,7 @@ pub fn execute_and_capture_output(
     cancellation_token: &CancellationToken,
 ) -> Result<String, ExecutionError> {
     // Pre-flight cancellation check.
-    if let Err(_) = commons::check_for_cancellation(cancellation_token) {
+    if commons::check_for_cancellation(cancellation_token).is_err() {
         return Err(ExecutionError::Cancelled);
     }
 

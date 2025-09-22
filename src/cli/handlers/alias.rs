@@ -127,7 +127,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
                 println!(
                     "{} {}",
                     t!("common.success"),
-                    format!(t!("alias.success.removed"), name = clean_name)
+                    format_args!(t!("alias.success.removed"), name = clean_name)
                 );
             } else {
                 return Err(anyhow!(t!("alias.error.not_found"), name = clean_name));

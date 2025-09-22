@@ -99,26 +99,26 @@ pub fn launch_interactive_shell(
     }
 
     // 5. Execute the `at_exit` hook
-    if let Some(at_exit_command) = &config.options.at_exit {
-        if !at_exit_command.trim().is_empty() {
-            println!("\nExecuting 'at_exit' hook...");
+    if let Some(at_exit_command) = &config.options.at_exit
+        && !at_exit_command.trim().is_empty()
+    {
+        println!("\nExecuting 'at_exit' hook...");
 
-            // NOTE: CORRECTED API USAGE
-            // 1. Create a mutable interpolator instance.
-            let mut interpolator = Interpolator::new(config);
-            // 2. Call the new method `expand_string`, which returns a Result.
-            let final_command = interpolator
-                .expand_string(at_exit_command, cancellation_token)
-                .map_err(|e| ShellError::InterpolationFailed(e.to_string()))?;
+        // NOTE: CORRECTED API USAGE
+        // 1. Create a mutable interpolator instance.
+        let mut interpolator = Interpolator::new(config);
+        // 2. Call the new method `expand_string`, which returns a Result.
+        let final_command = interpolator
+            .expand_string(at_exit_command, cancellation_token)
+            .map_err(|e| ShellError::InterpolationFailed(e.to_string()))?;
 
-            if let Err(e) = executor::execute_command(
-                &final_command,
-                &config.project_root,
-                &config.env,
-                cancellation_token,
-            ) {
-                eprintln!("\nWarning: 'at_exit' hook failed to execute: {}", e);
-            }
+        if let Err(e) = executor::execute_command(
+            &final_command,
+            &config.project_root,
+            &config.env,
+            cancellation_token,
+        ) {
+            eprintln!("\nWarning: 'at_exit' hook failed to execute: {}", e);
         }
     }
 

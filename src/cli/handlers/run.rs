@@ -155,7 +155,7 @@ impl<'a> CommandExecutor<'a> {
             .collect();
 
         results.with_context(|| "A command in the parallel batch failed.")?;
-        println!("{}", format!("⚡ Parallel batch completed.").blue());
+        println!("{}", "⚡ Parallel batch completed.".to_string().blue());
         Ok(())
     }
 
