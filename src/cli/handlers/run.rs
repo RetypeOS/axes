@@ -39,7 +39,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     let params = &run_args.params;
 
     // 4. Create the top-level executor for this run.
-    let executor = CommandExecutor::new(config);
+    let executor = CommandExecutor::new(config, cancellation_token);
 
     // 5. Start the execution chain.
     println!(
@@ -58,24 +58,21 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
 }
 
 /// A struct to hold the state and configuration for a single `axes run` invocation.
-struct CommandExecutor {
+struct CommandExecutor<'a> {
     config: ResolvedConfig,
+    cancellation_token: &'a CancellationToken,
 }
 
-impl CommandExecutor {
-    fn new(config: ResolvedConfig) -> Self {
-        Self { config }
+impl<'a> CommandExecutor<'a> {
+    fn new(config: ResolvedConfig, cancellation_token: &'a CancellationToken) -> Self {
+        Self { config, cancellation_token }
     }
 
-    /// The top-level entry point for executing a script by its name.
-    /// It initializes the interpolator for the entire run.
     fn run_script(&self, script_name: &str, params: &[String]) -> Result<()> {
         let mut interpolator = Interpolator::new(&self.config);
         self.execute_internal_script(script_name, params, &mut interpolator)
     }
 
-    /// The recursive engine for running scripts defined in `axes.toml`.
-    /// It fetches the script's definition and passes its commands to be processed.
     fn execute_internal_script(
         &self,
         script_name: &str,
@@ -84,16 +81,16 @@ impl CommandExecutor {
     ) -> Result<()> {
         let command_def = self
             .config
-            .commands // TODO: Rename to `scripts` in a future refactor
+            .commands
             .get(script_name)
             .ok_or_else(|| anyhow!(t!("run.error.script_not_found"), script = script_name))?;
 
         let command_list = self.get_command_list_from_def(command_def, script_name)?;
 
+        // NOTE: Pass the cancellation token down.
         self.process_command_list(&command_list, cli_params, interpolator)
     }
 
-    /// Processes a list of command strings, handling recursion, parallelism, and execution.
     fn process_command_list(
         &self,
         command_list: &[String],
@@ -103,27 +100,22 @@ impl CommandExecutor {
         let mut parallel_batch = Vec::new();
 
         for command_template in command_list {
+            commons::check_for_cancellation(self.cancellation_token)?;
             let is_parallel = command_template.starts_with('>');
-            let template = if is_parallel {
-                command_template[1..].trim()
-            } else {
-                command_template.as_str()
-            };
+            let template = if is_parallel { command_template[1..].trim() } else { command_template.as_str() };
 
             if is_parallel {
                 parallel_batch.push(template.to_string());
             } else {
-                // Execute any pending parallel batch before a sequential command.
                 if !parallel_batch.is_empty() {
                     self.execute_parallel_batch(&parallel_batch, cli_params, interpolator)?;
                     parallel_batch.clear();
                 }
-                // Execute the sequential command.
+                // NOTE: Pass the cancellation token down.
                 self.execute_template(template, cli_params, interpolator)?;
             }
         }
 
-        // Execute any final parallel batch at the end of the list.
         if !parallel_batch.is_empty() {
             self.execute_parallel_batch(&parallel_batch, cli_params, interpolator)?;
         }
@@ -131,24 +123,19 @@ impl CommandExecutor {
         Ok(())
     }
 
-    /// Executes a batch of command templates in parallel using Rayon.
     fn execute_parallel_batch(
         &self,
         batch: &[String],
         cli_params: &[String],
         interpolator: &mut Interpolator,
     ) -> Result<()> {
-        println!(
-            "{}",
-            format!("⚡ Running {} commands in parallel...", batch.len()).blue()
-        );
+        println!("{}", format!("⚡ Running {} commands in parallel...", batch.len()).blue());
 
         let results: Result<Vec<()>> = batch
             .par_iter()
             .map(|template| {
-                // Each parallel task needs its own mutable interpolator state to avoid data races.
-                // Cloning is efficient as the config is behind a reference and the stack is small.
                 let mut task_interpolator = interpolator.clone();
+                // NOTE: Pass the cancellation token to each parallel task.
                 self.execute_template(template, cli_params, &mut task_interpolator)
             })
             .collect();
@@ -158,28 +145,20 @@ impl CommandExecutor {
         Ok(())
     }
 
-    /// The core logic that processes a single template string from a script.
-    /// It distinguishes between pure script inclusion and external command execution.
     fn execute_template(
         &self,
         template: &str,
         cli_params: &[String],
         interpolator: &mut Interpolator,
     ) -> Result<()> {
-        // Regex to detect if a string is a pure, single script inclusion.
-        // TODO: Change "commands" to "scripts" in a future refactor
+        // NOTE: Corrected regex to handle whitespace correctly
         let re = regex::Regex::new(r"^\s*<axes::(commands|scripts)::([^>]+)>\s*$").unwrap();
         if let Some(caps) = re.captures(template) {
             let script_name = &caps[2];
-            // This is a pure recursion. We pass the interpolator down to maintain the cycle detection stack.
-            // CLI params are passed along, as this is a direct inclusion.
             return self.execute_internal_script(script_name, cli_params, interpolator);
         }
 
-        // If not a pure inclusion, it's a command to be expanded and executed externally.
-        let expanded_command = interpolator.expand_string(template)?;
-
-        // CLI params are appended only to external commands, not to internal script definitions.
+        let expanded_command = interpolator.expand_string(template, self.cancellation_token)?;
         let final_command = if !cli_params.is_empty() {
             format!("{} {}", expanded_command, cli_params.join(" "))
         } else {
@@ -188,20 +167,17 @@ impl CommandExecutor {
 
         let trimmed_command = final_command.trim();
         if trimmed_command.is_empty() {
-            return Ok(()); // Nothing to execute (e.g., an empty line in a script)
+            return Ok(());
         }
 
         println!("\n> {}", trimmed_command.green());
-        executor::execute_command(trimmed_command, &self.config.project_root, &self.config.env)?;
+        // NOTE: Pass the cancellation token to the external command executor.
+        executor::execute_command(trimmed_command, &self.config.project_root, &self.config.env, self.cancellation_token)?;
         Ok(())
     }
 
     /// Helper to extract the initial list of command strings from a `ProjectCommand` enum.
-    fn get_command_list_from_def<'a>(
-        &self,
-        command_def: &'a ProjectCommand,
-        script_key: &str,
-    ) -> Result<Vec<String>> {
+    fn get_command_list_from_def(&self, command_def: &ProjectCommand, script_key: &str) -> Result<Vec<String>> {
         let runnable = match command_def {
             ProjectCommand::Simple(s) => return Ok(vec![s.clone()]),
             ProjectCommand::Sequence(s) => return Ok(s.clone()),

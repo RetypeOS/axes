@@ -209,6 +209,7 @@ pub fn choose_parent_interactive(index: &GlobalIndex, cancellation_token: &Cance
             .items(items)
             .default(2) // Default to 'global'
             .interact()?;
+        check_for_cancellation(cancellation_token)?;
 
         match selection {
             0 => {
@@ -220,7 +221,7 @@ pub fn choose_parent_interactive(index: &GlobalIndex, cancellation_token: &Cance
             }
             1 => {
                 // Browse projects visually
-                return select_parent_by_browsing(index);
+                return select_parent_by_browsing(index, cancellation_token);
             }
             2 => {
                 // Use 'global'
@@ -238,6 +239,7 @@ fn select_parent_by_context(index: &GlobalIndex, cancellation_token: &Cancellati
         let input: String = Input::with_theme(&ColorfulTheme::default())
             .with_prompt("Enter context path (leave empty to go back)")
             .interact_text()?;
+        check_for_cancellation(cancellation_token)?;
 
         if input.is_empty() {
             return Ok(None); // User wants to go back to the main menu
@@ -246,13 +248,15 @@ fn select_parent_by_context(index: &GlobalIndex, cancellation_token: &Cancellati
         match context_resolver::resolve_context(&input, index, cancellation_token) {
             Ok((uuid, qualified_name)) => {
                 let prompt = format!("Resolved to '{}'. Use this as the parent?", qualified_name);
-                if Confirm::with_theme(&ColorfulTheme::default())
+                let result = if Confirm::with_theme(&ColorfulTheme::default())
                     .with_prompt(prompt)
                     .default(true)
                     .interact()?
                 {
                     return Ok(Some(uuid));
-                }
+                };
+                check_for_cancellation(cancellation_token)?;
+                result
                 // If user says no, the loop continues to ask for another context.
             }
             Err(e) => {
@@ -264,7 +268,7 @@ fn select_parent_by_context(index: &GlobalIndex, cancellation_token: &Cancellati
 }
 
 /// Handles the visual browsing workflow.
-fn select_parent_by_browsing(index: &GlobalIndex) -> Result<Uuid> {
+fn select_parent_by_browsing(index: &GlobalIndex, cancellation_token: &CancellationToken) -> Result<Uuid> {
     let mut current_uuid_opt = None; // Start at the root view
 
     loop {
@@ -319,6 +323,7 @@ fn select_parent_by_browsing(index: &GlobalIndex) -> Result<Uuid> {
             .items(&items)
             .default(0)
             .interact()?;
+        check_for_cancellation(cancellation_token)?;
 
         let selection_str = &items[selection_idx];
 

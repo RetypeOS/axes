@@ -2,6 +2,7 @@
 
 use crate::models::{ResolvedConfig, ShellConfig, ShellsConfig};
 use crate::system::executor;
+use crate::CancellationToken;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -32,7 +33,7 @@ pub enum ShellError {
 }
 
 /// Launches an interactive sub-shell for a project.
-pub fn launch_interactive_shell(config: &ResolvedConfig) -> Result<(), ShellError> {
+pub fn launch_interactive_shell(config: &ResolvedConfig, cancellation_token: &CancellationToken) -> Result<(), ShellError> {
     let shells_config = load_shells_config()?;
 
     // 1. Determine which shell to use
@@ -104,11 +105,11 @@ pub fn launch_interactive_shell(config: &ResolvedConfig) -> Result<(), ShellErro
             let mut interpolator = Interpolator::new(config);
             // 2. Call the new method `expand_string`, which returns a Result.
             let final_command = interpolator
-                .expand_string(at_exit_command)
+                .expand_string(at_exit_command, cancellation_token)
                 .map_err(|e| ShellError::InterpolationFailed(e.to_string()))?;
 
             if let Err(e) =
-                executor::execute_command(&final_command, &config.project_root, &config.env)
+                executor::execute_command(&final_command, &config.project_root, &config.env, cancellation_token)
             {
                 eprintln!("\nWarning: 'at_exit' hook failed to execute: {}", e);
             }

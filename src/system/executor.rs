@@ -1,19 +1,21 @@
-// src/system/executor.rs
+// EN: src/system/executor.rs
 
+use crate::{cli::handlers::commons, CancellationToken};
 use dunce;
 use std::collections::HashMap;
-use std::io::ErrorKind; // Required for error detection
+use std::io::ErrorKind;
 use std::path::Path;
 use std::process::{Command as StdCommand, Stdio};
+use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ExecutionError {
-    #[error("El comando no pudo ser parseado: {0}")]
+    #[error("Command could not be parsed: {0}")]
     CommandParse(String),
     #[error("No command specified to run.")]
     EmptyCommand,
-    #[error("El comando '{0}' no se pudo ejecutar: {1}")]
+    #[error("Command '{0}' could not be executed: {1}")]
     CommandFailed(String, std::io::Error),
     #[error("Command '{0}' exited with a non-zero error code.")]
     NonZeroExitStatus(String),
@@ -23,17 +25,22 @@ pub enum ExecutionError {
         #[source]
         source: std::string::FromUtf8Error,
     },
+    #[error("Operation was cancelled by the user.")]
+    Cancelled,
 }
 
-/// Executes a system command robustly and predictably.
+/// Executes a system command robustly and predictably, with support for graceful cancellation.
+/// This function will not return until the command has finished, but it can be
+/// interrupted by the CancellationToken.
 pub fn execute_command(
     command_line: &str,
     cwd: &Path,
     env_vars: &HashMap<String, String>,
+    cancellation_token: &CancellationToken,
 ) -> Result<(), ExecutionError> {
     let trimmed_command = command_line.trim();
     if trimmed_command.is_empty() {
-        return Err(ExecutionError::EmptyCommand);
+        return Ok(()); // An empty command is a success, not an error.
     }
 
     let (final_command_line, ignore_errors) = if trimmed_command.starts_with('-') {
@@ -42,26 +49,20 @@ pub fn execute_command(
         (trimmed_command, false)
     };
 
-    log::info!(
-        "Ejecutando comando: '{}' en {:?}",
-        final_command_line,
-        dunce::simplified(cwd).display()
-    );
+    if final_command_line.is_empty() {
+        return Ok(());
+    }
 
     let parts = shlex::split(final_command_line)
         .ok_or_else(|| ExecutionError::CommandParse(final_command_line.to_string()))?;
-
     if parts.is_empty() {
-        return Err(ExecutionError::EmptyCommand);
+        return Ok(());
     }
 
     let program = &parts[0];
     let args = &parts[1..];
     let clean_cwd = dunce::simplified(cwd);
 
-    // --- The Unified Approach ---
-
-    // 1. Attempt direct execution
     let mut command = StdCommand::new(program);
     command
         .args(args)
@@ -69,68 +70,83 @@ pub fn execute_command(
         .envs(env_vars)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-
-    match command.status() {
-        Ok(status) => {
-            // The program was found and executed.
-            if !status.success() {
-                if !ignore_errors {
-                    return Err(ExecutionError::NonZeroExitStatus(command_line.to_string()));
-                } else {
-                    log::warn!(
-                        "Command finished with a non-zero error code, but was ignored as requested."
-                    );
-                }
-            }
+    
+    // Fallback logic for Windows built-in commands like `echo`.
+    // We try to spawn directly first. If it fails with `NotFound`, we try with `cmd /C`.
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(e) if e.kind() == ErrorKind::NotFound && cfg!(target_os = "windows") => {
+            log::debug!("Command '{}' not found. Retrying with cmd /C.", program);
+            StdCommand::new("cmd")
+                .arg("/C")
+                .arg(final_command_line) // Pass the full, unparsed line to cmd
+                .current_dir(clean_cwd)
+                .envs(env_vars)
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .map_err(|e| ExecutionError::CommandFailed(final_command_line.to_string(), e))?
         }
-        Err(e) => {
-            // The program could not be started.
-            if e.kind() == ErrorKind::NotFound && cfg!(target_os = "windows") {
-                // 2. FALLBACK: If not found and on Windows, it might be a `builtin`.
-                log::debug!("Command '{}' not found. Retrying with cmd /C.", program);
+        Err(e) => return Err(ExecutionError::CommandFailed(final_command_line.to_string(), e)),
+    };
 
-                let mut fallback_command = StdCommand::new("cmd");
-                fallback_command
-                    .arg("/C")
-                    .arg(command_line) // We pass the full line for `cmd` to parse.
-                    .current_dir(dunce::simplified(cwd))
-                    .envs(env_vars)
-                    .stdout(Stdio::inherit())
-                    .stderr(Stdio::inherit());
 
-                let fallback_status = fallback_command
-                    .status()
-                    .map_err(|e| ExecutionError::CommandFailed(command_line.to_string(), e))?;
-
-                if !fallback_status.success() {
-                    return Err(ExecutionError::NonZeroExitStatus(command_line.to_string()));
+    // Non-blocking wait loop to allow for cancellation.
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                // Process has finished.
+                if !status.success() && !ignore_errors {
+                    return Err(ExecutionError::NonZeroExitStatus(final_command_line.to_string()));
                 }
-            } else {
-                // If the error is different (e.g., permissions) or we are not on Windows, it's a real error.
-                return Err(ExecutionError::CommandFailed(command_line.to_string(), e));
+                return Ok(());
+            }
+            Ok(None) => {
+                // Process is still running. Check for cancellation signal.
+                if let Err(_) = commons::check_for_cancellation(cancellation_token) {
+                    log::debug!("Cancellation requested, killing child process (PID: {})...", child.id());
+                    if let Err(e) = child.kill() {
+                        log::warn!("Failed to kill child process {}: {}", child.id(), e);
+                    }
+                    // Wait briefly for the process to die after being killed.
+                    child.wait().ok();
+                    return Err(ExecutionError::Cancelled);
+                }
+                // Wait briefly to avoid a tight loop consuming CPU.
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => {
+                // Error while trying to get the process status.
+                return Err(ExecutionError::CommandFailed(final_command_line.to_string(), e));
             }
         }
     }
-
-    Ok(())
 }
 
 /// Executes a command and captures its standard output.
 /// Stderr is passed through to the user's terminal.
+/// NOTE: This operation is blocking and only checks for cancellation *before* starting.
+/// It is intended for short-running commands used for text substitution.
 pub fn execute_and_capture_output(
     command_line: &str,
     cwd: &Path,
     env_vars: &HashMap<String, String>,
+    cancellation_token: &CancellationToken,
 ) -> Result<String, ExecutionError> {
+    // Pre-flight cancellation check.
+    if let Err(_) = commons::check_for_cancellation(cancellation_token) {
+        return Err(ExecutionError::Cancelled);
+    }
+    
     let trimmed_command = command_line.trim();
     if trimmed_command.is_empty() {
-        return Err(ExecutionError::EmptyCommand);
+        return Ok(String::new());
     }
 
     let parts = shlex::split(trimmed_command)
         .ok_or_else(|| ExecutionError::CommandParse(trimmed_command.to_string()))?;
     if parts.is_empty() {
-        return Err(ExecutionError::EmptyCommand);
+        return Ok(String::new());
     }
 
     let program = &parts[0];
@@ -148,9 +164,7 @@ pub fn execute_and_capture_output(
         .map_err(|e| ExecutionError::CommandFailed(trimmed_command.to_string(), e))?;
 
     if !command_output.status.success() {
-        return Err(ExecutionError::NonZeroExitStatus(
-            trimmed_command.to_string(),
-        ));
+        return Err(ExecutionError::NonZeroExitStatus(trimmed_command.to_string()));
     }
 
     String::from_utf8(command_output.stdout).map_err(|e| ExecutionError::InvalidUtf8Output {

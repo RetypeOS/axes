@@ -65,7 +65,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
 
     // 4. Interpolate the command template using the new interpolator.
     let mut interpolator = Interpolator::new(&config);
-    let final_command = interpolator.expand_string(&command_template)?;
+    let final_command = interpolator.expand_string(&command_template, cancellation_token)?;
 
     if final_command.trim().is_empty() {
         println!(
@@ -77,7 +77,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
 
     // 5. Execute the final command.
     println!("\n> {}", final_command.green());
-    executor::execute_command(&final_command, &config.project_root, &config.env)?;
+    executor::execute_command(&final_command, &config.project_root, &config.env, cancellation_token)?;
 
     Ok(())
 }

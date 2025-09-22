@@ -2,8 +2,8 @@
 
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
-use dialoguer::{self, theme::ColorfulTheme, Input};
-use std::{collections::HashMap, env, fs, path::Path, sync::atomic::Ordering};
+use dialoguer::{self, theme::ColorfulTheme, Error as DialoguerError, Input};
+use std::{collections::HashMap, env, fs, io, path::Path};
 use uuid::Uuid;
 
 use super::commons::{self, check_for_cancellation};
@@ -43,9 +43,9 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     check_for_cancellation(cancellation_token)?;
 
     // --- Interactive step for version and description ---
-    let version = resolve_project_version(&init_args, is_interactive)?;
+    let version = resolve_project_version(&init_args, is_interactive, cancellation_token)?;
     check_for_cancellation(cancellation_token)?;
-    let description = resolve_project_description(&init_args, &project_name, is_interactive)?;
+    let description = resolve_project_description(&init_args, &project_name, is_interactive, cancellation_token)?;
     check_for_cancellation(cancellation_token)?;
 
     // 3. Build the project configuration object
@@ -131,11 +131,14 @@ fn resolve_project_name(
                 .with_prompt("Project name")
                 .default(default_name.clone())
                 .interact_text() {
-                    Ok(i) => i,
-                    //Err(dialoguer::Error::Interrupt) => {
-                    //    return Err(anyhow!(t!("common.error.operation_cancelled")));
-                    //},
-                    Err(e) => return Err(e.into()),
+                    Ok(value) => {
+                        check_for_cancellation(cancellation_token)?;
+                        value
+                    },
+                    Err(DialoguerError::IO(io_err)) if io_err.kind() == io::ErrorKind::Interrupted => {
+                        return Err(anyhow!(t!("common.error.operation_cancelled")));
+                    }
+                    Err(e) => return Err(e.into()), // Otro error (I/O, etc.).
                 };
             
             check_for_cancellation(cancellation_token)?;
@@ -179,7 +182,7 @@ fn resolve_parent_project(args: &InitArgs, is_interactive: bool, cancellation_to
     }
 }
 
-fn resolve_project_version(args: &InitArgs, is_interactive: bool) -> Result<String> {
+fn resolve_project_version(args: &InitArgs, is_interactive: bool, cancellation_token: &CancellationToken) -> Result<String> {
     if let Some(version) = &args.version {
         return Ok(version.clone());
     }
@@ -189,10 +192,12 @@ fn resolve_project_version(args: &InitArgs, is_interactive: bool) -> Result<Stri
             .default("0.1.0".to_string())
             .interact_text()
             .map_err(|e| anyhow!(e)) {
-                    Ok(i) => Ok(i),
+                    Ok(i) => {
+                        check_for_cancellation(cancellation_token)?;
+                        Ok(i)
+                    },
                     Err(e) => return Err(e.into()),
                 }
-        
     } else {
         Ok("0.1.0".to_string())
     }
@@ -202,6 +207,7 @@ fn resolve_project_description(
     args: &InitArgs,
     name: &str,
     is_interactive: bool,
+    cancellation_token: &CancellationToken,
 ) -> Result<String> {
     if let Some(desc) = &args.description {
         return Ok(desc.clone());
@@ -213,7 +219,10 @@ fn resolve_project_description(
             .default(default_desc)
             .interact_text()
             .map_err(|e| anyhow!(e)) {
-                    Ok(i) => Ok(i),
+                    Ok(i) => {
+                        check_for_cancellation(cancellation_token)?;
+                        Ok(i)
+                    },
                     Err(e) => return Err(e.into()),
                 }
     } else {

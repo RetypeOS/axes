@@ -36,7 +36,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     );
 
     // 5. Delegate the core logic to the shell module.
-    shell::launch_interactive_shell(&config).with_context(|| {
+    shell::launch_interactive_shell(&config, cancellation_token).with_context(|| {
         anyhow!(
             t!("start.error.session_failed"),
             name = config.qualified_name

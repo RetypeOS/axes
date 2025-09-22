@@ -13,7 +13,7 @@ use crate::{
     }, CancellationToken,
 };
 
-pub fn handle(args: Vec<String>, _cancellation_token: &CancellationToken) -> Result<()> {
+pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
     if env::var("AXES_PROJECT_UUID").is_ok() {
         return Err(anyhow!(
             "'register' command is not available inside a project session."
@@ -52,7 +52,7 @@ pub fn handle(args: Vec<String>, _cancellation_token: &CancellationToken) -> Res
         suggested_parent_uuid: None,
     };
 
-    onboarding_manager::register_project(&path_to_register, &mut index, &options).with_context(
+    onboarding_manager::register_project(&path_to_register, &mut index, &options, cancellation_token).with_context(
         || {
             anyhow!(
                 t!("register.error.failed"),

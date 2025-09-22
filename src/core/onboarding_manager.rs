@@ -1,7 +1,9 @@
 // src/core/onboarding_manager.rs
 
+use crate::cli::handlers::commons::check_for_cancellation;
 use crate::core::index_manager::{self, GLOBAL_PROJECT_UUID};
 use crate::models::{GlobalIndex, IndexEntry, ProjectRef};
+use crate::CancellationToken;
 use dialoguer::{
     Confirm, Error as DialoguerError, Input, MultiSelect, Select, theme::ColorfulTheme,
 };
@@ -40,7 +42,8 @@ pub struct OnboardingOptions {
 pub fn register_project(
     path: &Path,
     index: &mut GlobalIndex,
-    options: &OnboardingOptions, // Pass by reference
+    options: &OnboardingOptions,
+    cancellation_token: &CancellationToken,
 ) -> OnboardingResult<()> {
     let project_root = dunce::canonicalize(path)?;
     println!(
@@ -57,7 +60,7 @@ pub fn register_project(
     // Check if the PATH is already registered. If so, skip to child scan.
     if let Some((uuid, _)) = index.projects.iter().find(|(_, e)| e.path == project_root) {
         println!("This project is already registered. Moving to child scan...");
-        scan_and_register_children(&project_root, *uuid, index, options)?;
+        scan_and_register_children(&project_root, *uuid, index, options, cancellation_token)?;
         return Ok(());
     }
 
@@ -65,17 +68,17 @@ pub fn register_project(
     match index_manager::read_project_ref(&project_root) {
         Ok(pref) => {
             // Case 1: `project_ref.bin` exists.
-            handle_registration_with_ref(project_root.clone(), pref, index, options)?;
+            handle_registration_with_ref(project_root.clone(), pref, index, options, cancellation_token)?;
         }
         Err(_) => {
             // Case 2: `project_ref.bin` does not exist.
-            handle_registration_without_ref(project_root.clone(), index, options)?;
+            handle_registration_without_ref(project_root.clone(), index, options, cancellation_token)?;
         }
     };
 
     // Get the newly registered UUID for child scanning.
     if let Some((uuid, _)) = index.projects.iter().find(|(_, e)| e.path == project_root) {
-        scan_and_register_children(&project_root, *uuid, index, options)?;
+        scan_and_register_children(&project_root, *uuid, index, options, cancellation_token)?;
     }
 
     Ok(())
@@ -86,6 +89,7 @@ fn handle_registration_with_ref(
     mut pref: ProjectRef, // Make it mutable to be able to correct it
     index: &mut GlobalIndex,
     options: &OnboardingOptions,
+    cancellation_token: &CancellationToken,
 ) -> OnboardingResult<()> {
     println!("Local reference (`project_ref.bin`) found. Validating...");
 
@@ -126,7 +130,7 @@ fn handle_registration_with_ref(
             "Warning: The parent of this project (UUID: {}) is not registered.",
             parent_uuid
         );
-        pref.parent_uuid = Some(choose_parent(index, None)?); // Ask for new parent
+        pref.parent_uuid = Some(choose_parent(index, None, cancellation_token)?); // Ask for new parent
     }
 
     // 3. Validate Name
@@ -152,6 +156,7 @@ fn handle_registration_with_ref(
         pref.name = Input::with_theme(&ColorfulTheme::default())
             .with_prompt("Por favor, introduce un nuevo nombre para este proyecto")
             .interact_text()?;
+        check_for_cancellation(cancellation_token).map_err(|_| OnboardingError::Cancelled)?;
     }
 
     // 4. Register/Update in the index
@@ -173,6 +178,7 @@ fn handle_registration_without_ref(
     project_root: PathBuf,
     index: &mut GlobalIndex,
     options: &OnboardingOptions,
+    cancellation_token: &CancellationToken,
 ) -> OnboardingResult<()> {
     if options.autosolve {
         if let Some(parent_uuid) = options.suggested_parent_uuid {
@@ -217,8 +223,9 @@ fn handle_registration_without_ref(
             .with_prompt("Nombre para este proyecto:")
             .default(name_default)
             .interact_text()?;
+        check_for_cancellation(cancellation_token).map_err(|_| OnboardingError::Cancelled)?;
 
-        let parent_uuid = choose_parent(index, options.suggested_parent_uuid)?;
+        let parent_uuid = choose_parent(index, options.suggested_parent_uuid, cancellation_token)?;
         let (new_uuid, _) = index_manager::add_project_to_index(
             index,
             name.clone(),
@@ -244,6 +251,7 @@ fn scan_and_register_children(
     parent_uuid: Uuid,
     index: &mut GlobalIndex,
     options: &OnboardingOptions,
+    cancellation_token: &CancellationToken,
 ) -> OnboardingResult<()> {
     if !options.autosolve
         && !Confirm::with_theme(&ColorfulTheme::default())
@@ -283,6 +291,7 @@ fn scan_and_register_children(
             .with_prompt("The following unregistered children were found. Select which ones to register (space to toggle, enter to continue):")
             .items(&child_names)
             .interact()?;
+        check_for_cancellation(cancellation_token).map_err(|_| OnboardingError::Cancelled)?;
 
         selections
             .iter()
@@ -296,13 +305,13 @@ fn scan_and_register_children(
             suggested_parent_uuid: Some(parent_uuid),
         };
         // RECURSIVE CALL
-        register_project(&child_path, index, &child_options)?;
+        register_project(&child_path, index, &child_options, cancellation_token)?;
     }
 
     Ok(())
 }
 
-fn choose_parent(index: &GlobalIndex, suggested_parent: Option<Uuid>) -> OnboardingResult<Uuid> {
+fn choose_parent(index: &GlobalIndex, suggested_parent: Option<Uuid>, cancellation_token: &CancellationToken) -> OnboardingResult<Uuid> {
     let mut parents: Vec<(Uuid, String)> = index
         .projects
         .iter()
@@ -326,6 +335,7 @@ fn choose_parent(index: &GlobalIndex, suggested_parent: Option<Uuid>) -> Onboard
         .items(&parent_names)
         .default(default_selection)
         .interact()?;
+    check_for_cancellation(cancellation_token).map_err(|_| OnboardingError::Cancelled)?;
 
     Ok(parents[selection].0)
 }
