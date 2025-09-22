@@ -1,16 +1,15 @@
 // EN: src/bin/axes.rs
 
 use anyhow::Result;
-use axes::cli::{handlers, Cli};
-use axes::t;
 use axes::CancellationToken;
+use axes::cli::{Cli, handlers};
+use axes::t;
 use clap::Parser;
 use colored::*;
 use std::env;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio;
-use dialoguer::Error as DialoguerError;
 
 // --- Command Definition and Registry ---
 
@@ -28,23 +27,73 @@ struct CommandDefinition {
 /// The single source of truth for all system commands.
 /// To add a new command, simply add a new entry here.
 static COMMAND_REGISTRY: &[CommandDefinition] = &[
-    CommandDefinition { name: "alias", aliases: &[], handler: handlers::alias::handle },
-    CommandDefinition { name: "delete", aliases: &["del"], handler: handlers::delete::handle },
-    CommandDefinition { name: "info", aliases: &[], handler: handlers::info::handle },
-    CommandDefinition { name: "init", aliases: &["new"], handler: handlers::init::handle },
-    CommandDefinition { name: "link", aliases: &[], handler: handlers::link::handle },
-    CommandDefinition { name: "open", aliases: &[], handler: handlers::open::handle },
-    CommandDefinition { name: "register", aliases: &["reg"], handler: handlers::register::handle },
-    CommandDefinition { name: "rename", aliases: &[], handler: handlers::rename::handle },
-    CommandDefinition { name: "run", aliases: &[], handler: handlers::run::handle },
-    CommandDefinition { name: "start", aliases: &[], handler: handlers::start::handle },
-    CommandDefinition { name: "tree", aliases: &["ls"], handler: handlers::tree::handle },
-    CommandDefinition { name: "unregister", aliases: &["unreg"], handler: handlers::unregister::handle },
+    CommandDefinition {
+        name: "alias",
+        aliases: &[],
+        handler: handlers::alias::handle,
+    },
+    CommandDefinition {
+        name: "delete",
+        aliases: &["del"],
+        handler: handlers::delete::handle,
+    },
+    CommandDefinition {
+        name: "info",
+        aliases: &[],
+        handler: handlers::info::handle,
+    },
+    CommandDefinition {
+        name: "init",
+        aliases: &["new"],
+        handler: handlers::init::handle,
+    },
+    CommandDefinition {
+        name: "link",
+        aliases: &[],
+        handler: handlers::link::handle,
+    },
+    CommandDefinition {
+        name: "open",
+        aliases: &[],
+        handler: handlers::open::handle,
+    },
+    CommandDefinition {
+        name: "register",
+        aliases: &["reg"],
+        handler: handlers::register::handle,
+    },
+    CommandDefinition {
+        name: "rename",
+        aliases: &[],
+        handler: handlers::rename::handle,
+    },
+    CommandDefinition {
+        name: "run",
+        aliases: &[],
+        handler: handlers::run::handle,
+    },
+    CommandDefinition {
+        name: "start",
+        aliases: &[],
+        handler: handlers::start::handle,
+    },
+    CommandDefinition {
+        name: "tree",
+        aliases: &["ls"],
+        handler: handlers::tree::handle,
+    },
+    CommandDefinition {
+        name: "unregister",
+        aliases: &["unreg"],
+        handler: handlers::unregister::handle,
+    },
 ];
 
 /// Finds a command definition in the registry by its name or alias.
 fn find_command(name: &str) -> Option<&'static CommandDefinition> {
-    COMMAND_REGISTRY.iter().find(|cmd| cmd.name == name || cmd.aliases.contains(&name))
+    COMMAND_REGISTRY
+        .iter()
+        .find(|cmd| cmd.name == name || cmd.aliases.contains(&name))
 }
 
 /// The main entry point of the application.

@@ -6,7 +6,10 @@ use colored::*;
 use dialoguer::{Confirm, theme::ColorfulTheme};
 
 use super::commons;
-use crate::{core::{context_resolver, index_manager}, CancellationToken};
+use crate::{
+    CancellationToken,
+    core::{context_resolver, index_manager},
+};
 
 #[derive(Parser, Debug, Default)]
 #[command(no_binary_name = true)]
@@ -25,7 +28,10 @@ struct UnregisterArgs {
 
 pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
     let unregister_args = UnregisterArgs::try_parse_from(&args)?;
-    let config = commons::resolve_config_from_context_or_session(Some(unregister_args.context), cancellation_token)?;
+    let config = commons::resolve_config_from_context_or_session(
+        Some(unregister_args.context),
+        cancellation_token,
+    )?;
     let mut index = index_manager::load_and_ensure_global_project()?;
 
     if config.uuid == index_manager::GLOBAL_PROJECT_UUID {

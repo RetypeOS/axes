@@ -3,9 +3,9 @@
 use anyhow::{Result, anyhow};
 use colored::*;
 
+use crate::CancellationToken;
 use crate::core::interpolator::Interpolator;
 use crate::system::executor;
-use crate::CancellationToken;
 
 use clap::Parser;
 
@@ -26,7 +26,10 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     let open_args = OpenArgs::try_parse_from(&args)?;
 
     // 2. Resolve the project configuration, which is mandatory.
-    let config = commons::resolve_config_from_context_or_session(Some(open_args.context), cancellation_token)?;
+    let config = commons::resolve_config_from_context_or_session(
+        Some(open_args.context),
+        cancellation_token,
+    )?;
 
     // 3. Determine which command template to use based on the provided key or the default.
     let command_template = match open_args.app_key.as_deref() {
@@ -77,7 +80,12 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
 
     // 5. Execute the final command.
     println!("\n> {}", final_command.green());
-    executor::execute_command(&final_command, &config.project_root, &config.env, cancellation_token)?;
+    executor::execute_command(
+        &final_command,
+        &config.project_root,
+        &config.env,
+        cancellation_token,
+    )?;
 
     Ok(())
 }

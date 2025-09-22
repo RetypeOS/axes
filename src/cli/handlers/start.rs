@@ -4,7 +4,7 @@ use anyhow::{Context, Result, anyhow};
 use std::env;
 
 use super::commons;
-use crate::{system::shell, CancellationToken};
+use crate::{CancellationToken, system::shell};
 
 use clap::Parser;
 
@@ -27,7 +27,8 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     }
 
     // 3. Resolve the project configuration. This requires a context.
-    let config = commons::resolve_config_from_context_or_session(start_args.context, cancellation_token)?;
+    let config =
+        commons::resolve_config_from_context_or_session(start_args.context, cancellation_token)?;
 
     // 4. Provide feedback to the user before launching the shell.
     println!(

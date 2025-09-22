@@ -1,6 +1,6 @@
 // EN: src/system/executor.rs
 
-use crate::{cli::handlers::commons, CancellationToken};
+use crate::{CancellationToken, cli::handlers::commons};
 use dunce;
 use std::collections::HashMap;
 use std::io::ErrorKind;
@@ -70,7 +70,7 @@ pub fn execute_command(
         .envs(env_vars)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    
+
     // Fallback logic for Windows built-in commands like `echo`.
     // We try to spawn directly first. If it fails with `NotFound`, we try with `cmd /C`.
     let mut child = match command.spawn() {
@@ -87,9 +87,13 @@ pub fn execute_command(
                 .spawn()
                 .map_err(|e| ExecutionError::CommandFailed(final_command_line.to_string(), e))?
         }
-        Err(e) => return Err(ExecutionError::CommandFailed(final_command_line.to_string(), e)),
+        Err(e) => {
+            return Err(ExecutionError::CommandFailed(
+                final_command_line.to_string(),
+                e,
+            ));
+        }
     };
-
 
     // Non-blocking wait loop to allow for cancellation.
     loop {
@@ -97,14 +101,19 @@ pub fn execute_command(
             Ok(Some(status)) => {
                 // Process has finished.
                 if !status.success() && !ignore_errors {
-                    return Err(ExecutionError::NonZeroExitStatus(final_command_line.to_string()));
+                    return Err(ExecutionError::NonZeroExitStatus(
+                        final_command_line.to_string(),
+                    ));
                 }
                 return Ok(());
             }
             Ok(None) => {
                 // Process is still running. Check for cancellation signal.
                 if let Err(_) = commons::check_for_cancellation(cancellation_token) {
-                    log::debug!("Cancellation requested, killing child process (PID: {})...", child.id());
+                    log::debug!(
+                        "Cancellation requested, killing child process (PID: {})...",
+                        child.id()
+                    );
                     if let Err(e) = child.kill() {
                         log::warn!("Failed to kill child process {}: {}", child.id(), e);
                     }
@@ -117,7 +126,10 @@ pub fn execute_command(
             }
             Err(e) => {
                 // Error while trying to get the process status.
-                return Err(ExecutionError::CommandFailed(final_command_line.to_string(), e));
+                return Err(ExecutionError::CommandFailed(
+                    final_command_line.to_string(),
+                    e,
+                ));
             }
         }
     }
@@ -137,7 +149,7 @@ pub fn execute_and_capture_output(
     if let Err(_) = commons::check_for_cancellation(cancellation_token) {
         return Err(ExecutionError::Cancelled);
     }
-    
+
     let trimmed_command = command_line.trim();
     if trimmed_command.is_empty() {
         return Ok(String::new());
@@ -164,7 +176,9 @@ pub fn execute_and_capture_output(
         .map_err(|e| ExecutionError::CommandFailed(trimmed_command.to_string(), e))?;
 
     if !command_output.status.success() {
-        return Err(ExecutionError::NonZeroExitStatus(trimmed_command.to_string()));
+        return Err(ExecutionError::NonZeroExitStatus(
+            trimmed_command.to_string(),
+        ));
     }
 
     String::from_utf8(command_output.stdout).map_err(|e| ExecutionError::InvalidUtf8Output {

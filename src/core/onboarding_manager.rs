@@ -1,9 +1,9 @@
 // src/core/onboarding_manager.rs
 
+use crate::CancellationToken;
 use crate::cli::handlers::commons::check_for_cancellation;
 use crate::core::index_manager::{self, GLOBAL_PROJECT_UUID};
 use crate::models::{GlobalIndex, IndexEntry, ProjectRef};
-use crate::CancellationToken;
 use dialoguer::{
     Confirm, Error as DialoguerError, Input, MultiSelect, Select, theme::ColorfulTheme,
 };
@@ -68,11 +68,22 @@ pub fn register_project(
     match index_manager::read_project_ref(&project_root) {
         Ok(pref) => {
             // Case 1: `project_ref.bin` exists.
-            handle_registration_with_ref(project_root.clone(), pref, index, options, cancellation_token)?;
+            handle_registration_with_ref(
+                project_root.clone(),
+                pref,
+                index,
+                options,
+                cancellation_token,
+            )?;
         }
         Err(_) => {
             // Case 2: `project_ref.bin` does not exist.
-            handle_registration_without_ref(project_root.clone(), index, options, cancellation_token)?;
+            handle_registration_without_ref(
+                project_root.clone(),
+                index,
+                options,
+                cancellation_token,
+            )?;
         }
     };
 
@@ -311,7 +322,11 @@ fn scan_and_register_children(
     Ok(())
 }
 
-fn choose_parent(index: &GlobalIndex, suggested_parent: Option<Uuid>, cancellation_token: &CancellationToken) -> OnboardingResult<Uuid> {
+fn choose_parent(
+    index: &GlobalIndex,
+    suggested_parent: Option<Uuid>,
+    cancellation_token: &CancellationToken,
+) -> OnboardingResult<Uuid> {
     let mut parents: Vec<(Uuid, String)> = index
         .projects
         .iter()

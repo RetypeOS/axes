@@ -7,9 +7,10 @@ use dialoguer::{Confirm, theme::ColorfulTheme};
 use std::{fs, path::PathBuf};
 
 use crate::{
+    CancellationToken,
     cli::handlers::commons,
     constants::AXES_DIR,
-    core::{context_resolver, index_manager}, CancellationToken,
+    core::{context_resolver, index_manager},
 };
 
 #[derive(Parser, Debug, Default)]
@@ -32,7 +33,10 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     let delete_args = DeleteArgs::try_parse_from(&args)?;
 
     // Solve config.
-    let config = commons::resolve_config_from_context_or_session(Some(delete_args.context), cancellation_token)?;
+    let config = commons::resolve_config_from_context_or_session(
+        Some(delete_args.context),
+        cancellation_token,
+    )?;
 
     if config.uuid == index_manager::GLOBAL_PROJECT_UUID {
         return Err(anyhow!(t!("delete.error.cannot_delete_global")));

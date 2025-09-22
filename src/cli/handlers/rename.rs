@@ -5,7 +5,7 @@ use colored::*;
 use dialoguer::{Confirm, theme::ColorfulTheme};
 
 use super::commons;
-use crate::{core::index_manager, CancellationToken};
+use crate::{CancellationToken, core::index_manager};
 
 use clap::Parser;
 
@@ -24,7 +24,10 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     let rename_args = RenameArgs::try_parse_from(&args)?;
 
     // 2. Solve config.
-    let config = commons::resolve_config_from_context_or_session(Some(rename_args.context), cancellation_token)?;
+    let config = commons::resolve_config_from_context_or_session(
+        Some(rename_args.context),
+        cancellation_token,
+    )?;
     let old_qualified_name = config.qualified_name.clone();
 
     let simple_name = config

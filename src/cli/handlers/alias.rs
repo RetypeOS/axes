@@ -3,11 +3,11 @@
 use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
 use colored::*;
-use dialoguer::{console::measure_text_width, theme::ColorfulTheme, Confirm};
+use dialoguer::{Confirm, console::measure_text_width, theme::ColorfulTheme};
 use std::env;
 
-use crate::cli::handlers::commons::check_for_cancellation;
 use crate::CancellationToken;
+use crate::cli::handlers::commons::check_for_cancellation;
 
 use crate::core::{context_resolver, index_manager};
 
@@ -64,7 +64,8 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
             }
             check_for_cancellation(cancellation_token)?;
 
-            let (target_uuid, target_name) = context_resolver::resolve_context(&context, &index, cancellation_token)?;
+            let (target_uuid, target_name) =
+                context_resolver::resolve_context(&context, &index, cancellation_token)?;
             index_manager::set_alias(&mut index, clean_name.clone(), target_uuid);
             index_manager::save_global_index(&index)?;
 
@@ -85,23 +86,23 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
             println!("\n{}:", t!("alias.info.header"));
             let mut sorted_aliases: Vec<_> = index.aliases.iter().collect();
             sorted_aliases.sort_by_key(|(name, _)| *name);
-            
+
             let max_len = sorted_aliases
                 .iter()
                 .map(|(name, _)| measure_text_width(&format!("{}!", name)))
                 .max()
                 .unwrap_or(0);
-        
+
             for (name, uuid) in sorted_aliases {
                 let target_name = index_manager::build_qualified_name(*uuid, &index)
                     .unwrap_or_else(|| t!("alias.info.broken_link").red().to_string());
-            
+
                 let alias_display_raw = format!("{}!", name);
                 let alias_display_colored = format!("{}!", name.cyan());
-            
+
                 let visible_len = measure_text_width(&alias_display_raw);
                 let padding = " ".repeat(max_len.saturating_sub(visible_len));
-            
+
                 println!("  {}{} ->  {}", alias_display_colored, padding, target_name);
             }
         }

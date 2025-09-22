@@ -3,8 +3,9 @@
 // EN: src/core/interpolator.rs
 
 use crate::{
+    CancellationToken, // We need the executor for <axes::run::...>
     models::{Command as ProjectCommand, ResolvedConfig, Runnable},
-    system::executor, CancellationToken, // We need the executor for <axes::run::...>
+    system::executor,
 };
 use anyhow::{Context, Result, anyhow};
 use regex::Regex;
@@ -42,7 +43,11 @@ impl<'a> Interpolator<'a> {
     }
 
     /// Recursively expands all `<axes::...>` tokens in a string.
-    pub fn expand_string(&mut self, template: &str, cancellation_token: &CancellationToken) -> Result<String> {
+    pub fn expand_string(
+        &mut self,
+        template: &str,
+        cancellation_token: &CancellationToken,
+    ) -> Result<String> {
         // Protection against runaway recursion.
         if self.recursion_depth >= MAX_RECURSION_DEPTH {
             return Err(anyhow!(
@@ -68,7 +73,11 @@ impl<'a> Interpolator<'a> {
     }
 
     /// Expands a single token path (e.g., "name" or "scripts::test").
-    fn expand_token(&mut self, token_path: &str, cancellation_token: &CancellationToken) -> Result<String> {
+    fn expand_token(
+        &mut self,
+        token_path: &str,
+        cancellation_token: &CancellationToken,
+    ) -> Result<String> {
         let parts: Vec<&str> = token_path.split("::").collect();
 
         if parts.len() > 1 {
@@ -92,7 +101,11 @@ impl<'a> Interpolator<'a> {
         Err(anyhow!("<axes::{}> not found.", token_path))
     }
 
-    fn expand_qualified_token(&mut self, parts: &[&str], cancellation_token: &CancellationToken) -> Result<String> {
+    fn expand_qualified_token(
+        &mut self,
+        parts: &[&str],
+        cancellation_token: &CancellationToken,
+    ) -> Result<String> {
         match parts.get(0) {
             Some(&"vars") => {
                 let key = parts
@@ -142,7 +155,11 @@ impl<'a> Interpolator<'a> {
     }
 
     /// Expands the content of an internal script, with cycle detection.
-    fn expand_script(&mut self, script_name: &str, cancellation_token: &CancellationToken) -> Result<String> {
+    fn expand_script(
+        &mut self,
+        script_name: &str,
+        cancellation_token: &CancellationToken,
+    ) -> Result<String> {
         if self.recursion_stack.contains(script_name) {
             let path = self
                 .recursion_stack
@@ -200,7 +217,11 @@ impl<'a> Interpolator<'a> {
     }
 
     /// Executes a command and returns its output for substitution.
-    fn expand_run(&mut self, sub_path: &[&str], cancellation_token: &CancellationToken) -> Result<String> {
+    fn expand_run(
+        &mut self,
+        sub_path: &[&str],
+        cancellation_token: &CancellationToken,
+    ) -> Result<String> {
         let command_to_run =
             if sub_path.get(0) == Some(&"commands") || sub_path.get(0) == Some(&"scripts") {
                 // Case: <axes::run::scripts::my_script>
@@ -225,7 +246,7 @@ impl<'a> Interpolator<'a> {
             &final_command,
             &self.config.project_root,
             &self.config.env,
-            cancellation_token
+            cancellation_token,
         )
         .with_context(|| format!("Execution of '{}' for substitution failed.", final_command))?;
 

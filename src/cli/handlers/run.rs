@@ -5,9 +5,10 @@ use colored::*;
 use rayon::prelude::*;
 
 use crate::{
+    CancellationToken,
     core::interpolator::Interpolator,
     models::{Command as ProjectCommand, ResolvedConfig},
-    system::executor, CancellationToken,
+    system::executor,
 };
 
 use clap::Parser;
@@ -32,7 +33,10 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     let run_args = RunArgs::try_parse_from(&args)?;
 
     // 2. Solve config.
-    let config = commons::resolve_config_from_context_or_session(Some(run_args.context), cancellation_token)?;
+    let config = commons::resolve_config_from_context_or_session(
+        Some(run_args.context),
+        cancellation_token,
+    )?;
 
     // 3. Parse script name and parameters from arguments.
     let script_key = &run_args.script;
@@ -65,7 +69,10 @@ struct CommandExecutor<'a> {
 
 impl<'a> CommandExecutor<'a> {
     fn new(config: ResolvedConfig, cancellation_token: &'a CancellationToken) -> Self {
-        Self { config, cancellation_token }
+        Self {
+            config,
+            cancellation_token,
+        }
     }
 
     fn run_script(&self, script_name: &str, params: &[String]) -> Result<()> {
@@ -102,7 +109,11 @@ impl<'a> CommandExecutor<'a> {
         for command_template in command_list {
             commons::check_for_cancellation(self.cancellation_token)?;
             let is_parallel = command_template.starts_with('>');
-            let template = if is_parallel { command_template[1..].trim() } else { command_template.as_str() };
+            let template = if is_parallel {
+                command_template[1..].trim()
+            } else {
+                command_template.as_str()
+            };
 
             if is_parallel {
                 parallel_batch.push(template.to_string());
@@ -129,7 +140,10 @@ impl<'a> CommandExecutor<'a> {
         cli_params: &[String],
         interpolator: &mut Interpolator,
     ) -> Result<()> {
-        println!("{}", format!("⚡ Running {} commands in parallel...", batch.len()).blue());
+        println!(
+            "{}",
+            format!("⚡ Running {} commands in parallel...", batch.len()).blue()
+        );
 
         let results: Result<Vec<()>> = batch
             .par_iter()
@@ -172,12 +186,21 @@ impl<'a> CommandExecutor<'a> {
 
         println!("\n> {}", trimmed_command.green());
         // NOTE: Pass the cancellation token to the external command executor.
-        executor::execute_command(trimmed_command, &self.config.project_root, &self.config.env, self.cancellation_token)?;
+        executor::execute_command(
+            trimmed_command,
+            &self.config.project_root,
+            &self.config.env,
+            self.cancellation_token,
+        )?;
         Ok(())
     }
 
     /// Helper to extract the initial list of command strings from a `ProjectCommand` enum.
-    fn get_command_list_from_def(&self, command_def: &ProjectCommand, script_key: &str) -> Result<Vec<String>> {
+    fn get_command_list_from_def(
+        &self,
+        command_def: &ProjectCommand,
+        script_key: &str,
+    ) -> Result<Vec<String>> {
         let runnable = match command_def {
             ProjectCommand::Simple(s) => return Ok(vec![s.clone()]),
             ProjectCommand::Sequence(s) => return Ok(s.clone()),

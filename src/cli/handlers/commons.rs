@@ -5,17 +5,17 @@
 use anyhow::{Context, Result, anyhow};
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use uuid::Uuid;
 
 use crate::{
+    CancellationToken,
     core::{
         config_resolver, context_resolver,
         index_manager::{self},
     },
     models::{GlobalIndex, IndexEntry, ResolvedConfig},
-    CancellationToken,
 };
 
 use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
@@ -166,7 +166,8 @@ pub fn resolve_config_from_context_or_session(
     match context_str {
         Some(context) => {
             // Contexto explícito, tiene prioridad
-            let (uuid, qualified_name) = context_resolver::resolve_context(&context, &index, cancellation_token)?;
+            let (uuid, qualified_name) =
+                context_resolver::resolve_context(&context, &index, cancellation_token)?;
             Ok(config_resolver::resolve_config_for_uuid(
                 uuid,
                 qualified_name,
@@ -196,7 +197,10 @@ pub fn resolve_config_from_context_or_session(
 }
 
 /// Interactive, multi-modal parent selector.
-pub fn choose_parent_interactive(index: &GlobalIndex, cancellation_token: &CancellationToken) -> Result<Uuid> {
+pub fn choose_parent_interactive(
+    index: &GlobalIndex,
+    cancellation_token: &CancellationToken,
+) -> Result<Uuid> {
     loop {
         let items = &[
             "Enter a context path (e.g., 'my-app/api', 'g!', '*')",
@@ -234,7 +238,10 @@ pub fn choose_parent_interactive(index: &GlobalIndex, cancellation_token: &Cance
 
 /// Handles the "Enter context" workflow. Returns `Ok(Some(Uuid))` on success,
 /// `Ok(None)` if the user cancels, and `Err` on I/O failure.
-fn select_parent_by_context(index: &GlobalIndex, cancellation_token: &CancellationToken) -> Result<Option<Uuid>> {
+fn select_parent_by_context(
+    index: &GlobalIndex,
+    cancellation_token: &CancellationToken,
+) -> Result<Option<Uuid>> {
     loop {
         let input: String = Input::with_theme(&ColorfulTheme::default())
             .with_prompt("Enter context path (leave empty to go back)")
@@ -268,7 +275,10 @@ fn select_parent_by_context(index: &GlobalIndex, cancellation_token: &Cancellati
 }
 
 /// Handles the visual browsing workflow.
-fn select_parent_by_browsing(index: &GlobalIndex, cancellation_token: &CancellationToken) -> Result<Uuid> {
+fn select_parent_by_browsing(
+    index: &GlobalIndex,
+    cancellation_token: &CancellationToken,
+) -> Result<Uuid> {
     let mut current_uuid_opt = None; // Start at the root view
 
     loop {

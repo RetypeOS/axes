@@ -5,12 +5,13 @@ use clap::Parser;
 use std::{env, path::PathBuf};
 
 use crate::{
+    CancellationToken,
     cli::args::RegisterArgs,
     core::{
         graph_display::{self, DisplayOptions},
         index_manager,
         onboarding_manager::{self, OnboardingOptions},
-    }, CancellationToken,
+    },
 };
 
 pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
@@ -52,14 +53,18 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
         suggested_parent_uuid: None,
     };
 
-    onboarding_manager::register_project(&path_to_register, &mut index, &options, cancellation_token).with_context(
-        || {
-            anyhow!(
-                t!("register.error.failed"),
-                path = path_to_register.display()
-            )
-        },
-    )?;
+    onboarding_manager::register_project(
+        &path_to_register,
+        &mut index,
+        &options,
+        cancellation_token,
+    )
+    .with_context(|| {
+        anyhow!(
+            t!("register.error.failed"),
+            path = path_to_register.display()
+        )
+    })?;
 
     // Save changes to disk
     index_manager::save_global_index(&index)?;

@@ -2,16 +2,17 @@
 
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
-use dialoguer::{self, theme::ColorfulTheme, Error as DialoguerError, Input};
+use dialoguer::{self, Error as DialoguerError, Input, theme::ColorfulTheme};
 use std::{collections::HashMap, env, fs, io, path::Path};
 use uuid::Uuid;
 
 use super::commons::{self, check_for_cancellation};
 use crate::{
+    CancellationToken,
     cli::args::InitArgs,
     constants::{AXES_DIR, PROJECT_CONFIG_FILENAME, PROJECT_REF_FILENAME},
     core::{context_resolver, index_manager},
-    models::{ProjectConfig, ProjectRef}, CancellationToken,
+    models::{ProjectConfig, ProjectRef},
 };
 
 use colored::Colorize;
@@ -37,7 +38,8 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     let is_interactive = !init_args.autosolve;
 
     // 2. Resolve configuration details
-    let project_name = resolve_project_name(&init_args, &target_dir, is_interactive, cancellation_token)?;
+    let project_name =
+        resolve_project_name(&init_args, &target_dir, is_interactive, cancellation_token)?;
     check_for_cancellation(cancellation_token)?;
     let parent_uuid = resolve_parent_project(&init_args, is_interactive, cancellation_token)?;
     check_for_cancellation(cancellation_token)?;
@@ -45,7 +47,12 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     // --- Interactive step for version and description ---
     let version = resolve_project_version(&init_args, is_interactive, cancellation_token)?;
     check_for_cancellation(cancellation_token)?;
-    let description = resolve_project_description(&init_args, &project_name, is_interactive, cancellation_token)?;
+    let description = resolve_project_description(
+        &init_args,
+        &project_name,
+        is_interactive,
+        cancellation_token,
+    )?;
     check_for_cancellation(cancellation_token)?;
 
     // 3. Build the project configuration object
@@ -130,17 +137,18 @@ fn resolve_project_name(
             let input = match Input::with_theme(&ColorfulTheme::default())
                 .with_prompt("Project name")
                 .default(default_name.clone())
-                .interact_text() {
-                    Ok(value) => {
-                        check_for_cancellation(cancellation_token)?;
-                        value
-                    },
-                    Err(DialoguerError::IO(io_err)) if io_err.kind() == io::ErrorKind::Interrupted => {
-                        return Err(anyhow!(t!("common.error.operation_cancelled")));
-                    }
-                    Err(e) => return Err(e.into()), // Otro error (I/O, etc.).
-                };
-            
+                .interact_text()
+            {
+                Ok(value) => {
+                    check_for_cancellation(cancellation_token)?;
+                    value
+                }
+                Err(DialoguerError::IO(io_err)) if io_err.kind() == io::ErrorKind::Interrupted => {
+                    return Err(anyhow!(t!("common.error.operation_cancelled")));
+                }
+                Err(e) => return Err(e.into()), // Otro error (I/O, etc.).
+            };
+
             check_for_cancellation(cancellation_token)?;
 
             match commons::validate_project_name(&input) {
@@ -151,7 +159,6 @@ fn resolve_project_name(
                     continue;
                 }
             }
-
         }
     } else {
         // In non-interactive mode, use the default name and validate it.
@@ -160,12 +167,17 @@ fn resolve_project_name(
 }
 
 /// Resuelve el UUID del padre, desde flags, interactivamente, o usando 'global' como default.
-fn resolve_parent_project(args: &InitArgs, is_interactive: bool, cancellation_token: &CancellationToken) -> Result<Uuid> {
+fn resolve_parent_project(
+    args: &InitArgs,
+    is_interactive: bool,
+    cancellation_token: &CancellationToken,
+) -> Result<Uuid> {
     let index = index_manager::load_and_ensure_global_project()?;
 
     if let Some(parent_context) = &args.parent {
         println!("Resolving parent '{}'...", parent_context);
-        let (uuid, qualified_name) = context_resolver::resolve_context(parent_context, &index, cancellation_token)?;
+        let (uuid, qualified_name) =
+            context_resolver::resolve_context(parent_context, &index, cancellation_token)?;
         println!(
             "Parent project '{}' found (UUID: {}).",
             qualified_name, uuid
@@ -182,7 +194,11 @@ fn resolve_parent_project(args: &InitArgs, is_interactive: bool, cancellation_to
     }
 }
 
-fn resolve_project_version(args: &InitArgs, is_interactive: bool, cancellation_token: &CancellationToken) -> Result<String> {
+fn resolve_project_version(
+    args: &InitArgs,
+    is_interactive: bool,
+    cancellation_token: &CancellationToken,
+) -> Result<String> {
     if let Some(version) = &args.version {
         return Ok(version.clone());
     }
@@ -191,13 +207,14 @@ fn resolve_project_version(args: &InitArgs, is_interactive: bool, cancellation_t
             .with_prompt("Version")
             .default("0.1.0".to_string())
             .interact_text()
-            .map_err(|e| anyhow!(e)) {
-                    Ok(i) => {
-                        check_for_cancellation(cancellation_token)?;
-                        Ok(i)
-                    },
-                    Err(e) => return Err(e.into()),
-                }
+            .map_err(|e| anyhow!(e))
+        {
+            Ok(i) => {
+                check_for_cancellation(cancellation_token)?;
+                Ok(i)
+            }
+            Err(e) => return Err(e.into()),
+        }
     } else {
         Ok("0.1.0".to_string())
     }
@@ -218,13 +235,14 @@ fn resolve_project_description(
             .with_prompt("Description")
             .default(default_desc)
             .interact_text()
-            .map_err(|e| anyhow!(e)) {
-                    Ok(i) => {
-                        check_for_cancellation(cancellation_token)?;
-                        Ok(i)
-                    },
-                    Err(e) => return Err(e.into()),
-                }
+            .map_err(|e| anyhow!(e))
+        {
+            Ok(i) => {
+                check_for_cancellation(cancellation_token)?;
+                Ok(i)
+            }
+            Err(e) => return Err(e.into()),
+        }
     } else {
         Ok(default_desc)
     }

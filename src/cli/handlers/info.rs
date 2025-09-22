@@ -4,8 +4,9 @@ use anyhow::{Result, anyhow};
 use colored::*;
 
 use crate::{
+    CancellationToken,
     constants::{AXES_DIR, PROJECT_CONFIG_FILENAME},
-    models::{Command as ProjectCommand, ResolvedConfig}, CancellationToken,
+    models::{Command as ProjectCommand, ResolvedConfig},
 };
 
 use clap::Parser;
@@ -29,7 +30,8 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     }
 
     // 2. Resolver la configuración usando el `context` parseado.
-    let config = commons::resolve_config_from_context_or_session(info_args.context, cancellation_token)?;
+    let config =
+        commons::resolve_config_from_context_or_session(info_args.context, cancellation_token)?;
 
     // 3. El resto de la lógica de impresión no cambia.
     print_metadata(&config);

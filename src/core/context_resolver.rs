@@ -6,10 +6,10 @@ use std::{env, fs, path::Path};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::constants::AXES_DIR;
-use crate::core::index_manager::{self, GLOBAL_PROJECT_UUID};
 use crate::CancellationToken;
+use crate::constants::AXES_DIR;
 use crate::constants::LAST_USED_CACHE_FILENAME;
+use crate::core::index_manager::{self, GLOBAL_PROJECT_UUID};
 
 use bincode::error::DecodeError;
 
@@ -61,7 +61,11 @@ pub enum ContextError {
 type ContextResult<T> = Result<T, ContextError>;
 
 /// Resolves a project path to a UUID and a qualified name.
-pub fn resolve_context(context: &str, index: &GlobalIndex, cancellation_token: &CancellationToken) -> ContextResult<(Uuid, String)> {
+pub fn resolve_context(
+    context: &str,
+    index: &GlobalIndex,
+    _cancellation_token: &CancellationToken,
+) -> ContextResult<(Uuid, String)> {
     let parts: Vec<&str> = context.split('/').filter(|s| !s.is_empty()).collect();
     if parts.is_empty() {
         return Err(ContextError::EmptyContext);
