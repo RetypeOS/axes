@@ -1,0 +1,5246 @@
+===== bin\axes.rs =====
+// EN: src/bin/axes.rs
+
+use anyhow::Result;
+use axes::CancellationToken;
+use axes::cli::{Cli, handlers};
+use axes::t;
+use clap::Parser;
+use colored::*;
+use std::env;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+// --- Command Definition and Registry ---
+
+/// Defines a system command, its aliases, and its handler function.
+/// The handler now accepts a `CancellationToken` to allow for safe interruption.
+struct CommandDefinition {
+    name: &'static str,
+    aliases: &'static [&'static str],
+    handler: fn(Vec<String>, &CancellationToken) -> Result<()>,
+}
+
+/// The single source of truth for all system scripts.
+/// To add a new command, simply add a new entry here.
+static COMMAND_REGISTRY: &[CommandDefinition] = &[
+    CommandDefinition {
+        name: "alias",
+        aliases: &[],
+        handler: handlers::alias::handle,
+    },
+    CommandDefinition {
+        name: "delete",
+        aliases: &["del"],
+        handler: handlers::delete::handle,
+    },
+    CommandDefinition {
+        name: "info",
+        aliases: &[],
+        handler: handlers::info::handle,
+    },
+    CommandDefinition {
+        name: "init",
+        aliases: &["new"],
+        handler: handlers::init::handle,
+    },
+    CommandDefinition {
+        name: "link",
+        aliases: &[],
+        handler: handlers::link::handle,
+    },
+    CommandDefinition {
+        name: "open",
+        aliases: &[],
+        handler: handlers::open::handle,
+    },
+    CommandDefinition {
+        name: "register",
+        aliases: &["reg"],
+        handler: handlers::register::handle,
+    },
+    CommandDefinition {
+        name: "rename",
+        aliases: &[],
+        handler: handlers::rename::handle,
+    },
+    CommandDefinition {
+        name: "run",
+        aliases: &[],
+        handler: handlers::run::handle,
+    },
+    CommandDefinition {
+        name: "start",
+        aliases: &[],
+        handler: handlers::start::handle,
+    },
+    CommandDefinition {
+        name: "tree",
+        aliases: &["ls"],
+        handler: handlers::tree::handle,
+    },
+    CommandDefinition {
+        name: "unregister",
+        aliases: &["unreg"],
+        handler: handlers::unregister::handle,
+    },
+];
+
+/// Finds a command definition in the registry by its name or alias.
+fn find_command(name: &str) -> Option<&'static CommandDefinition> {
+    COMMAND_REGISTRY
+        .iter()
+        .find(|cmd| cmd.name == name || cmd.aliases.contains(&name))
+}
+
+/// The main entry point of the application.
+#[tokio::main]
+async fn main() -> Result<()> {
+    let cancellation_token = Arc::new(AtomicBool::new(true));
+    env_logger::init();
+    let cli = Cli::parse();
+
+    let signal_token = cancellation_token.clone();
+    let main_logic_token = cancellation_token.clone();
+
+    tokio::select! {
+        // Work A: Main logic of aplication.
+        result = run_cli_wrapper(cli, main_logic_token) => {
+            if let Err(e) = result {
+                if !cancellation_token.load(Ordering::SeqCst) {
+                    std::process::exit(130);
+                } else {
+                    eprintln!("\n{}: {}", "Error".red().bold(), e);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        // Work B: Wait the signal of Ctrl+C.
+        _ = tokio::signal::ctrl_c() => {
+            if signal_token.load(Ordering::SeqCst) {
+                signal_token.store(false, Ordering::SeqCst);
+                println!(
+                    "\n{}",
+                    t!("common.info.cancellation_requested_interactive").yellow()
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A wrapper function needed because `tokio::select!` requires the futures to be `Send`.
+/// `run_cli` en sí no es `async`, por lo que lo envolvemos en un `tokio::task::spawn_blocking`.
+async fn run_cli_wrapper(cli: Cli, cancellation_token: CancellationToken) -> Result<()> {
+    tokio::task::spawn_blocking(move || run_cli(cli, cancellation_token)).await?
+}
+
+/// The main application dispatcher.
+///
+/// This function is the primary router for the application. It determines the user's
+/// intent based on command-line arguments and the environment, then routes
+/// to the appropriate handler. It is designed to be highly maintainable and declarative.
+///
+/// # Arguments
+/// * `cli`: The parsed command-line arguments from `clap`.
+/// * `cancellation_token`: A shared token to signal graceful shutdown on Ctrl+C.
+fn run_cli(cli: Cli, cancellation_token: CancellationToken) -> Result<()> {
+    log::debug!("CLI args parsed: {:?}", cli);
+
+    let arg1 = match cli.context_or_action {
+        Some(a) => a,
+        None => {
+            println!("{}", t!("common.info.tui_placeholder"));
+            return Ok(());
+        }
+    };
+
+    let mut remaining_args = Vec::new();
+    if let Some(arg2) = cli.action_or_context_or_arg {
+        remaining_args.push(arg2);
+    }
+    remaining_args.extend(cli.args);
+
+    let (action_name, action_args) = if env::var("AXES_PROJECT_UUID").is_ok() {
+        // --- Session Mode: Strict Grammar ---
+        // `arg1` is always the action or script name.
+        (arg1, remaining_args)
+    } else {
+        // --- Script Mode: Flexible Grammar ---
+        if find_command(&arg1).is_some() {
+            // Case: `axes <action> [args...]` (e.g., `axes tree --all`)
+            (arg1, remaining_args)
+        } else if let Some(arg2) = remaining_args.first() {
+            if find_command(arg2).is_some() {
+                // Case: `axes <context> <action> [args...]` (e.g., `axes my-app info`)
+                let mut args_for_handler = vec![arg1.clone()];
+                args_for_handler.extend(remaining_args.iter().skip(1).cloned());
+                (arg2.clone(), args_for_handler)
+            } else {
+                // Case: `axes <context> <script> [params...]` (Shortcut for `run`)
+                let mut run_args = vec![arg1.clone()];
+                run_args.extend(remaining_args);
+                ("run".to_string(), run_args)
+            }
+        } else {
+            // Case: `axes <context>` (Shortcut for `start`)
+            ("start".to_string(), vec![arg1])
+        }
+    };
+
+    // --- Dispatch Logic ---
+    if let Some(command) = find_command(&action_name) {
+        // A system command was found. Execute its handler.
+        (command.handler)(action_args, &cancellation_token)
+    } else {
+        // Not a system command, so it's a shortcut for `run`.
+        let mut run_args = vec![action_name];
+        run_args.extend(action_args);
+        handlers::run::handle(run_args, &cancellation_token)
+    }
+}
+
+===== cli\args.rs =====
+// EN: src/cli/args.rs
+use clap::Parser;
+
+#[derive(Parser, Debug, Default)]
+#[command(no_binary_name = true)] // Important: Prevents clap from expecting "init" as the first arg
+pub struct InitArgs {
+    /// The name for the new project. If not provided, will be asked interactively.
+    pub name: Option<String>,
+
+    /// The context of the parent project. Defaults to 'global'.
+    #[arg(long)]
+    pub parent: Option<String>,
+
+    /// The name of the template to use from `~/.config/axes/templates`.
+    #[arg(long, short)]
+    pub template: Option<String>,
+
+    /// The version of the project.
+    #[arg(long)]
+    pub version: Option<String>,
+
+    /// A short description of the project.
+    #[arg(long)]
+    pub description: Option<String>,
+
+    /// Do not ask for user input, use defaults for unspecified values.
+    #[arg(long)]
+    pub autosolve: bool,
+
+    /// Set environment variables for the project (e.g., "KEY=VALUE").
+    #[arg(long, value_delimiter = ',', num_args = 1..)]
+    pub env: Vec<String>,
+
+    /// Set interpolation variables for the project (e.g., "KEY=VALUE").
+    #[arg(long, value_delimiter = ',', num_args = 1..)]
+    pub var: Vec<String>,
+}
+
+#[derive(Parser, Debug, Default)]
+#[command(no_binary_name = true)]
+pub struct RegisterArgs {
+    /// The path to the project to register. Defaults to the current directory.
+    pub path: Option<String>,
+
+    /// Do not ask for user input, fail on any conflict.
+    #[arg(long)]
+    pub autosolve: bool,
+}
+
+===== cli\handlers\alias.rs =====
+// EN: src/cli/handlers/alias.rs
+
+use anyhow::{Result, anyhow};
+use clap::{Parser, Subcommand};
+use colored::*;
+use dialoguer::{Confirm, console::measure_text_width, theme::ColorfulTheme};
+use std::env;
+
+use crate::CancellationToken;
+use crate::cli::handlers::commons::check_for_cancellation;
+
+use crate::core::{context_resolver, index_manager};
+
+#[derive(Parser, Debug)]
+#[command(no_binary_name = true)]
+struct AliasArgs {
+    #[command(subcommand)]
+    command: Option<AliasCommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum AliasCommand {
+    /// Sets a new alias or updates an existing one.
+    Set {
+        /// The name for the alias (without the '!' suffix).
+        name: String,
+        /// The project context the alias should point to.
+        context: String,
+    },
+    /// Lists all defined aliases.
+    #[command(aliases= ["ls"])]
+    List,
+    /// Removes an alias.
+    #[command(aliases = ["rm"])]
+    Remove {
+        /// The name of the alias to remove.
+        name: String,
+    },
+}
+
+pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+    if env::var("AXES_PROJECT_UUID").is_ok() {
+        return Err(anyhow!(t!("alias.error.not_in_session")));
+    }
+
+    let alias_args = AliasArgs::try_parse_from(&args)?;
+    let mut index = index_manager::load_and_ensure_global_project()?;
+
+    match alias_args.command.unwrap_or(AliasCommand::List) {
+        AliasCommand::Set { name, context } => {
+            let clean_name = validate_alias_name(&name)?;
+
+            // Special handling for the 'g' alias.
+            if clean_name.to_lowercase() == "g" {
+                println!("{}", t!("alias.warning.modifying_g").yellow().bold());
+                if !Confirm::with_theme(&ColorfulTheme::default())
+                    .with_prompt(t!("common.prompt.are_you_sure"))
+                    .default(false)
+                    .interact()?
+                {
+                    println!("\n{}", t!("common.info.operation_cancelled"));
+                    return Ok(());
+                }
+            }
+            check_for_cancellation(cancellation_token)?;
+
+            let (target_uuid, target_name) =
+                context_resolver::resolve_context(&context, &index, cancellation_token)?;
+            index_manager::set_alias(&mut index, clean_name.clone(), target_uuid);
+            index_manager::save_global_index(&index)?;
+
+            println!(
+                "{} {} '{}!' -> '{}'",
+                t!("common.success"),
+                t!("alias.success.set"),
+                clean_name,
+                target_name.cyan()
+            );
+        }
+        AliasCommand::List => {
+            if index.aliases.is_empty() {
+                println!("\n{}", t!("alias.info.no_aliases"));
+                return Ok(());
+            }
+
+            println!("\n{}:", t!("alias.info.header"));
+            let mut sorted_aliases: Vec<_> = index.aliases.iter().collect();
+            sorted_aliases.sort_by_key(|(name, _)| *name);
+
+            let max_len = sorted_aliases
+                .iter()
+                .map(|(name, _)| measure_text_width(&format!("{}!", name)))
+                .max()
+                .unwrap_or(0);
+
+            for (name, uuid) in sorted_aliases {
+                let target_name = index_manager::build_qualified_name(*uuid, &index)
+                    .unwrap_or_else(|| t!("alias.info.broken_link").red().to_string());
+
+                let alias_display_raw = format!("{}!", name);
+                let alias_display_colored = format!("{}!", name.cyan());
+
+                let visible_len = measure_text_width(&alias_display_raw);
+                let padding = " ".repeat(max_len.saturating_sub(visible_len));
+
+                println!("  {}{} ->  {}", alias_display_colored, padding, target_name);
+            }
+        }
+        AliasCommand::Remove { name } => {
+            let clean_name = validate_alias_name(&name)?;
+
+            if clean_name.to_lowercase() == "g" {
+                println!("{}", t!("alias.warning.modifying_g").yellow().bold());
+                if !Confirm::with_theme(&ColorfulTheme::default())
+                    .with_prompt(t!("common.prompt.are_you_sure"))
+                    .default(false)
+                    .interact()?
+                {
+                    println!("\n{}", t!("common.info.operation_cancelled"));
+                    return Ok(());
+                }
+            }
+            check_for_cancellation(cancellation_token)?;
+
+            if index_manager::remove_alias(&mut index, &clean_name) {
+                index_manager::save_global_index(&index)?;
+                println!(
+                    "{} {}",
+                    t!("common.success"),
+                    format_args!(t!("alias.success.removed"), name = clean_name)
+                );
+            } else {
+                return Err(anyhow!(t!("alias.error.not_found"), name = clean_name));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Validates an alias name against reserved keywords and syntax rules.
+fn validate_alias_name(raw_name: &str) -> Result<String> {
+    let name = raw_name.trim().strip_suffix('!').unwrap_or(raw_name.trim());
+
+    if name.is_empty() {
+        return Err(anyhow!(t!("alias.error.empty_name")));
+    }
+    if name.contains(char::is_whitespace) || name.contains('/') || name.contains('\\') {
+        return Err(anyhow!(t!("alias.error.invalid_chars"), name = name));
+    }
+
+    // These are reserved for context resolution and cannot be aliases.
+    let reserved_nav_names = [".", "..", "*", "**", "_"];
+    if reserved_nav_names.contains(&name.to_lowercase().as_str()) {
+        return Err(anyhow!(t!("alias.error.reserved_name"), name = name));
+    }
+
+    Ok(name.to_string())
+}
+
+===== cli\handlers\commons.rs =====
+// EN: src/cli/handlers/commons.rs
+
+// This module contains shared functions used by multiple handlers.
+
+use anyhow::{Context, Result, anyhow};
+use std::collections::{HashMap, HashSet};
+use std::env;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use uuid::Uuid;
+
+use crate::{
+    CancellationToken,
+    core::{
+        config_resolver, context_resolver,
+        index_manager::{self},
+    },
+    models::{GlobalIndex, IndexEntry, ResolvedConfig},
+};
+
+use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
+
+use colored::Colorize;
+
+/// Represents a calculated plan for an unregister or delete operation.
+/// It contains all the necessary information to present to the user and execute.
+#[derive(Debug, Default)]
+pub struct UnregisterPlan {
+    pub uuids_to_remove: Vec<Uuid>,
+    pub reparent_warnings: Vec<String>,
+    pub summary_lines: Vec<String>,
+}
+
+#[inline]
+pub fn check_for_cancellation(cancellation_token: &Arc<AtomicBool>) -> Result<()> {
+    if !cancellation_token.load(Ordering::SeqCst) {
+        Err(anyhow!(t!("common.error.operation_cancelled")))
+    } else {
+        Ok(())
+    }
+}
+
+/// Prepares a plan for unregistering projects. This function is a "dry run"
+/// and does not modify the index; it only calculates the effects.
+pub fn prepare_unregister_plan(
+    index: &GlobalIndex,
+    config: &ResolvedConfig,
+    recursive: bool,
+    reparent_to: Option<String>,
+    cancellation_token: &CancellationToken,
+) -> Result<UnregisterPlan> {
+    let mut uuids_to_remove = vec![config.uuid];
+    let mut reparent_warnings = Vec::new();
+    let mut summary_lines = Vec::new();
+
+    let new_parent_uuid = if let Some(ctx) = &reparent_to {
+        let (uuid, _) = context_resolver::resolve_context(ctx, index, cancellation_token)?;
+        Some(uuid)
+    } else {
+        None
+    };
+
+    if recursive {
+        if reparent_to.is_some() {
+            return Err(anyhow!(t!("plan.error.recursive_and_reparent")));
+        }
+        uuids_to_remove.extend(index_manager::get_all_descendants(index, config.uuid));
+        summary_lines.push(t!("plan.summary.unregister_recursive").to_string());
+    } else {
+        summary_lines.push(
+            format!(
+                t!("plan.summary.unregister_single"),
+                name = config.qualified_name
+            )
+            .to_string(),
+        );
+
+        let final_parent_uuid = new_parent_uuid.unwrap_or(index_manager::GLOBAL_PROJECT_UUID);
+        let final_parent_entry = index.projects.get(&final_parent_uuid).unwrap();
+
+        summary_lines.push(
+            format!(
+                t!("plan.summary.reparent_to"),
+                name = final_parent_entry.name
+            )
+            .to_string(),
+        );
+
+        let (warnings, conflicts) =
+            check_reparent_collisions(index, config.uuid, final_parent_uuid)?;
+        if !conflicts.is_empty() {
+            let conflict_str = conflicts.join("', '");
+            return Err(anyhow!(
+                t!("plan.error.reparent_collision"),
+                conflicts = conflict_str
+            ));
+        }
+        reparent_warnings = warnings;
+    }
+
+    Ok(UnregisterPlan {
+        uuids_to_remove,
+        reparent_warnings,
+        summary_lines,
+    })
+}
+
+/// Checks for potential name collisions when reparenting children.
+/// Returns a tuple of (warnings_for_automatic_renames, hard_conflicts).
+fn check_reparent_collisions(
+    index: &GlobalIndex,
+    old_parent_uuid: Uuid,
+    new_parent_uuid: Uuid,
+) -> Result<(Vec<String>, Vec<String>)> {
+    let mut warnings = Vec::new();
+    let mut conflicts = Vec::new();
+
+    let old_parent_name = &index.projects.get(&old_parent_uuid).unwrap().name;
+    let children_to_move: Vec<_> = index
+        .projects
+        .values()
+        .filter(|e| e.parent == Some(old_parent_uuid))
+        .collect();
+
+    if children_to_move.is_empty() {
+        return Ok((warnings, conflicts));
+    }
+
+    let new_sibling_names: HashSet<_> = index
+        .projects
+        .values()
+        .filter(|e| e.parent == Some(new_parent_uuid))
+        .map(|e| e.name.clone())
+        .collect();
+
+    for child in children_to_move {
+        if new_sibling_names.contains(&child.name) {
+            // Initial collision detected
+            let suggested_name = format!("{}_{}", old_parent_name, child.name);
+            if new_sibling_names.contains(&suggested_name) {
+                // Automatic rename also conflicts. This is a hard conflict.
+                conflicts.push(format!(
+                    "'{}' (also conflicts as '{}')",
+                    child.name, suggested_name
+                ));
+            } else {
+                // Automatic rename is possible. This is a warning.
+                warnings.push(format!(
+                    "Child '{}' will be renamed to '{}' to avoid collision.",
+                    child.name, suggested_name
+                ));
+            }
+        }
+    }
+
+    Ok((warnings, conflicts))
+}
+
+/// Helper function to resolve a project's configuration from a context string.
+pub fn resolve_config_from_context_or_session(
+    context_str: Option<String>,
+    cancellation_token: &CancellationToken,
+) -> Result<ResolvedConfig> {
+    let index = index_manager::load_and_ensure_global_project()?;
+
+    match context_str {
+        Some(context) => {
+            // Contexto explícito, tiene prioridad
+            let (uuid, qualified_name) =
+                context_resolver::resolve_context(&context, &index, cancellation_token)?;
+            Ok(config_resolver::resolve_config_for_uuid(
+                uuid,
+                qualified_name,
+                &index,
+            )?)
+        }
+        None => {
+            // Sin contexto explícito, intentar modo sesión
+            if let Ok(uuid_str) = env::var("AXES_PROJECT_UUID") {
+                let uuid = Uuid::parse_str(&uuid_str)
+                    .with_context(|| "Invalid UUID found in AXES_PROJECT_UUID.")?;
+                let qualified_name =
+                    index_manager::build_qualified_name(uuid, &index).ok_or_else(|| {
+                        anyhow!("Could not build qualified name for session project.")
+                    })?;
+                Ok(config_resolver::resolve_config_for_uuid(
+                    uuid,
+                    qualified_name,
+                    &index,
+                )?)
+            } else {
+                // Ni explícito ni implícito
+                Err(anyhow!(t!("error.context_required")))
+            }
+        }
+    }
+}
+
+/// Interactive, multi-modal parent selector.
+pub fn choose_parent_interactive(
+    index: &GlobalIndex,
+    cancellation_token: &CancellationToken,
+) -> Result<Uuid> {
+    loop {
+        let items = &[
+            "Enter a context path (e.g., 'my-app/api', 'g!', '*')",
+            "Browse projects visually",
+            "Use 'global' as the parent (default)",
+        ];
+
+        let selection = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt("How would you like to select the parent project?")
+            .items(items)
+            .default(2) // Default to 'global'
+            .interact()?;
+        check_for_cancellation(cancellation_token)?;
+
+        match selection {
+            0 => {
+                // Enter a context path
+                if let Some(uuid) = select_parent_by_context(index, cancellation_token)? {
+                    return Ok(uuid);
+                }
+                // If it returns None, the user cancelled, so we loop again.
+            }
+            1 => {
+                // Browse projects visually
+                return select_parent_by_browsing(index, cancellation_token);
+            }
+            2 => {
+                // Use 'global'
+                return Ok(index_manager::GLOBAL_PROJECT_UUID);
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+/// Handles the "Enter context" workflow. Returns `Ok(Some(Uuid))` on success,
+/// `Ok(None)` if the user cancels, and `Err` on I/O failure.
+fn select_parent_by_context(
+    index: &GlobalIndex,
+    cancellation_token: &CancellationToken,
+) -> Result<Option<Uuid>> {
+    loop {
+        let input: String = Input::with_theme(&ColorfulTheme::default())
+            .with_prompt("Enter context path (leave empty to go back)")
+            .interact_text()?;
+        check_for_cancellation(cancellation_token)?;
+
+        if input.is_empty() {
+            return Ok(None); // User wants to go back to the main menu
+        }
+
+        match context_resolver::resolve_context(&input, index, cancellation_token) {
+            Ok((uuid, qualified_name)) => {
+                let prompt = format!("Resolved to '{}'. Use this as the parent?", qualified_name);
+                if Confirm::with_theme(&ColorfulTheme::default())
+                    .with_prompt(prompt)
+                    .default(true)
+                    .interact()?
+                {
+                    return Ok(Some(uuid));
+                };
+                check_for_cancellation(cancellation_token)?;
+
+                // If user says no, the loop continues to ask for another context.
+            }
+            Err(e) => {
+                // Inform the user of the error and let them try again.
+                println!("Error: {}", e);
+            }
+        }
+    }
+}
+
+/// Handles the visual browsing workflow.
+fn select_parent_by_browsing(
+    index: &GlobalIndex,
+    cancellation_token: &CancellationToken,
+) -> Result<Uuid> {
+    let mut current_uuid_opt = None; // Start at the root view
+
+    loop {
+        let (current_name, current_uuid, children) = match current_uuid_opt {
+            Some(uuid) => {
+                let entry = index.projects.get(&uuid).unwrap();
+                let children_vec: Vec<&IndexEntry> = index
+                    .projects
+                    .values()
+                    .filter(|e| e.parent == Some(uuid))
+                    .collect();
+                (entry.name.clone(), uuid, children_vec)
+            }
+            None => {
+                let root_entry = index
+                    .projects
+                    .get(&index_manager::GLOBAL_PROJECT_UUID)
+                    .expect("Fatal: Root project not found during browsing.");
+
+                let children_vec: Vec<&IndexEntry> = index
+                    .projects
+                    .values()
+                    .filter(|e| e.parent == Some(index_manager::GLOBAL_PROJECT_UUID))
+                    .collect();
+                (
+                    root_entry.name.clone(),
+                    index_manager::GLOBAL_PROJECT_UUID,
+                    children_vec,
+                )
+            }
+        };
+
+        let mut items = Vec::new();
+        items.push(format!("✅ [ Select '{}' as parent ]", current_name));
+
+        // The option to go back is only available if we are not at the root view.
+        if current_uuid_opt.is_some() {
+            items.push("⬆️  [ Go up to parent project ]".to_string());
+        }
+
+        let mut child_map = HashMap::new();
+        for child in children.iter() {
+            // Store the mapping from the display name to the actual entry.
+            let display_name = format!("  └─ {}", child.name);
+            items.push(display_name.clone());
+            child_map.insert(display_name, *child);
+        }
+
+        let prompt = format!("Browsing children of '{}'", current_name);
+        let selection_idx = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt(&prompt)
+            .items(&items)
+            .default(0)
+            .interact()?;
+        check_for_cancellation(cancellation_token)?;
+
+        let selection_str = &items[selection_idx];
+
+        if selection_str.starts_with("✅") {
+            return Ok(current_uuid);
+        } else if selection_str.starts_with("⬆️") {
+            let current_entry = index.projects.get(&current_uuid).unwrap();
+            current_uuid_opt = if current_entry.parent == Some(index_manager::GLOBAL_PROJECT_UUID) {
+                None // Go back to the root view
+            } else {
+                current_entry.parent
+            };
+        } else {
+            // A child was selected
+            if let Some(selected_child) = child_map.get(selection_str) {
+                // Find the UUID of the selected child
+                let child_uuid = index
+                    .projects
+                    .iter()
+                    .find(|(_, entry)| entry.path == selected_child.path) // Path is a reliable unique identifier
+                    .map(|(uuid, _)| *uuid);
+
+                if let Some(uuid) = child_uuid {
+                    current_uuid_opt = Some(uuid);
+                }
+            }
+        }
+    }
+}
+
+/// Validates a project name against axes' naming rules.
+/// Returns a sanitized `String` on success.
+/// Prints non-blocking warnings for stylistic issues.
+/// Returns a blocking `Err` for critical issues.
+pub fn validate_project_name(raw_name: &str) -> Result<String> {
+    let name = raw_name.trim();
+
+    // --- Strict, Blocking Errors ---
+    if name.is_empty() {
+        return Err(anyhow!(t!("validation.error.empty_name")));
+    }
+    if name.contains(char::is_whitespace) {
+        return Err(anyhow!(t!("validation.error.contains_whitespace")));
+    }
+    if name.contains('/') || name.contains('\\') {
+        return Err(anyhow!(t!("validation.error.invalid_chars")));
+    }
+    let reserved_nav_names = ["..", "*", "**", "_"];
+    if reserved_nav_names.contains(&name.to_lowercase().as_str()) {
+        return Err(anyhow!(t!("validation.error.reserved_name"), name = name));
+    }
+
+    // --- Soft, Non-Blocking Warnings ---
+    let first_char = name.chars().next().unwrap(); // Safe due to is_empty check
+    let last_char = name.chars().last().unwrap();
+
+    if !first_char.is_alphanumeric() {
+        println!(
+            "{}",
+            format!(
+                "Warning: The name '{}' starts with a non-alphanumeric character. This is allowed but may cause confusion.",
+                name
+            )
+            .yellow()
+        );
+    }
+    if !last_char.is_alphanumeric() && last_char != '_' {
+        println!(
+            "{}",
+            format!(
+                "Warning: The name '{}' ends with a special character. This is allowed but not recommended.",
+                name
+            )
+            .yellow()
+        );
+    }
+
+    Ok(name.to_string())
+}
+
+===== cli\handlers\delete.rs =====
+// EN: src/cli/handlers/delete.rs
+
+use anyhow::{Context, Result, anyhow};
+use clap::Parser;
+use colored::*;
+use dialoguer::{Confirm, theme::ColorfulTheme};
+use std::{fs, path::PathBuf};
+
+use crate::{
+    CancellationToken,
+    cli::handlers::commons,
+    constants::AXES_DIR,
+    core::{context_resolver, index_manager},
+};
+
+#[derive(Parser, Debug, Default)]
+#[command(no_binary_name = true)]
+struct DeleteArgs {
+    /// The project context to delete.
+    context: String,
+
+    /// Deletes the project and all its descendants.
+    #[arg(long)]
+    recursive: bool,
+
+    /// Reparents direct children to a new project instead of deleting them.
+    #[arg(long)]
+    reparent_to: Option<String>,
+}
+
+pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+    // Parse args.
+    let delete_args = DeleteArgs::try_parse_from(&args)?;
+
+    // Solve config.
+    let config = commons::resolve_config_from_context_or_session(
+        Some(delete_args.context),
+        cancellation_token,
+    )?;
+
+    if config.uuid == index_manager::GLOBAL_PROJECT_UUID {
+        return Err(anyhow!(t!("delete.error.cannot_delete_global")));
+    }
+
+    let mut index = index_manager::load_and_ensure_global_project()?;
+    //println!("\n{}", t!("delete.warning.destructive_header").red().bold());
+
+    // 1. Prepare the plan.
+    let plan = commons::prepare_unregister_plan(
+        &index,
+        &config,
+        delete_args.recursive,
+        delete_args.reparent_to.clone(),
+        cancellation_token,
+    )?;
+
+    let paths_to_purge: Vec<PathBuf> = plan
+        .uuids_to_remove
+        .iter()
+        .filter_map(|uuid| index.projects.get(uuid).map(|e| e.path.join(AXES_DIR)))
+        .collect();
+
+    // 2. Present the destructive plan.
+    println!("\n{}", t!("delete.warning.destructive_header").red().bold());
+    for line in &plan.summary_lines {
+        println!("  - {}", line);
+    }
+    println!("{}", t!("delete.info.files_to_be_deleted").yellow());
+    for path in &paths_to_purge {
+        println!("    • {}", path.display());
+    }
+
+    // 3. Get MORE confirmation.
+    if !Confirm::with_theme(&ColorfulTheme::default())
+        .with_prompt(t!("delete.prompt.are_you_sure"))
+        .default(false)
+        .interact()?
+    {
+        println!("\n{}", t!("common.info.operation_cancelled"));
+        return Ok(());
+    }
+
+    // 4. EXECUTE PLAN - DESTRUCTIVE PART FIRST
+    let mut purged_count = 0;
+    for path in paths_to_purge {
+        if path.exists() {
+            fs::remove_dir_all(&path)
+                .with_context(|| format!("Failed to delete: {}", path.display()))?;
+            purged_count += 1;
+        }
+    }
+
+    // 5. EXECUTE PLAN - INDEX PART
+    if !delete_args.recursive {
+        let new_parent_uuid = match delete_args.reparent_to {
+            Some(ctx) => context_resolver::resolve_context(&ctx, &index, cancellation_token)?.0,
+            None => index_manager::GLOBAL_PROJECT_UUID,
+        };
+        index_manager::reparent_children(&mut index, config.uuid, new_parent_uuid)?;
+    }
+
+    let removed_count = index_manager::remove_from_index(&mut index, &plan.uuids_to_remove);
+    index_manager::save_global_index(&index)?;
+
+    // 6. Final feedback.
+    println!(
+        "\n{} {}",
+        t!("common.success"),
+        format_args!(
+            t!("delete.success.header"),
+            purged = purged_count,
+            unregistered = removed_count
+        )
+    );
+    for warning in plan.reparent_warnings {
+        println!("  - {}", warning.yellow());
+    }
+    Ok(())
+}
+
+===== cli\handlers\info.rs =====
+// EN: src/cli/handlers/info.rs
+
+use anyhow::{Result, anyhow};
+use colored::*;
+
+use crate::{
+    CancellationToken,
+    constants::{AXES_DIR, PROJECT_CONFIG_FILENAME},
+    models::{Command as ProjectCommand, ResolvedConfig},
+};
+
+use clap::Parser;
+
+use super::commons;
+
+#[derive(Parser, Debug, Default)]
+#[command(no_binary_name = true)]
+struct InfoArgs {
+    /// The project context to display information for.
+    context: Option<String>,
+}
+
+/// The main handler for the `info` command.
+/// Displays detailed information about the resolved project configuration.
+pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+    // 1. Parsear los argumentos específicos de `info`.
+    let info_args = InfoArgs::try_parse_from(&args)?;
+    if args.len() > 1 {
+        return Err(anyhow!(t!("info.error.unexpected_args")));
+    }
+
+    // 2. Resolver la configuración usando el `context` parseado.
+    let config =
+        commons::resolve_config_from_context_or_session(info_args.context, cancellation_token)?;
+
+    // 3. El resto de la lógica de impresión no cambia.
+    print_metadata(&config);
+    print_scripts(&config);
+    print_variables(&config, "vars", t!("info.label.vars"));
+    print_variables(&config, "env", t!("info.label.env"));
+
+    println!("\n---------------------------------");
+    Ok(())
+}
+
+/// Prints the core metadata of the project.
+fn print_metadata(config: &ResolvedConfig) {
+    let config_file_path = config
+        .project_root
+        .join(AXES_DIR)
+        .join(PROJECT_CONFIG_FILENAME);
+
+    println!(
+        "\n--- {} '{}' ---",
+        t!("info.header"),
+        config.qualified_name.yellow()
+    );
+
+    println!("  {:<15} {}", t!("info.label.uuid").blue(), config.uuid);
+    println!(
+        "  {:<15} {}",
+        t!("info.label.root_path").blue(),
+        config.project_root.display()
+    );
+    println!(
+        "  {:<15} {}",
+        t!("info.label.config_file").blue(),
+        config_file_path.display()
+    );
+
+    if let Some(v) = &config.version {
+        println!("  {:<15} {}", t!("info.label.version").blue(), v);
+    }
+    if let Some(d) = &config.description {
+        println!("  {:<15} {}", t!("info.label.description").blue(), d);
+    }
+}
+
+/// Prints the list of available scripts (scripts).
+fn print_scripts(config: &ResolvedConfig) {
+    // TODO: Change `config.scripts` to `config.scripts` in the future.
+    if config.scripts.is_empty() {
+        println!("\n  {}", t!("info.label.no_scripts").dimmed());
+        return;
+    }
+
+    println!("\n  {}:", t!("info.label.available_scripts").blue());
+    let mut cmd_names: Vec<_> = config.scripts.keys().collect();
+    cmd_names.sort();
+
+    for cmd_name in cmd_names {
+        if let Some(command_def) = config.scripts.get(cmd_name) {
+            print!("    - {}", cmd_name.cyan());
+
+            match command_def {
+                ProjectCommand::Extended(ext) => {
+                    if let Some(d) = &ext.desc {
+                        print!(": {}", d.dimmed());
+                    }
+                }
+                ProjectCommand::Platform(pc) => {
+                    let type_info = format!("({})", t!("info.script_type.platform"));
+                    if let Some(d) = &pc.desc {
+                        print!(": {} {}", d.dimmed(), type_info.dimmed());
+                    } else {
+                        print!(" {}", type_info.dimmed());
+                    }
+                }
+                ProjectCommand::Sequence(_) => {
+                    print!(" ({})", t!("info.script_type.sequence").dimmed());
+                }
+                ProjectCommand::Simple(_) => { /* No extra info */ }
+            }
+            println!();
+        }
+    }
+}
+
+/// A generic function to print key-value maps like [vars] and [env].
+fn print_variables(config: &ResolvedConfig, key: &str, title: &str) {
+    let map = match key {
+        "vars" => &config.vars,
+        "env" => &config.env,
+        _ => return,
+    };
+
+    if map.is_empty() {
+        return;
+    }
+
+    println!("\n  {}:", title.blue());
+    let mut sorted_keys: Vec<_> = map.keys().collect();
+    sorted_keys.sort();
+
+    for k in sorted_keys {
+        if let Some(val) = map.get(k) {
+            println!("    - {} = {}", k.cyan(), format_args!("\"{}\"", val));
+        }
+    }
+}
+
+===== cli\handlers\init.rs =====
+// EN: src/cli/handlers/init.rs
+
+use anyhow::{Context, Result, anyhow};
+use clap::Parser;
+use dialoguer::{self, Error as DialoguerError, Input, theme::ColorfulTheme};
+use std::{collections::HashMap, env, fs, io, path::Path};
+use uuid::Uuid;
+
+use super::commons::{self, check_for_cancellation};
+use crate::{
+    CancellationToken,
+    cli::args::InitArgs,
+    constants::{AXES_DIR, PROJECT_CONFIG_FILENAME, PROJECT_REF_FILENAME},
+    core::{context_resolver, index_manager},
+    models::{ProjectConfig, ProjectRef},
+};
+
+use colored::Colorize;
+
+/// The main handler for the `init` command.
+/// Allows creating and registering new projects to axes.
+pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+    // 1. Parse arguments
+    let init_args = InitArgs::try_parse_from(&args)?;
+
+    let target_dir = env::current_dir()?;
+    println!("Initializing project in: {}", target_dir.display());
+
+    // 1.5 Validate target directory
+    let axes_dir = target_dir.join(AXES_DIR);
+    if axes_dir.exists() {
+        return Err(anyhow!(
+            "An '{}' directory already exists at this location.",
+            AXES_DIR
+        ));
+    }
+
+    let is_interactive = !init_args.autosolve;
+
+    // 2. Resolve configuration details
+    let project_name =
+        resolve_project_name(&init_args, &target_dir, is_interactive, cancellation_token)?;
+    check_for_cancellation(cancellation_token)?;
+    let parent_uuid = resolve_parent_project(&init_args, is_interactive, cancellation_token)?;
+    check_for_cancellation(cancellation_token)?;
+
+    // --- Interactive step for version and description ---
+    let version = resolve_project_version(&init_args, is_interactive, cancellation_token)?;
+    check_for_cancellation(cancellation_token)?;
+    let description = resolve_project_description(
+        &init_args,
+        &project_name,
+        is_interactive,
+        cancellation_token,
+    )?;
+    check_for_cancellation(cancellation_token)?;
+
+    // 3. Build the project configuration object
+    let mut project_config = ProjectConfig::new_for_init(&project_name, &version, &description);
+
+    // Apply overrides from flags (`--env`, `--var`) if they exist.
+    let env_vars = parse_key_value_pairs(&init_args.env)?;
+    project_config.env.extend(env_vars);
+
+    let vars = parse_key_value_pairs(&init_args.var)?;
+    project_config.vars.extend(vars);
+
+    // 4. Perform filesystem and index operations
+    let mut index = index_manager::load_and_ensure_global_project()?;
+
+    let (new_uuid, _) = index_manager::add_project_to_index(
+        &mut index,
+        project_name.clone(), // `project_name` is the validated name
+        target_dir.clone(),
+        Some(parent_uuid),
+    )
+    .with_context(
+        || "Could not add project to global index. A sibling with the same name might exist.",
+    )?;
+
+    // 4.2. Write local files (`.axes/axes.toml`, `.axes/project_ref.bin`)
+    fs::create_dir_all(&axes_dir)?;
+
+    let config_path = axes_dir.join(PROJECT_CONFIG_FILENAME);
+    let toml_string = toml::to_string_pretty(&project_config)?;
+    fs::write(&config_path, toml_string)?;
+
+    let project_ref = ProjectRef {
+        self_uuid: new_uuid,
+        parent_uuid: Some(parent_uuid),
+        name: project_name.clone(),
+    };
+    index_manager::write_project_ref(&target_dir, &project_ref).with_context(|| {
+        format!(
+            "Could not write project reference file ('{}').",
+            PROJECT_REF_FILENAME
+        )
+    })?;
+
+    // 4.3. Save updated global index
+    index_manager::save_global_index(&index).with_context(|| t!("error.saving_global_index"))?;
+
+    println!("\n{}", t!("common.success"));
+    println!(
+        "  Project '{}' created with UUID: {}",
+        project_name, new_uuid
+    );
+    println!("  Configuration created at: {}", config_path.display());
+    println!("  Successfully registered in global index.");
+
+    Ok(())
+}
+
+// --- Funciones Auxiliares ---
+
+/// Resuelve el nombre del proyecto, ya sea desde flags, el directorio, o interactivamente.
+fn resolve_project_name(
+    args: &InitArgs,
+    target_dir: &Path,
+    is_interactive: bool,
+    cancellation_token: &CancellationToken,
+) -> Result<String> {
+    if let Some(name) = &args.name {
+        // If name is provided via flag, validate it. Failure is a hard error.
+        return commons::validate_project_name(name);
+    }
+
+    let default_name = target_dir
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    if is_interactive {
+        // In interactive mode, loop until a valid name is provided.
+        loop {
+            let input = match Input::with_theme(&ColorfulTheme::default())
+                .with_prompt("Project name")
+                .default(default_name.clone())
+                .interact_text()
+            {
+                Ok(value) => {
+                    check_for_cancellation(cancellation_token)?;
+                    value
+                }
+                Err(DialoguerError::IO(io_err)) if io_err.kind() == io::ErrorKind::Interrupted => {
+                    return Err(anyhow!(t!("common.error.operation_cancelled")));
+                }
+                Err(e) => return Err(e.into()), // Otro error (I/O, etc.).
+            };
+
+            check_for_cancellation(cancellation_token)?;
+
+            match commons::validate_project_name(&input) {
+                Ok(name) => return Ok(name),
+                Err(e) => {
+                    // Print the validation error and prompt the user to try again.
+                    println!("{}", format!("Error: {}", e).red());
+                    continue;
+                }
+            }
+        }
+    } else {
+        // In non-interactive mode, use the default name and validate it.
+        commons::validate_project_name(&default_name)
+    }
+}
+
+/// Resuelve el UUID del padre, desde flags, interactivamente, o usando 'global' como default.
+fn resolve_parent_project(
+    args: &InitArgs,
+    is_interactive: bool,
+    cancellation_token: &CancellationToken,
+) -> Result<Uuid> {
+    let index = index_manager::load_and_ensure_global_project()?;
+
+    if let Some(parent_context) = &args.parent {
+        println!("Resolving parent '{}'...", parent_context);
+        let (uuid, qualified_name) =
+            context_resolver::resolve_context(parent_context, &index, cancellation_token)?;
+        println!(
+            "Parent project '{}' found (UUID: {}).",
+            qualified_name, uuid
+        );
+        return Ok(uuid);
+    }
+
+    if is_interactive {
+        // NOTE: Uses the new interactive tree selector.
+        commons::choose_parent_interactive(&index, cancellation_token)
+    } else {
+        println!("No parent specified. Linking to 'global' project.");
+        Ok(index_manager::GLOBAL_PROJECT_UUID)
+    }
+}
+
+fn resolve_project_version(
+    args: &InitArgs,
+    is_interactive: bool,
+    cancellation_token: &CancellationToken,
+) -> Result<String> {
+    if let Some(version) = &args.version {
+        return Ok(version.clone());
+    }
+    if is_interactive {
+        match Input::with_theme(&ColorfulTheme::default())
+            .with_prompt("Version")
+            .default("0.1.0".to_string())
+            .interact_text()
+            .map_err(|e| anyhow!(e))
+        {
+            Ok(i) => {
+                check_for_cancellation(cancellation_token)?;
+                Ok(i)
+            }
+            Err(e) => Err(e),
+        }
+    } else {
+        Ok("0.1.0".to_string())
+    }
+}
+
+fn resolve_project_description(
+    args: &InitArgs,
+    name: &str,
+    is_interactive: bool,
+    cancellation_token: &CancellationToken,
+) -> Result<String> {
+    if let Some(desc) = &args.description {
+        return Ok(desc.clone());
+    }
+    let default_desc = format!("A new project named '{}', managed by `axes`.", name);
+    if is_interactive {
+        match Input::with_theme(&ColorfulTheme::default())
+            .with_prompt("Description")
+            .default(default_desc)
+            .interact_text()
+            .map_err(|e| anyhow!(e))
+        {
+            Ok(i) => {
+                check_for_cancellation(cancellation_token)?;
+                Ok(i)
+            }
+            Err(e) => Err(e),
+        }
+    } else {
+        Ok(default_desc)
+    }
+}
+
+/// Parses a vector of "KEY=VALUE" strings into a HashMap.
+fn parse_key_value_pairs(pairs: &[String]) -> Result<HashMap<String, String>> {
+    let mut map = HashMap::new();
+    for pair in pairs {
+        match pair.split_once('=') {
+            Some((key, value)) => {
+                map.insert(key.trim().to_string(), value.trim().to_string());
+            }
+            None => {
+                return Err(anyhow!(
+                    "Invalid format for key-value pair: '{}'. Expected 'KEY=VALUE'.",
+                    pair
+                ));
+            }
+        }
+    }
+    Ok(map)
+}
+
+===== cli\handlers\link.rs =====
+// EN: src/cli/handlers/link.rs
+
+use anyhow::{Context, Result, anyhow};
+
+use super::commons;
+use crate::{
+    CancellationToken,
+    core::{context_resolver, index_manager},
+};
+
+use clap::Parser;
+
+#[derive(Parser, Debug, Default)]
+#[command(no_binary_name = true)]
+struct LinkArgs {
+    /// The project context to link.
+    context: String,
+    /// The new parent project's context.
+    new_parent: String,
+}
+
+pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+    // 1. Resolve the project to be moved. This requires a context.
+    let link_args = LinkArgs::try_parse_from(&args)?;
+    let config = commons::resolve_config_from_context_or_session(
+        Some(link_args.context),
+        cancellation_token,
+    )?;
+
+    // 2. Get the new parent's context from the arguments.
+    let new_parent_context = link_args.new_parent.trim();
+
+    if new_parent_context.is_empty() {
+        return Err(anyhow!(t!("link.error.empty_parent_context")));
+    }
+
+    println!(
+        t!("link.info.attempting"),
+        name = config.qualified_name,
+        new_parent = new_parent_context
+    );
+
+    // 3. Load the index and resolve the new parent's UUID.
+    let mut index = index_manager::load_and_ensure_global_project()?;
+    let (new_parent_uuid, new_parent_qualified_name) =
+        context_resolver::resolve_context(new_parent_context, &index, cancellation_token)
+            .with_context(|| {
+                anyhow!(
+                    t!("link.error.cannot_resolve_parent"),
+                    parent = new_parent_context
+                )
+            })?;
+
+    // 4. Perform the link operation, which includes all critical validations.
+    index_manager::link_project(&mut index, config.uuid, new_parent_uuid)
+        .with_context(|| anyhow!(t!("link.error.link_failed"), name = config.qualified_name))?;
+
+    // 5. Save the updated global index.
+    index_manager::save_global_index(&index).with_context(|| t!("error.saving_global_index"))?;
+
+    // 6. Update the local project reference file (`project_ref.bin`).
+    // This is a critical step for self-healing and consistency.
+    let mut project_ref =
+        index_manager::get_or_create_project_ref(&config.project_root, config.uuid, &index)
+            .with_context(|| t!("error.local_ref_failed"))?;
+
+    project_ref.parent_uuid = Some(new_parent_uuid);
+    if let Err(e) = index_manager::write_project_ref(&config.project_root, &project_ref) {
+        // This is not a fatal error, but the user should be warned.
+        eprintln!(
+            "\n{}",
+            anyhow!(t!("link.warning.local_ref_update_failed"), error = e)
+        );
+    }
+
+    // 7. Provide clear feedback to the user.
+    println!("\n{}", t!("common.success"));
+    println!(
+        "  {}",
+        // NOTE: The qualified name of the *moved project* will change.
+        // We can't easily show the new name without rebuilding it, but we can
+        // show what happened in a clear way.
+        format_args!(
+            t!("link.success.header"),
+            old_name = config.qualified_name,
+            new_parent = new_parent_qualified_name
+        )
+    );
+    println!("  {}", t!("common.info.caches_will_regenerate"));
+
+    Ok(())
+}
+
+===== cli\handlers\mod.rs =====
+// EN: src/cli/handlers/mod.rs
+
+// This module will contain the logic for each CLI action.
+
+pub mod alias;
+pub mod commons;
+pub mod delete;
+pub mod info;
+pub mod init;
+pub mod link;
+pub mod open;
+pub mod register;
+pub mod rename;
+pub mod run;
+pub mod start;
+pub mod tree;
+pub mod unregister;
+
+===== cli\handlers\open.rs =====
+// EN: src/cli/handlers/open.rs
+
+use anyhow::{Result, anyhow};
+use colored::*;
+
+use crate::CancellationToken;
+use crate::core::interpolator::Interpolator;
+use crate::system::executor;
+
+use clap::Parser;
+
+use super::commons;
+
+#[derive(Parser, Debug, Default)]
+#[command(no_binary_name = true)]
+struct OpenArgs {
+    /// The project context to open.
+    context: String,
+    /// The application key from [options.open_with] to use.
+    app_key: Option<String>,
+}
+
+/// The main handler for the `open` command.
+pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+    // 1. Validate arguments: `open` accepts zero or one argument.
+    let open_args = OpenArgs::try_parse_from(&args)?;
+
+    // 2. Resolve the project configuration, which is mandatory.
+    let config = commons::resolve_config_from_context_or_session(
+        Some(open_args.context),
+        cancellation_token,
+    )?;
+
+    // 3. Determine which command template to use based on the provided key or the default.
+    let command_template = match open_args.app_key.as_deref() {
+        Some(key) => {
+            // User provided a specific key, e.g., "vsc"
+            if key == "default" {
+                return Err(anyhow!(t!("open.error.default_is_reserved")));
+            }
+            config
+                .options
+                .open_with
+                .get(key)
+                .ok_or_else(|| anyhow!(t!("open.error.action_not_found"), key = key))?
+                .clone()
+        }
+        None => {
+            // No key provided, so we must use the default.
+            // First, get the *name* of the default key.
+            let default_key_name = config
+                .options
+                .open_with
+                .get("default")
+                .ok_or_else(|| anyhow!(t!("open.error.no_app_no_default")))?;
+
+            // Then, use that name to get the actual command template.
+            config
+                .options
+                .open_with
+                .get(default_key_name)
+                .ok_or_else(|| {
+                    anyhow!(t!("open.error.default_key_invalid"), key = default_key_name)
+                })?
+                .clone()
+        }
+    };
+
+    // 4. Interpolate the command template using the new interpolator.
+    let mut interpolator = Interpolator::new(&config);
+    let final_command = interpolator.expand_string(&command_template, cancellation_token)?;
+
+    if final_command.trim().is_empty() {
+        println!(
+            "{}",
+            "Warning: The 'open' command is empty after expansion. Nothing to do.".yellow()
+        );
+        return Ok(());
+    }
+
+    // 5. Execute the final command.
+    println!("\n> {}", final_command.green());
+    executor::execute_command(
+        &final_command,
+        &config.project_root,
+        &config.env,
+        cancellation_token,
+    )?;
+
+    Ok(())
+}
+
+===== cli\handlers\register.rs =====
+// EN: src/cli/handlers/register.rs
+
+use anyhow::{Context, Result, anyhow};
+use clap::Parser;
+use std::{env, path::PathBuf};
+
+use crate::{
+    CancellationToken,
+    cli::args::RegisterArgs,
+    core::{
+        graph_display::{self, DisplayOptions},
+        index_manager,
+        onboarding_manager::{self, OnboardingOptions},
+    },
+};
+
+pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+    if env::var("AXES_PROJECT_UUID").is_ok() {
+        return Err(anyhow!(
+            "'register' command is not available inside a project session."
+        ));
+    }
+
+    let register_args = RegisterArgs::try_parse_from(&args)?;
+
+    let initial_path = match register_args.path {
+        Some(p) => PathBuf::from(p),
+        None => env::current_dir()?,
+    };
+
+    // Robustness #2: Canonicalize and clean the path from the start.
+    let path_to_register = dunce::canonicalize(&initial_path).with_context(|| {
+        format!(
+            "Could not resolve the absolute path for '{}'",
+            initial_path.display()
+        )
+    })?;
+
+    if !path_to_register.exists() {
+        return Err(anyhow!(
+            "Specified path does not exist: {}",
+            path_to_register.display()
+        ));
+    }
+
+    let mut index = index_manager::load_and_ensure_global_project()?;
+
+    // Robustness #1: Keep a copy of the index *before* modification to compare.
+    let index_before = index.clone();
+
+    let options = OnboardingOptions {
+        autosolve: register_args.autosolve,
+        suggested_parent_uuid: None,
+    };
+
+    onboarding_manager::register_project(
+        &path_to_register,
+        &mut index,
+        &options,
+        cancellation_token,
+    )
+    .with_context(|| {
+        anyhow!(
+            t!("register.error.failed"),
+            path = path_to_register.display()
+        )
+    })?;
+
+    // Save changes to disk
+    index_manager::save_global_index(&index)?;
+
+    // Robustness #4: Provide a meaningful summary of the operation.
+    let projects_registered_count = index.projects.len() - index_before.projects.len();
+    if projects_registered_count > 0 {
+        println!(
+            "\n✔ {} project(s) successfully registered.",
+            projects_registered_count
+        );
+
+        if let Some((main_uuid, _)) = index
+            .projects
+            .iter()
+            .find(|(_, entry)| entry.path == path_to_register)
+        {
+            println!("\nProject structure registered:");
+
+            // NOTE: CORRECTION. Provide a default DisplayOptions.
+            // We don't need to show full details here, so default options are fine.
+            let display_options = DisplayOptions {
+                show_paths: false,
+                show_uuids: false,
+            };
+            graph_display::display_project_tree(&index, Some(*main_uuid), &display_options);
+        }
+    } else {
+        println!("\nNo new projects were registered. The project may have already been indexed.");
+    }
+
+    Ok(())
+}
+
+===== cli\handlers\rename.rs =====
+// EN: src/cli/handlers/rename.rs
+
+use anyhow::{Context, Result, anyhow};
+use colored::*;
+use dialoguer::{Confirm, theme::ColorfulTheme};
+
+use super::commons;
+use crate::{CancellationToken, core::index_manager};
+
+use clap::Parser;
+
+#[derive(Parser, Debug, Default)]
+#[command(no_binary_name = true)]
+struct RenameArgs {
+    /// The project context to rename.
+    context: String,
+    /// The new name for the project.
+    new_name: String,
+}
+
+/// The main handler for the `rename` command.
+pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+    // 1. Parse args.
+    let rename_args = RenameArgs::try_parse_from(&args)?;
+
+    // 2. Solve config.
+    let config = commons::resolve_config_from_context_or_session(
+        Some(rename_args.context),
+        cancellation_token,
+    )?;
+    let old_qualified_name = config.qualified_name.clone();
+
+    let simple_name = config
+        .qualified_name
+        .split('/')
+        .next_back()
+        .unwrap_or(&config.qualified_name);
+
+    let new_name = commons::validate_project_name(&rename_args.new_name)?;
+
+    if config.uuid == index_manager::GLOBAL_PROJECT_UUID {
+        println!(
+            "{}",
+            t!("rename.warning.renaming_global_header").yellow().bold()
+        );
+        println!("  - {}", t!("rename.warning.renaming_global_docs"));
+        println!("  - {}", t!("rename.warning.renaming_global_community"));
+
+        if !Confirm::with_theme(&ColorfulTheme::default())
+            .with_prompt(t!("common.prompt.are_you_sure"))
+            .default(false)
+            .interact()?
+        {
+            println!("\n{}", t!("common.info.operation_cancelled"));
+            return Ok(());
+        }
+    }
+
+    println!(
+        t!("rename.info.renaming"),
+        old_name = simple_name.yellow(),
+        new_name = new_name.cyan()
+    );
+
+    let mut index = index_manager::load_and_ensure_global_project()?;
+
+    index_manager::rename_project(&mut index, config.uuid, &new_name)
+        .with_context(|| anyhow!(t!("rename.error.rename_failed"), name = old_qualified_name))?;
+
+    index_manager::save_global_index(&index).with_context(|| t!("error.saving_global_index"))?;
+
+    let mut project_ref =
+        index_manager::get_or_create_project_ref(&config.project_root, config.uuid, &index)
+            .with_context(|| t!("error.local_ref_failed"))?;
+
+    project_ref.name = new_name.clone();
+    if let Err(e) = index_manager::write_project_ref(&config.project_root, &project_ref) {
+        eprintln!(
+            "\n{}",
+            format!(
+                t!("rename.warning.local_ref_update_failed"),
+                path = config.project_root.display(),
+                error = e
+            )
+            .yellow()
+        );
+    }
+
+    println!("\n{}", t!("common.success"));
+    println!(
+        "  {}",
+        format_args!(
+            t!("rename.success.header"),
+            old_name = simple_name,
+            new_name = new_name
+        )
+    );
+    println!("  {}", t!("common.info.caches_will_regenerate").dimmed());
+
+    Ok(())
+}
+
+===== cli\handlers\run.rs =====
+// EN: src/cli/handlers/run.rs
+
+use anyhow::{Context, Result, anyhow};
+use colored::*;
+use rayon::prelude::*;
+
+use crate::{
+    CancellationToken,
+    core::interpolator::Interpolator,
+    models::{Command as ProjectCommand, ResolvedConfig},
+    system::executor,
+};
+
+use clap::Parser;
+
+use super::commons;
+
+#[derive(Parser, Debug, Default)]
+#[command(no_binary_name = true)]
+struct RunArgs {
+    /// The project context to run the script in.
+    context: String,
+    /// The name of the script to run.
+    script: String,
+    /// Parameters to pass to the script.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    params: Vec<String>,
+}
+
+/// Main entry point for the 'run' command.
+pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+    // 1. Parse args.
+    let run_args = RunArgs::try_parse_from(&args)?;
+
+    // 2. Solve config.
+    let config = commons::resolve_config_from_context_or_session(
+        Some(run_args.context),
+        cancellation_token,
+    )?;
+
+    // 3. Parse script name and parameters from arguments.
+    let script_key = &run_args.script;
+    let params = &run_args.params;
+
+    // 4. Create the top-level executor for this run.
+    let executor = CommandExecutor::new(config, cancellation_token);
+
+    // 5. Start the execution chain.
+    println!(
+        "\n▶️  Running script '{}' for project '{}'...",
+        script_key.cyan(),
+        executor.config.qualified_name.yellow()
+    );
+    executor.run_script(script_key, params)?;
+
+    println!(
+        "\n✅ {} Script '{}' completed successfully.",
+        "Success:".green().bold(),
+        script_key.cyan()
+    );
+    Ok(())
+}
+
+/// A struct to hold the state and configuration for a single `axes run` invocation.
+struct CommandExecutor<'a> {
+    config: ResolvedConfig,
+    cancellation_token: &'a CancellationToken,
+}
+
+impl<'a> CommandExecutor<'a> {
+    fn new(config: ResolvedConfig, cancellation_token: &'a CancellationToken) -> Self {
+        Self {
+            config,
+            cancellation_token,
+        }
+    }
+
+    fn run_script(&self, script_name: &str, params: &[String]) -> Result<()> {
+        let mut interpolator = Interpolator::new(&self.config);
+        self.execute_internal_script(script_name, params, &mut interpolator)
+    }
+
+    fn execute_internal_script(
+        &self,
+        script_name: &str,
+        cli_params: &[String],
+        interpolator: &mut Interpolator,
+    ) -> Result<()> {
+        let command_def = self
+            .config
+            .scripts
+            .get(script_name)
+            .ok_or_else(|| anyhow!(t!("run.error.script_not_found"), script = script_name))?;
+
+        let command_list = self.get_command_list_from_def(command_def, script_name)?;
+
+        // NOTE: Pass the cancellation token down.
+        self.process_command_list(&command_list, cli_params, interpolator)
+    }
+
+    fn process_command_list(
+        &self,
+        command_list: &[String],
+        cli_params: &[String],
+        interpolator: &mut Interpolator,
+    ) -> Result<()> {
+        let mut parallel_batch = Vec::new();
+
+        for command_template in command_list {
+            commons::check_for_cancellation(self.cancellation_token)?;
+            let is_parallel = command_template.starts_with('>');
+            let template = if is_parallel {
+                command_template[1..].trim()
+            } else {
+                command_template.as_str()
+            };
+
+            if is_parallel {
+                parallel_batch.push(template.to_string());
+            } else {
+                if !parallel_batch.is_empty() {
+                    self.execute_parallel_batch(&parallel_batch, cli_params, interpolator)?;
+                    parallel_batch.clear();
+                }
+                // NOTE: Pass the cancellation token down.
+                self.execute_template(template, cli_params, interpolator)?;
+            }
+        }
+
+        if !parallel_batch.is_empty() {
+            self.execute_parallel_batch(&parallel_batch, cli_params, interpolator)?;
+        }
+
+        Ok(())
+    }
+
+    fn execute_parallel_batch(
+        &self,
+        batch: &[String],
+        cli_params: &[String],
+        interpolator: &mut Interpolator,
+    ) -> Result<()> {
+        println!(
+            "{}",
+            format!("⚡ Running {} scripts in parallel...", batch.len()).blue()
+        );
+
+        let results: Result<Vec<()>> = batch
+            .par_iter()
+            .map(|template| {
+                let mut task_interpolator = interpolator.clone();
+                // NOTE: Pass the cancellation token to each parallel task.
+                self.execute_template(template, cli_params, &mut task_interpolator)
+            })
+            .collect();
+
+        results.with_context(|| "A command in the parallel batch failed.")?;
+        println!("{}", "⚡ Parallel batch completed.".to_string().blue());
+        Ok(())
+    }
+
+    fn execute_template(
+        &self,
+        template: &str,
+        cli_params: &[String],
+        interpolator: &mut Interpolator,
+    ) -> Result<()> {
+        // NOTE: Corrected regex to handle whitespace correctly
+        let re = regex::Regex::new(r"^\s*<axes::(scripts|scripts)::([^>]+)>\s*$").unwrap();
+        if let Some(caps) = re.captures(template) {
+            let script_name = &caps[2];
+            return self.execute_internal_script(script_name, cli_params, interpolator);
+        }
+
+        let expanded_command = interpolator.expand_string(template, self.cancellation_token)?;
+        let final_command = if !cli_params.is_empty() {
+            format!("{} {}", expanded_command, cli_params.join(" "))
+        } else {
+            expanded_command
+        };
+
+        let trimmed_command = final_command.trim();
+        if trimmed_command.is_empty() {
+            return Ok(());
+        }
+
+        println!("\n> {}", trimmed_command.green());
+        // NOTE: Pass the cancellation token to the external command executor.
+        executor::execute_command(
+            trimmed_command,
+            &self.config.project_root,
+            &self.config.env,
+            self.cancellation_token,
+        )?;
+        Ok(())
+    }
+
+    /// Helper to extract the initial list of command strings from a `ProjectCommand` enum.
+    fn get_command_list_from_def(
+        &self,
+        command_def: &ProjectCommand,
+        script_key: &str,
+    ) -> Result<Vec<String>> {
+        let runnable = match command_def {
+            ProjectCommand::Simple(s) => return Ok(vec![s.clone()]),
+            ProjectCommand::Sequence(s) => return Ok(s.clone()),
+            ProjectCommand::Extended(ext) => &ext.run,
+            ProjectCommand::Platform(pc) => {
+                let os_specific = if cfg!(target_os = "windows") {
+                    pc.windows.as_ref()
+                } else if cfg!(target_os = "linux") {
+                    pc.linux.as_ref()
+                } else if cfg!(target_os = "macos") {
+                    pc.macos.as_ref()
+                } else {
+                    None
+                };
+
+                os_specific.or(pc.default.as_ref()).ok_or_else(|| {
+                    anyhow!(
+                        "Script '{}' has no platform implementation for the current OS and no 'default'.",
+                        script_key
+                    )
+                })?
+            }
+        };
+
+        match runnable {
+            crate::models::Runnable::Single(s) => Ok(vec![s.clone()]),
+            crate::models::Runnable::Sequence(s) => Ok(s.clone()),
+        }
+    }
+}
+
+===== cli\handlers\start.rs =====
+// EN: src/cli/handlers/start.rs
+
+use anyhow::{Context, Result, anyhow};
+use std::env;
+
+use super::commons;
+use crate::{CancellationToken, system::shell};
+
+use clap::Parser;
+
+#[derive(Parser, Debug, Default)]
+#[command(no_binary_name = true)]
+struct StartArgs {
+    /// The project context to start a session in.
+    context: Option<String>,
+}
+
+pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+    // 1. Parse args.
+    let start_args = StartArgs::try_parse_from(&args)?;
+
+    // 2. Robustness: Prevent nested sessions.
+    if env::var("AXES_PROJECT_UUID").is_ok() && start_args.context.is_some() {
+        return Err(anyhow!(
+            "Cannot start a nested session. Please `exit` the current session before starting a new one."
+        ));
+    }
+
+    // 3. Resolve the project configuration. This requires a context.
+    let config =
+        commons::resolve_config_from_context_or_session(start_args.context, cancellation_token)?;
+
+    // 4. Provide feedback to the user before launching the shell.
+    println!(
+        t!("start.info.starting_session"),
+        name = config.qualified_name
+    );
+
+    // 5. Delegate the core logic to the shell module.
+    shell::launch_interactive_shell(&config, cancellation_token).with_context(|| {
+        anyhow!(
+            t!("start.error.session_failed"),
+            name = config.qualified_name
+        )
+    })
+}
+
+===== cli\handlers\tree.rs =====
+// EN: src/cli/handlers/tree.rs
+
+use anyhow::Result;
+use clap::Parser;
+
+use crate::{
+    CancellationToken,
+    core::{
+        context_resolver,
+        graph_display::{self, DisplayOptions},
+        index_manager,
+    },
+};
+
+#[derive(Parser, Debug, Default)]
+#[command(no_binary_name = true)]
+struct TreeArgs {
+    /// The project context to start the tree from. Defaults to the root.
+    context: Option<String>,
+
+    /// Show the full absolute paths for each project.
+    #[arg(long, short)]
+    paths: bool,
+
+    /// Show the UUID for each project.
+    #[arg(long, short)]
+    uuids: bool,
+
+    /// Show all available information (paths and UUIDs).
+    #[arg(long)]
+    all: bool,
+}
+
+pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+    let tree_args = TreeArgs::try_parse_from(&args)?;
+
+    // 2. Load the index.
+    let index = index_manager::load_and_ensure_global_project()?;
+
+    // 3. Determine the starting node.
+    let (start_node_uuid, header) = if let Some(context_str) = tree_args.context {
+        let (uuid, qualified_name) =
+            context_resolver::resolve_context(&context_str, &index, cancellation_token)?;
+        let header = format!(t!("tree.header.from_project"), name = qualified_name);
+        (Some(uuid), header)
+    } else {
+        (None, t!("tree.header.all_projects").to_string())
+    };
+
+    // 4. Set display options.
+    let display_options = DisplayOptions {
+        show_paths: tree_args.paths || tree_args.all,
+        show_uuids: tree_args.uuids || tree_args.all,
+    };
+
+    // 5. Delegate to the display module.
+    println!("\n{}", header);
+    graph_display::display_project_tree(&index, start_node_uuid, &display_options);
+
+    Ok(())
+}
+
+===== cli\handlers\unregister.rs =====
+// EN: src/cli/handlers/unregister.rs
+
+use anyhow::{Result, anyhow};
+use clap::Parser;
+use colored::*;
+use dialoguer::{Confirm, theme::ColorfulTheme};
+
+use super::commons;
+use crate::{
+    CancellationToken,
+    core::{context_resolver, index_manager},
+};
+
+#[derive(Parser, Debug, Default)]
+#[command(no_binary_name = true)]
+struct UnregisterArgs {
+    /// The project context to unregister.
+    context: String,
+
+    /// Unregisters the project and all its descendants.
+    #[arg(long)]
+    recursive: bool,
+
+    /// Reparents direct children to a new project instead of unregistering them.
+    #[arg(long)]
+    reparent_to: Option<String>,
+}
+
+pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+    let unregister_args = UnregisterArgs::try_parse_from(&args)?;
+    let config = commons::resolve_config_from_context_or_session(
+        Some(unregister_args.context),
+        cancellation_token,
+    )?;
+    let mut index = index_manager::load_and_ensure_global_project()?;
+
+    if config.uuid == index_manager::GLOBAL_PROJECT_UUID {
+        return Err(anyhow!(t!("unregister.error.cannot_unregister_global")));
+    }
+
+    // 1. Prepare the operational plan. This is a dry run.
+    let plan = commons::prepare_unregister_plan(
+        &index,
+        &config,
+        unregister_args.recursive,
+        unregister_args.reparent_to.clone(),
+        cancellation_token,
+    )?;
+
+    // 2. Present the plan to the user.
+    println!("\n{}", t!("unregister.info.header").yellow().bold());
+    for line in &plan.summary_lines {
+        println!("  - {}", line);
+    }
+    for uuid in &plan.uuids_to_remove {
+        if let Some(entry) = index.projects.get(uuid) {
+            println!("    • {} ({})", entry.name.cyan(), entry.path.display());
+        }
+    }
+
+    // 3. Get confirmation.
+    if !Confirm::with_theme(&ColorfulTheme::default())
+        .with_prompt(t!("common.prompt.continue"))
+        .default(false)
+        .interact()?
+    {
+        println!("\n{}", t!("common.info.operation_cancelled"));
+        return Ok(());
+    }
+
+    // 4. Execute the plan.
+    if !unregister_args.recursive {
+        let new_parent_uuid = match unregister_args.reparent_to {
+            Some(ctx) => context_resolver::resolve_context(&ctx, &index, cancellation_token)?.0,
+            None => index_manager::GLOBAL_PROJECT_UUID,
+        };
+        // The real reparenting happens here, with automatic renames.
+        index_manager::reparent_children(&mut index, config.uuid, new_parent_uuid)?;
+    }
+
+    let removed_count = index_manager::remove_from_index(&mut index, &plan.uuids_to_remove);
+    index_manager::save_global_index(&index)?;
+
+    // 5. Final feedback.
+    println!(
+        "\n{} {}",
+        t!("common.success"),
+        format_args!(t!("unregister.success.header"), count = removed_count)
+    );
+    for warning in plan.reparent_warnings {
+        println!("  - {}", warning.yellow());
+    }
+    Ok(())
+}
+
+===== cli\mod.rs =====
+// EN: src/cli/mod.rs
+use clap::Parser;
+
+pub mod args;
+pub mod handlers;
+
+/// axes: A holistic and hierarchical development workflow orchestrator.
+///
+/// `axes` operates in two main modes:
+///
+/// 1. SCRIPT MODE (default):
+///    The syntax is flexible. `axes` determines if an argument is an action or a
+///    project context based on a list of known system actions.
+///
+///    Valid formats:
+///    - `axes <context> <action> [args...]` (e.g., `axes my-app/api info`)
+///    - `axes <action> <context> [args...]` (e.g., `axes info my-app/api`)
+///
+///    Shortcuts:
+///    - `axes <context>` -> expands to `axes <context> start`
+///    - `axes <context> <script>` -> expands to `axes <context> run <script>`
+///
+/// 2. SESSION MODE (when `AXES_PROJECT_UUID` is defined):
+///    The syntax is strict, as the project context is implicit.
+///
+///    Valid format:
+///    - `axes <action> [args...]` (e.g., `axes tree`)
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+#[command(disable_help_subcommand = true)]
+pub struct Cli {
+    /// The first positional argument.
+    ///
+    /// Its role depends on the mode and other arguments:
+    /// - In SCRIPT MODE, it can be a project context, a system action,
+    ///   or a global action.
+    /// - In SESSION MODE, it is ALWAYS an action.
+    /// - If omitted, an attempt will be made to launch the TUI.
+    pub context_or_action: Option<String>,
+
+    /// The second positional argument.
+    ///
+    /// Its role depends on the first argument:
+    /// - If the first argument was an ACTION, this is the CONTEXT.
+    /// - If the first argument was a CONTEXT, this can be an ACTION or the
+    ///   name of a SCRIPT.
+    /// - For global actions (`init`, `register`, `alias`), this is the first
+    ///   argument for that action (e.g., the name of an alias).
+    pub action_or_context_or_arg: Option<String>,
+
+    /// All remaining arguments.
+    ///
+    /// These are passed directly to the action being executed. For example, the
+    /// parameters for a `run` script, the new name for `rename`, or the
+    /// flags for `delete`.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub args: Vec<String>,
+}
+
+===== constants.rs =====
+// src/constants.rs
+
+/// The name of the directory containing axes configuration for a project.
+pub const AXES_DIR: &str = ".axes";
+
+/// The name of the main configuration file for a project (inside .axes/).
+pub const PROJECT_CONFIG_FILENAME: &str = "axes.toml";
+
+/// The name of the cache file for a project's resolved configuration (inside .axes/).
+pub const CONFIG_CACHE_FILENAME: &str = "config.cache.bin";
+
+/// The name of the cache file for a project's children (inside .axes/).
+pub const CHILDREN_CACHE_FILENAME: &str = "children.cache.bin";
+
+/// The name of the global index file (in ~/.config/axes/).
+pub const GLOBAL_INDEX_FILENAME: &str = "index.bin";
+
+/// The name of the file containing a project's identity and references.
+pub const PROJECT_REF_FILENAME: &str = "project_ref.bin";
+
+pub const LAST_USED_CACHE_FILENAME: &str = "last_used.cache.bin";
+
+===== core\config_resolver.rs =====
+// src/core/config_resolver.rs
+
+use crate::constants::{AXES_DIR, CONFIG_CACHE_FILENAME, PROJECT_CONFIG_FILENAME};
+use crate::models::{
+    GlobalIndex, IndexEntry, OptionsConfig, ProjectConfig, ResolvedConfig, SerializableConfigCache,
+};
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+use thiserror::Error;
+use uuid::Uuid;
+
+use bincode::error::DecodeError;
+
+#[derive(Error, Debug)]
+pub enum ResolverError {
+    #[error("Filesystem Error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Error al parsear TOML en '{path}': {source}")]
+    TomlParse {
+        path: String,
+        #[source]
+        source: toml::de::Error,
+    },
+    #[error("Error decoding cache: {0}")]
+    BincodeDecode(#[from] bincode::error::DecodeError),
+    #[error("Error encoding cache: {0}")]
+    BincodeEncode(#[from] bincode::error::EncodeError),
+    #[error("Error de rutas: {0}")]
+    Path(#[from] crate::core::paths::PathError),
+    #[error("Project with UUID '{uuid}' referenced in index not found.")]
+    UuidNotFoundInIndex { uuid: Uuid },
+    #[error("Configuration file for project '{name}' not found at '{path}'.")]
+    ConfigFileNotFound { name: String, path: String },
+}
+
+type ResolverResult<T> = Result<T, ResolverError>;
+
+// --- MAIN PUBLIC FUNCTION ---
+
+pub fn resolve_config_for_uuid(
+    target_uuid: Uuid,
+    qualified_name: String,
+    index: &GlobalIndex,
+) -> ResolverResult<ResolvedConfig> {
+    let leaf_entry = index
+        .projects
+        .get(&target_uuid)
+        .ok_or(ResolverError::UuidNotFoundInIndex { uuid: target_uuid })?;
+
+    let config_cache_path = leaf_entry.path.join(AXES_DIR).join(CONFIG_CACHE_FILENAME);
+
+    if let Some(cached_config) =
+        read_and_validate_config_cache(&config_cache_path, &qualified_name)?
+    {
+        log::debug!("Valid configuration cache found for '{}'.", qualified_name);
+        return Ok(cached_config);
+    }
+    log::debug!(
+        "Invalid or no config cache found. Resolving '{}'...",
+        qualified_name
+    );
+
+    let inheritance_chain = build_inheritance_chain(target_uuid, index)?;
+
+    let dependencies = inheritance_chain
+        .iter()
+        .map(|(entry, _)| {
+            let config_path = entry.path.join(AXES_DIR).join(PROJECT_CONFIG_FILENAME);
+            let metadata = fs::metadata(&config_path)?;
+            Ok((config_path, metadata.modified()?))
+        })
+        .collect::<ResolverResult<HashMap<_, _>>>()?;
+
+    let configs_in_chain: Vec<ProjectConfig> =
+        inheritance_chain.into_iter().map(|(_, p)| p).collect();
+    let mut resolved_config = merge_chain_into_config(configs_in_chain);
+
+    resolved_config.uuid = target_uuid;
+    resolved_config.qualified_name = qualified_name;
+    resolved_config.project_root = leaf_entry.path.clone();
+
+    write_config_cache(&config_cache_path, &resolved_config, dependencies)?;
+    log::debug!(
+        "New config cache saved at '{}'.",
+        config_cache_path.display()
+    );
+
+    Ok(resolved_config)
+}
+
+// --- INHERITANCE LOGIC (ASCENDING) ---
+
+fn build_inheritance_chain(
+    leaf_uuid: Uuid,
+    index: &GlobalIndex,
+) -> ResolverResult<Vec<(&IndexEntry, ProjectConfig)>> {
+    let mut chain = Vec::new();
+    let mut current_uuid_opt = Some(leaf_uuid);
+
+    while let Some(current_uuid) = current_uuid_opt {
+        let entry = index
+            .projects
+            .get(&current_uuid)
+            .ok_or(ResolverError::UuidNotFoundInIndex { uuid: current_uuid })?;
+
+        let config = load_project_config(entry)?;
+        chain.push((entry, config));
+
+        current_uuid_opt = entry.parent;
+    }
+
+    chain.reverse();
+    Ok(chain)
+}
+
+// --- MERGE LOGIC ---
+
+fn merge_chain_into_config(chain: Vec<ProjectConfig>) -> ResolvedConfig {
+    let mut resolved = ResolvedConfig {
+        uuid: Uuid::nil(),
+        qualified_name: String::new(),
+        project_root: PathBuf::new(),
+        version: None,
+        description: None,
+        scripts: HashMap::new(),
+        options: OptionsConfig::default(),
+        vars: HashMap::new(),
+        env: HashMap::new(),
+    };
+
+    for config in chain {
+        resolved.version = config.version.or(resolved.version);
+        resolved.description = config.description.or(resolved.description);
+        resolved.options.at_start = config.options.at_start.or(resolved.options.at_start);
+        resolved.options.at_exit = config.options.at_exit.or(resolved.options.at_exit);
+        resolved.options.shell = config.options.shell.or(resolved.options.shell);
+        resolved.options.open_with.extend(config.options.open_with);
+        resolved.vars.extend(config.vars);
+        resolved.env.extend(config.env);
+        resolved.scripts.extend(config.scripts);
+    }
+
+    resolved
+}
+
+// --- LOAD AND CACHE LOGIC ---
+
+fn load_project_config(entry: &IndexEntry) -> ResolverResult<ProjectConfig> {
+    let config_path = entry.path.join(AXES_DIR).join(PROJECT_CONFIG_FILENAME);
+    if !config_path.is_file() {
+        return Err(ResolverError::ConfigFileNotFound {
+            name: entry.name.clone(),
+            path: config_path.display().to_string(),
+        });
+    }
+    let content = fs::read_to_string(&config_path)?;
+    toml::from_str(&content).map_err(|e| ResolverError::TomlParse {
+        path: config_path.display().to_string(),
+        source: e,
+    })
+}
+
+fn read_and_validate_config_cache(
+    cache_path: &Path,
+    expected_name: &str,
+) -> ResolverResult<Option<ResolvedConfig>> {
+    if !cache_path.exists() {
+        return Ok(None);
+    }
+    let cached_bytes = fs::read(cache_path)?;
+
+    let decode_result: Result<(SerializableConfigCache, usize), _> =
+        bincode::serde::decode_from_slice(&cached_bytes, bincode::config::standard());
+
+    let serializable_cache = match decode_result {
+        Ok((cache, _)) => cache, // Directly assigns the value we are interested in
+        Err(e) => {
+            if !matches!(e, DecodeError::Io { .. }) {
+                log::warn!(
+                    "Configuration cache at '{}' is corrupt or outdated. It will be regenerated. (Error: {})",
+                    cache_path.display(),
+                    e
+                );
+                let _ = fs::remove_file(cache_path);
+                return Ok(None);
+            }
+            return Err(ResolverError::BincodeDecode(e));
+        }
+    };
+
+    if serializable_cache.resolved_config.qualified_name != expected_name {
+        log::debug!("Cache qualified name mismatch. Cache invalid.");
+        return Ok(None);
+    }
+
+    for (path_str, cached_mod_time_serializable) in serializable_cache.dependencies.iter() {
+        let path = PathBuf::from(path_str);
+        if !path.exists() {
+            log::debug!(
+                "Cache dependency '{}' does not exist. Cache invalid.",
+                path.display()
+            );
+            return Ok(None);
+        }
+        let current_mod_time = fs::metadata(&path)?.modified()?;
+        let cached_mod_time: SystemTime = (*cached_mod_time_serializable).into();
+
+        if current_mod_time > cached_mod_time {
+            log::debug!(
+                "Cache dependency '{}' has been modified. Cache invalid.",
+                path.display()
+            );
+            return Ok(None);
+        }
+    }
+
+    Ok(Some(serializable_cache.resolved_config.into()))
+}
+
+fn write_config_cache(
+    cache_path: &Path,
+    config: &ResolvedConfig,
+    dependencies: HashMap<PathBuf, SystemTime>,
+) -> ResolverResult<()> {
+    let cache_dir = cache_path.parent().unwrap();
+    if !cache_dir.exists() {
+        fs::create_dir_all(cache_dir)?;
+    }
+
+    let serializable_deps = dependencies
+        .into_iter()
+        .map(|(path, time)| (path.to_string_lossy().into_owned(), time.into()))
+        .collect();
+
+    let cache_data = SerializableConfigCache {
+        resolved_config: config.into(),
+        dependencies: serializable_deps,
+    };
+
+    let bytes = bincode::serde::encode_to_vec(cache_data, bincode::config::standard())?;
+    fs::write(cache_path, &bytes)?;
+    Ok(())
+}
+
+===== core\context_resolver.rs =====
+// src/core/context_resolver.rs
+
+use crate::models::{GlobalIndex, IndexEntry, LastUsedCache};
+use dialoguer::{Error as DialoguerError, Select, theme::ColorfulTheme};
+use std::{env, fs, path::Path};
+use thiserror::Error;
+use uuid::Uuid;
+
+use crate::CancellationToken;
+use crate::constants::AXES_DIR;
+use crate::constants::LAST_USED_CACHE_FILENAME;
+use crate::core::index_manager::{self, GLOBAL_PROJECT_UUID};
+
+use bincode::error::DecodeError;
+
+#[derive(Error, Debug)]
+pub enum ContextError {
+    #[error("Filesystem Error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Index Error: {0}")]
+    Index(#[from] crate::core::index_manager::IndexError),
+    #[error("Error decoding cache: {0}")]
+    BincodeDecode(#[from] bincode::error::DecodeError),
+    #[error("Error encoding cache: {0}")]
+    BincodeEncode(#[from] bincode::error::EncodeError),
+    #[error("User Interface Error: {0}")]
+    Dialoguer(#[from] DialoguerError),
+    #[error("Empty context not provided.")]
+    EmptyContext,
+    #[error("Context '**' can only be used at the beginning of the path.")]
+    GlobalRecentNotAtStart,
+    #[error("Context '.' or '_' can only be used at the beginning of the path.")]
+    LocalPathNotAtStart,
+    #[error("Cannot go further up the hierarchy. Already at a root project.")]
+    AlreadyAtRoot,
+    #[error("No projects have been used recently. Cannot resolve '**'.")]
+    NoLastUsedProject,
+    #[error(
+        "Parent project '{parent_name}' has not used any children recently. Cannot resolve '*'."
+    )]
+    NoLastUsedChild { parent_name: String },
+    #[error("No axes project found in current directory or any parent directories.")]
+    ProjectNotFoundFromPath,
+    #[error("No axes project found in current directory.")]
+    ProjectNotFoundInCwd,
+    #[error("Root project with name '{name}' not found.")]
+    RootProjectNotFound { name: String },
+    #[error("Child project '{child_name}' not found for parent '{parent_name}'.")]
+    ChildProjectNotFound {
+        child_name: String,
+        parent_name: String,
+    },
+    #[error("Alias '{name}!' not found.")]
+    AliasNotFound { name: String },
+    #[error("Could not resolve project name for alias (possible broken parent link).")]
+    AliasResolutionError,
+    #[error("Operation cancelled by user.")]
+    Cancelled,
+}
+
+type ContextResult<T> = Result<T, ContextError>;
+
+/// Resolves a project path to a UUID and a qualified name.
+pub fn resolve_context(
+    context: &str,
+    index: &GlobalIndex,
+    _cancellation_token: &CancellationToken,
+) -> ContextResult<(Uuid, String)> {
+    let parts: Vec<&str> = context.split('/').filter(|s| !s.is_empty()).collect();
+    if parts.is_empty() {
+        return Err(ContextError::EmptyContext);
+    }
+
+    // 1. `resolve_first_part` now handles all initial logic.
+    let (mut current_uuid, mut current_parent_uuid) = resolve_first_part(parts[0], index)?;
+
+    // 2. If it's not an alias, proceed with normal path resolution.
+    //let parts: Vec<&str> = context.split('/').filter(|s| !s.is_empty()).collect();
+    //if parts.is_empty() { return Err(ContextError::EmptyContext); }
+    //
+    //let (mut current_uuid, mut current_parent_uuid) = resolve_first_part(parts[0], index)?;
+
+    // Iterate over the remaining parts
+    for part in &parts[1..] {
+        let (next_uuid, next_parent_uuid) = match *part {
+            "**" => return Err(ContextError::GlobalRecentNotAtStart),
+            "." | "_" => return Err(ContextError::LocalPathNotAtStart),
+            ".." => {
+                let parent_uuid = current_parent_uuid.ok_or(ContextError::AlreadyAtRoot)?;
+                let parent_entry = index.projects.get(&parent_uuid).unwrap(); // Safe
+                (parent_uuid, parent_entry.parent)
+            }
+            "*" => {
+                let parent_entry = index.projects.get(&current_uuid).unwrap(); // Safe
+                let child_uuid = resolve_last_used_child(current_uuid, parent_entry, index)?;
+                //let child_entry = index.projects.get(&child_uuid).unwrap(); // Safe
+                (child_uuid, Some(current_uuid))
+            }
+            name => {
+                let parent_entry = index.projects.get(&current_uuid).unwrap(); // Safe
+                let child_uuid = find_child_by_name(current_uuid, parent_entry, name, index)?;
+                //let child_entry = index.projects.get(&child_uuid).unwrap(); // Safe
+                (child_uuid, Some(current_uuid))
+            }
+        };
+        current_uuid = next_uuid;
+        current_parent_uuid = next_parent_uuid;
+    }
+
+    // At the end of the traversal, update the "last used" caches
+    update_last_used_caches(current_uuid, index)?;
+
+    // Reconstruct the full qualified name for the final UUID.
+    let final_qualified_name = index_manager::build_qualified_name(current_uuid, index)
+        .ok_or(ContextError::AliasResolutionError)?; // We reuse the error
+
+    Ok((current_uuid, final_qualified_name))
+}
+
+/// Resolves the first part of the path, which has special rules.
+fn resolve_first_part(part: &str, index: &GlobalIndex) -> ContextResult<(Uuid, Option<Uuid>)> {
+    // 1. Alias check remains the highest priority.
+    if let Some(alias_name) = part.strip_suffix('!') {
+        let uuid = index
+            .aliases
+            .get(alias_name)
+            .ok_or_else(|| ContextError::AliasNotFound {
+                name: alias_name.to_string(),
+            })?;
+        let entry = index.projects.get(uuid).unwrap(); // Safe if index is consistent.
+        return Ok((*uuid, entry.parent));
+    }
+
+    // 2. Handle special keywords.
+    match part {
+        "**" => {
+            let uuid = index.last_used.ok_or(ContextError::NoLastUsedProject)?;
+            let entry = index.projects.get(&uuid).unwrap();
+            return Ok((uuid, entry.parent));
+        }
+        "*" => {
+            let global_entry = index.projects.get(&GLOBAL_PROJECT_UUID).unwrap();
+            let uuid = resolve_last_used_child(GLOBAL_PROJECT_UUID, global_entry, index)?;
+            let entry = index.projects.get(&uuid).unwrap();
+            return Ok((uuid, entry.parent));
+        }
+        "." => {
+            let uuid = find_project_from_path(&env::current_dir()?, true, index)?;
+            let entry = index.projects.get(&uuid).unwrap();
+            return Ok((uuid, entry.parent));
+        }
+        "_" => {
+            let uuid = find_project_from_path(&env::current_dir()?, false, index)?;
+            let entry = index.projects.get(&uuid).unwrap();
+            return Ok((uuid, entry.parent));
+        }
+        _ => {
+            // It's a name, not a keyword. Proceed to the main logic.
+        }
+    }
+
+    // --- 3. Main Name Resolution Logic ---
+    let root_entry = index
+        .projects
+        .get(&GLOBAL_PROJECT_UUID)
+        .expect("Fatal: Global project with predefined UUID not found in index.");
+
+    if part == root_entry.name {
+        // Case 1: The user explicitly wrote the root project's current name (e.g., "global" or "main").
+        // The current node is the root itself.
+        Ok((GLOBAL_PROJECT_UUID, None))
+    } else {
+        // Case 2: The user wrote something else (e.g., "my-project").
+        // Assume it's an implicit child of the root project.
+        let child_uuid = find_child_by_name(GLOBAL_PROJECT_UUID, root_entry, part, index)?;
+        let child_entry = index.projects.get(&child_uuid).unwrap();
+        Ok((child_uuid, child_entry.parent))
+    }
+}
+
+/// Resolves '*' for a child, with interactive fallback.
+fn resolve_last_used_child(
+    parent_uuid: Uuid,
+    parent_entry: &IndexEntry,
+    index: &GlobalIndex,
+) -> ContextResult<Uuid> {
+    let cache_path = parent_entry
+        .path
+        .join(AXES_DIR)
+        .join(LAST_USED_CACHE_FILENAME);
+    if let Ok(Some(cache)) = read_last_used_cache(&cache_path)
+        && let Some(uuid) = cache.child_uuid
+    {
+        log::debug!(
+            "Last used child '{}' found in cache for '{}'.",
+            uuid,
+            parent_entry.name
+        );
+        return Ok(uuid);
+    }
+
+    // Fallback: no cache or empty. Ask the user.
+    log::warn!(
+        "No last used child cache found for '{}'. Initiating interactive fallback.",
+        parent_entry.name
+    );
+    let children: Vec<_> = index
+        .projects
+        .values()
+        .filter(|e| e.parent == Some(parent_uuid))
+        .collect();
+
+    if children.is_empty() {
+        return Err(ContextError::NoLastUsedChild {
+            parent_name: parent_entry.name.clone(),
+        });
+    }
+
+    let child_names: Vec<_> = children.iter().map(|e| e.name.as_str()).collect();
+    println!(
+        "Project '{}' has no recently used child.",
+        parent_entry.name
+    );
+    let selection = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("Please select a child to continue:")
+        .items(&child_names)
+        .default(0)
+        .interact_opt()?
+        .ok_or(ContextError::Cancelled)?;
+
+    let selected_name = child_names[selection];
+    find_child_by_name(parent_uuid, parent_entry, selected_name, index)
+}
+
+/// Finds a project's UUID by searching from a file system path.
+fn find_project_from_path(
+    path: &Path,
+    search_up: bool,
+    index: &GlobalIndex,
+) -> ContextResult<Uuid> {
+    let current_path = dunce::canonicalize(path)?;
+
+    if search_up {
+        // Mode '.' (ascending search)
+        let mut candidates: Vec<(Uuid, &IndexEntry)> = index
+            .projects
+            .iter()
+            .filter(|(_, entry)| current_path.starts_with(&entry.path))
+            .map(|(uuid, entry)| (*uuid, entry))
+            .collect();
+
+        if candidates.is_empty() {
+            return Err(ContextError::ProjectNotFoundFromPath);
+        }
+
+        // Sort by path length, from longest to shortest.
+        candidates.sort_by_key(|(_, entry)| std::cmp::Reverse(entry.path.as_os_str().len()));
+
+        // The first candidate is the most specific (the closest "ancestor").
+        Ok(candidates[0].0)
+    } else {
+        // Mode '_' (strict search in current directory)
+        index
+            .projects
+            .iter()
+            .find(|(_, entry)| entry.path == current_path)
+            .map(|(uuid, _)| *uuid)
+            .ok_or(ContextError::ProjectNotFoundInCwd)
+    }
+}
+
+/// Finds the UUID of a child by its name (logic moved from config_resolver).
+fn find_child_by_name(
+    parent_uuid: Uuid,
+    parent_entry: &IndexEntry,
+    child_name: &str,
+    index: &GlobalIndex,
+) -> ContextResult<Uuid> {
+    index
+        .projects
+        .iter()
+        .find(|(_, e)| e.parent == Some(parent_uuid) && e.name == child_name)
+        .map(|(uuid, _)| *uuid)
+        .ok_or_else(|| ContextError::ChildProjectNotFound {
+            child_name: child_name.to_string(),
+            parent_name: parent_entry.name.clone(),
+        })
+}
+
+/// Reads the "last used" cache for a parent project.
+fn read_last_used_cache(path: &Path) -> ContextResult<Option<LastUsedCache>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let bytes = fs::read(path)?;
+
+    let decode_result: Result<(LastUsedCache, usize), _> =
+        bincode::serde::decode_from_slice(&bytes, bincode::config::standard());
+
+    match decode_result {
+        Ok((cache, _)) => Ok(Some(cache)),
+        Err(e) => {
+            if !matches!(e, DecodeError::Io { .. }) {
+                log::warn!(
+                    "'last used' cache at '{}' is corrupt. It will be regenerated. (Error: {})",
+                    path.display(),
+                    e
+                );
+                let _ = fs::remove_file(path);
+                Ok(None)
+            } else {
+                Err(ContextError::BincodeDecode(e))
+            }
+        }
+    }
+}
+
+/// Writes the "last used" cache for a parent project.
+fn write_last_used_cache(path: &Path, cache: &LastUsedCache) -> ContextResult<()> {
+    let cache_dir = path.parent().unwrap(); // Ensures the directory exists
+    if !cache_dir.exists() {
+        fs::create_dir_all(cache_dir)?;
+    }
+    let bytes = bincode::serde::encode_to_vec(cache, bincode::config::standard())?;
+    fs::write(path, bytes)?;
+    Ok(())
+}
+
+fn update_last_used_caches(final_uuid: Uuid, index: &GlobalIndex) -> ContextResult<()> {
+    // 1. Update the global `last_used`.
+    let mut global_index = index_manager::load_and_ensure_global_project()?;
+    global_index.last_used = Some(final_uuid);
+    index_manager::save_global_index(&global_index)?;
+
+    // 2. Update child caches (`*`) by moving up the tree.
+    let mut current_entry = index.projects.get(&final_uuid).unwrap();
+    let mut child_uuid_to_save = final_uuid;
+
+    // Climb the inheritance chain
+    while let Some(parent_uuid) = current_entry.parent {
+        if let Some(parent_entry) = index.projects.get(&parent_uuid) {
+            log::debug!(
+                "Updating 'last used' for parent '{}' to '{}'",
+                parent_entry.name,
+                child_uuid_to_save
+            );
+            let cache = LastUsedCache {
+                child_uuid: Some(child_uuid_to_save),
+            };
+            let cache_path = parent_entry
+                .path
+                .join(AXES_DIR)
+                .join(LAST_USED_CACHE_FILENAME);
+
+            // Call the function that was not used before
+            write_last_used_cache(&cache_path, &cache)?;
+
+            // Prepare for the next iteration
+            child_uuid_to_save = parent_uuid;
+            current_entry = parent_entry;
+        } else {
+            // If the parent is not found in the index (broken link), we stop.
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+===== core\graph_display.rs =====
+// EN: src/core/graph_display.rs
+
+use crate::{
+    core::index_manager,
+    models::{GlobalIndex, IndexEntry},
+};
+use colored::*;
+use std::collections::HashMap;
+use uuid::Uuid;
+
+/// Options to control the appearance of the rendered tree.
+pub struct DisplayOptions {
+    pub show_paths: bool,
+    pub show_uuids: bool,
+}
+
+/// Displays an ASCII tree of all registered projects.
+pub fn display_project_tree(
+    index: &GlobalIndex,
+    start_node_uuid: Option<Uuid>,
+    options: &DisplayOptions,
+) {
+    if index.projects.is_empty() {
+        println!("\n{}", t!("tree.info.no_projects"));
+        return;
+    }
+
+    let mut children_map: HashMap<Option<Uuid>, Vec<(Uuid, &IndexEntry)>> = HashMap::new();
+    for (uuid, entry) in &index.projects {
+        children_map
+            .entry(entry.parent)
+            .or_default()
+            .push((*uuid, entry));
+    }
+    for children in children_map.values_mut() {
+        children.sort_by_key(|(_, entry)| &entry.name);
+    }
+
+    if let Some(start_uuid) = start_node_uuid {
+        if start_uuid == index_manager::GLOBAL_PROJECT_UUID {
+            // If the start node is the root, render the full tree from the top.
+            render_from_root(index, &children_map, options);
+        } else if let Some(start_entry) = index.projects.get(&start_uuid) {
+            // Render a subtree starting from a specific node.
+            let root_name = index
+                .projects
+                .get(&index_manager::GLOBAL_PROJECT_UUID)
+                .unwrap()
+                .name
+                .clone();
+            let qualified_name = index_manager::build_qualified_name(start_uuid, index)
+                .unwrap_or_else(|| start_entry.name.clone());
+
+            // Adjust name to not show the root project name if it's a direct child.
+            let display_name = qualified_name
+                .strip_prefix(&format!("{}/", root_name))
+                .unwrap_or(&qualified_name);
+
+            print_node_info(start_uuid, start_entry, index, options, display_name);
+            println!(); // Start with a newline
+
+            if let Some(children) = children_map.get(&Some(start_uuid)) {
+                for (i, (child_uuid, child_entry)) in children.iter().enumerate() {
+                    let is_last = i == children.len() - 1;
+                    print_node_recursive(
+                        *child_uuid,
+                        child_entry,
+                        index,
+                        &children_map,
+                        "",
+                        is_last,
+                        options,
+                    );
+                }
+            }
+        } else {
+            println!("\n{}", t!("tree.error.project_not_found").red());
+        }
+    } else {
+        render_from_root(index, &children_map, options);
+    }
+}
+
+/// Renders the entire tree starting from the project root.
+fn render_from_root(
+    index: &GlobalIndex,
+    children_map: &HashMap<Option<Uuid>, Vec<(Uuid, &IndexEntry)>>,
+    options: &DisplayOptions,
+) {
+    let root_uuid = index_manager::GLOBAL_PROJECT_UUID;
+    if let Some(root_entry) = index.projects.get(&root_uuid) {
+        print_node_info(root_uuid, root_entry, index, options, &root_entry.name);
+        println!();
+        if let Some(children) = children_map.get(&Some(root_uuid)) {
+            for (i, (child_uuid, child_entry)) in children.iter().enumerate() {
+                let is_last = i == children.len() - 1;
+                print_node_recursive(
+                    *child_uuid,
+                    child_entry,
+                    index,
+                    children_map,
+                    "",
+                    is_last,
+                    options,
+                );
+            }
+        }
+    } else {
+        println!("\n{}", t!("tree.error.root_project_missing").yellow());
+    }
+}
+
+/// Prints the formatted information for a single node in the tree.
+fn print_node_info(
+    uuid: Uuid,
+    entry: &IndexEntry,
+    index: &GlobalIndex,
+    options: &DisplayOptions,
+    name: &str,
+) {
+    // Print the main project name.
+    print!("{}", name.cyan());
+
+    let mut info_parts = Vec::new();
+
+    if options.show_paths {
+        info_parts.push(format!("[{}]", entry.path.display()).dimmed());
+    }
+    if options.show_uuids {
+        info_parts.push(format!("({})", uuid).dimmed());
+    }
+
+    for part in info_parts {
+        print!(" {}", part);
+    }
+
+    if index.last_used == Some(uuid) {
+        print!(" {}", "(**)".yellow());
+    }
+}
+
+/// Recursive function to print a tree node and its descendants.
+fn print_node_recursive(
+    uuid: Uuid,
+    entry: &IndexEntry,
+    index: &GlobalIndex,
+    children_map: &HashMap<Option<Uuid>, Vec<(Uuid, &IndexEntry)>>,
+    prefix: &str,
+    is_last: bool,
+    options: &DisplayOptions,
+) {
+    let connector = if is_last { "└─" } else { "├─" };
+    print!("{}{}", prefix, connector);
+    print_node_info(uuid, entry, index, options, &entry.name);
+    println!();
+
+    let child_prefix = format!("{}{}", prefix, if is_last { "   " } else { "│  " });
+    if let Some(children) = children_map.get(&Some(uuid)) {
+        for (i, (child_uuid, child_entry)) in children.iter().enumerate() {
+            let is_last_child = i == children.len() - 1;
+            print_node_recursive(
+                *child_uuid,
+                child_entry,
+                index,
+                children_map,
+                &child_prefix,
+                is_last_child,
+                options,
+            );
+        }
+    }
+}
+
+===== core\index_manager.rs =====
+// src/core/index_manager.rs
+
+use crate::constants::PROJECT_REF_FILENAME;
+use crate::core::paths;
+use crate::models::{GlobalIndex, IndexEntry, ProjectRef};
+
+use std::collections::HashSet;
+use std::error::Error;
+use std::io::ErrorKind;
+use std::{fs, path::Path, path::PathBuf};
+use thiserror::Error;
+use uuid::Uuid;
+
+use crate::constants::GLOBAL_INDEX_FILENAME;
+
+pub const GLOBAL_PROJECT_UUID: Uuid = Uuid::nil();
+
+#[derive(Error, Debug)]
+pub enum IndexError {
+    #[error("Filesystem Error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Error de rutas: {0}")]
+    Path(#[from] crate::core::paths::PathError),
+    #[error("Error al serializar a formato TOML: {0}")]
+    TomlSerialize(#[from] toml::ser::Error),
+    #[error("Project name '{name}' is already in use by another child of the same parent.")]
+    NameAlreadyExists { name: String },
+    #[error("Error al decodificar desde formato binario: {0}")]
+    BincodeDecode(#[from] bincode::error::DecodeError),
+    #[error("Error al codificar a formato binario: {0}")]
+    BincodeEncode(#[from] bincode::error::EncodeError),
+    #[error(
+        "Enlace de padre roto: el proyecto '{child_uuid}' apunta a un padre inexistente '{missing_parent_uuid}'."
+    )]
+    BrokenParentLink {
+        child_uuid: Uuid,
+        missing_parent_uuid: Uuid,
+    },
+    #[error("Project with UUID '{uuid}' not found in global index.")]
+    ProjectNotFoundInIndex { uuid: Uuid },
+    #[error(
+        "Dependencia circular detectada: el proyecto '{cycle_node_uuid}' ya es un ancestro de la ruta del nuevo padre. No se puede establecer este enlace."
+    )]
+    CircularDependency { cycle_node_uuid: Uuid },
+}
+
+type IndexResult<T> = Result<T, IndexError>;
+
+/// Loads the global index and ensures that the entry for the 'global' project exists.
+pub fn load_and_ensure_global_project() -> IndexResult<GlobalIndex> {
+    let mut index = load_global_index_internal()?;
+    if let std::collections::hash_map::Entry::Vacant(e) = index.projects.entry(GLOBAL_PROJECT_UUID)
+    {
+        log::warn!("'global' project not found in index. Creating it now.");
+        let config_dir = paths::get_axes_config_dir()?;
+
+        let global_entry = IndexEntry {
+            name: "global".to_string(),
+            path: config_dir.clone(),
+            parent: None,
+        };
+        e.insert(global_entry.clone());
+
+        index.projects.insert(GLOBAL_PROJECT_UUID, global_entry);
+
+        // If alias `g` does not exist, create it.
+        if !index.aliases.contains_key("g") {
+            log::debug!("Creando alias por defecto 'g' para el proyecto global.");
+            index.aliases.insert("g".to_string(), GLOBAL_PROJECT_UUID);
+        }
+
+        // 1. Create the default `axes.toml`.
+        let axes_dir = config_dir.join(crate::constants::AXES_DIR);
+        fs::create_dir_all(&axes_dir)?;
+        let config_path = axes_dir.join(crate::constants::PROJECT_CONFIG_FILENAME);
+        if !config_path.exists() {
+            let default_config = crate::models::ProjectConfig::new();
+            // Add default configuration for 'open'
+            let toml_string = toml::to_string_pretty(&default_config)?;
+            fs::write(config_path, toml_string)?;
+        }
+
+        // 2. Create its `project_ref.bin`.
+        let project_ref = crate::models::ProjectRef {
+            self_uuid: GLOBAL_PROJECT_UUID,
+            parent_uuid: None,
+            name: "global".to_string(),
+        };
+        write_project_ref(&config_dir, &project_ref)?;
+
+        // Save the updated index.
+        save_global_index(&index)?;
+    }
+    Ok(index)
+}
+
+/// Adds a new project entry to the index.
+pub fn add_project_to_index(
+    index: &mut GlobalIndex,
+    name: String,
+    path: PathBuf,
+    parent_uuid: Option<Uuid>,
+) -> IndexResult<(Uuid, IndexEntry)> {
+    let final_parent_uuid = parent_uuid.unwrap_or(GLOBAL_PROJECT_UUID);
+
+    let name_exists = index
+        .projects
+        .values()
+        .any(|entry| entry.parent == Some(final_parent_uuid) && entry.name == name);
+
+    if name_exists {
+        return Err(IndexError::NameAlreadyExists { name });
+    }
+
+    let new_uuid = Uuid::new_v4();
+    let new_entry = IndexEntry {
+        name,
+        path,
+        parent: Some(final_parent_uuid),
+    };
+
+    index.projects.insert(new_uuid, new_entry.clone());
+    Ok((new_uuid, new_entry))
+}
+
+fn load_global_index_internal() -> IndexResult<GlobalIndex> {
+    let path = paths::get_axes_config_dir()?.join(GLOBAL_INDEX_FILENAME);
+    if !path.exists() {
+        return Ok(GlobalIndex::default());
+    }
+    let bytes = fs::read(&path)?;
+    // Use bincode to deserialize from bytes
+    let (index, _): (GlobalIndex, usize) =
+        bincode::serde::decode_from_slice(&bytes, bincode::config::standard())?;
+    Ok(index)
+}
+
+/// Saves the global index to disk.
+pub fn save_global_index(index: &GlobalIndex) -> IndexResult<()> {
+    let path = paths::get_axes_config_dir()?.join(GLOBAL_INDEX_FILENAME);
+    // Use bincode to serialize to bytes
+    let bytes = bincode::serde::encode_to_vec(index, bincode::config::standard())?;
+    fs::write(path, bytes)?;
+    Ok(())
+}
+
+pub fn read_project_ref(project_root: &Path) -> IndexResult<ProjectRef> {
+    let ref_path = project_root
+        .join(crate::constants::AXES_DIR)
+        .join(PROJECT_REF_FILENAME);
+    let bytes = fs::read(&ref_path)?;
+    let (project_ref, _): (ProjectRef, usize) =
+        bincode::serde::decode_from_slice(&bytes, bincode::config::standard())?;
+    Ok(project_ref)
+}
+
+pub fn write_project_ref(project_root: &Path, project_ref: &ProjectRef) -> IndexResult<()> {
+    let axes_dir = project_root.join(crate::constants::AXES_DIR);
+    if !axes_dir.exists() {
+        fs::create_dir_all(&axes_dir)?;
+    }
+    let ref_path = axes_dir.join(PROJECT_REF_FILENAME);
+    // **CORRECTION**: Use `?` directly, as `IndexError` can now be converted from `bincode::error::EncodeError`.
+    let bytes = bincode::serde::encode_to_vec(project_ref, bincode::config::standard())?;
+    fs::write(ref_path, bytes)?;
+    Ok(())
+}
+
+pub fn rename_project(
+    index: &mut GlobalIndex,
+    target_uuid: Uuid,
+    new_name: &str,
+) -> IndexResult<()> {
+    // 1. Get the entry. Robust. `ok_or_else` prevents a panic if the UUID is invalid.
+    let target_entry = index
+        .projects
+        .get(&target_uuid)
+        .ok_or(IndexError::ProjectNotFoundInIndex { uuid: target_uuid })?;
+
+    let parent_uuid = target_entry.parent;
+
+    // 2. Collision validation. Robust. The logic with `.any()` is correct and efficient.
+    // The `*uuid != target_uuid` ensures we don't compare ourselves to ourselves.
+    let sibling_name_exists = index.projects.iter().any(|(uuid, entry)| {
+        *uuid != target_uuid && entry.parent == parent_uuid && entry.name == new_name
+    });
+
+    if sibling_name_exists {
+        return Err(IndexError::NameAlreadyExists {
+            name: new_name.to_string(),
+        });
+    }
+
+    // 3. Modification. Robust. `get_mut` is the correct way to modify a value in a HashMap.
+    // The `else` with `Err` is an extra layer of security, although theoretically unreachable.
+    if let Some(entry_to_modify) = index.projects.get_mut(&target_uuid) {
+        entry_to_modify.name = new_name.to_string();
+    } else {
+        return Err(IndexError::ProjectNotFoundInIndex { uuid: target_uuid });
+    }
+
+    Ok(())
+}
+
+pub fn find_cycle_from_node(
+    start_node_uuid: Uuid,
+    index: &GlobalIndex,
+) -> Result<Option<Uuid>, IndexError> {
+    let mut current_uuid_opt = Some(start_node_uuid);
+    let mut visited_nodes = HashSet::new();
+
+    while let Some(current_uuid) = current_uuid_opt {
+        // If we cannot insert the node, it's because it was already there. Cycle detected!
+        if !visited_nodes.insert(current_uuid) {
+            return Ok(Some(current_uuid));
+        }
+
+        // Move to parent
+        match index.projects.get(&current_uuid) {
+            Some(current_entry) => {
+                current_uuid_opt = current_entry.parent;
+            }
+            None => {
+                // The current node does not exist in the index, meaning `parent_uuid`
+                // from a previous node points to a non-existent entry (broken link).
+                // Or we have safely reached the root (parent: None).
+                if current_uuid != GLOBAL_PROJECT_UUID {
+                    // If it's not the global project and has no parent, it's a broken link
+                    // (since all should point to global or another project).
+                    // This should be `current_entry.parent` of the previous node.
+                    // This is a bit more complex to report accurately at this point.
+                    // For now, we assume `index.projects.get(&current_uuid)` would already detect it.
+                    // The error would propagate earlier.
+                }
+                return Ok(None); // We reached a root or an endpoint without a cycle.
+            }
+        }
+    }
+
+    Ok(None) // The loop never executed (start_node_uuid was None) or no cycle was found.
+}
+
+pub fn link_project(
+    index: &mut GlobalIndex,
+    project_to_move_uuid: Uuid,
+    new_parent_uuid: Uuid,
+) -> IndexResult<()> {
+    // 1. A project cannot be moved to itself or to `global` arbitrarily if it is already a child of `global`.
+    if project_to_move_uuid == new_parent_uuid {
+        return Err(IndexError::CircularDependency {
+            cycle_node_uuid: project_to_move_uuid,
+        });
+    }
+    // A project cannot be its own parent.
+
+    // 2. Anti-Cycle Validation
+    // We create a temporary copy of the index with the proposed change to test the cycle.
+    let mut temp_index_for_cycle_check = index.clone(); // Needs `Clone` for GlobalIndex
+    if let Some(entry_to_modify) = temp_index_for_cycle_check
+        .projects
+        .get_mut(&project_to_move_uuid)
+    {
+        entry_to_modify.parent = Some(new_parent_uuid);
+    } else {
+        return Err(IndexError::ProjectNotFoundInIndex {
+            uuid: project_to_move_uuid,
+        });
+    }
+
+    if let Some(cycle_node_uuid) =
+        find_cycle_from_node(project_to_move_uuid, &temp_index_for_cycle_check)?
+    {
+        return Err(IndexError::CircularDependency { cycle_node_uuid });
+    }
+
+    // 3. Sibling Name Collision Validation
+    let project_to_move_entry = index.projects.get(&project_to_move_uuid).ok_or({
+        IndexError::ProjectNotFoundInIndex {
+            uuid: project_to_move_uuid,
+        }
+    })?;
+
+    let sibling_name_exists = index.projects.iter().any(|(uuid, entry)| {
+        *uuid != project_to_move_uuid && // It is not the project we are moving
+        entry.parent == Some(new_parent_uuid) && // It is a child of the new parent
+        entry.name == project_to_move_entry.name // And has the same name
+    });
+
+    if sibling_name_exists {
+        return Err(IndexError::NameAlreadyExists {
+            name: project_to_move_entry.name.clone(),
+        });
+    }
+
+    // 4. If all validations pass, make the change in the actual index.
+    if let Some(entry_to_modify) = index.projects.get_mut(&project_to_move_uuid) {
+        entry_to_modify.parent = Some(new_parent_uuid);
+    } else {
+        return Err(IndexError::ProjectNotFoundInIndex {
+            uuid: project_to_move_uuid,
+        });
+    }
+
+    Ok(())
+}
+
+//Utils
+
+/// Reads the `project_ref.bin` of a project. If it doesn't exist, it creates it from the global index.
+pub fn get_or_create_project_ref(
+    project_root: &Path,
+    uuid: Uuid,
+    index: &GlobalIndex,
+) -> IndexResult<ProjectRef> {
+    match read_project_ref(project_root) {
+        Ok(project_ref) => Ok(project_ref), // The file exists and is valid.
+        Err(e) => {
+            // Check if the error is specifically "File not found".
+            if let Some(io_err) = e.source().and_then(|s| s.downcast_ref::<std::io::Error>())
+                && io_err.kind() == ErrorKind::NotFound
+            {
+                log::warn!(
+                    "Local reference file (project_ref.bin) does not exist for project at '{}'. A new one will be created.",
+                    project_root.display()
+                );
+
+                // Reconstruct information from the index.
+                let entry = index
+                    .projects
+                    .get(&uuid)
+                    .ok_or(IndexError::ProjectNotFoundInIndex { uuid })?;
+
+                let new_ref = ProjectRef {
+                    self_uuid: uuid,
+                    parent_uuid: entry.parent,
+                    name: entry.name.clone(),
+                };
+
+                // Write the newly created file for future operations.
+                write_project_ref(project_root, &new_ref)?;
+
+                return Ok(new_ref);
+            }
+            // If the error is anything else, we propagate it.
+            Err(e)
+        }
+    }
+}
+
+/// Deletes a project from the index. Re-parents its direct children to 'global'.
+pub fn delete_project_entry(index: &mut GlobalIndex, target_uuid: Uuid) -> Option<IndexEntry> {
+    if target_uuid == GLOBAL_PROJECT_UUID {
+        log::error!("No se puede eliminar el proyecto 'global'.");
+        return None; // Cannot delete the global project
+    }
+
+    // Find all direct children of the node to be deleted
+    let children_to_reparent: Vec<Uuid> = index
+        .projects
+        .iter()
+        .filter(|(_, entry)| entry.parent == Some(target_uuid))
+        .map(|(uuid, _)| *uuid)
+        .collect();
+
+    // Re-parent them to `global`
+    for child_uuid in children_to_reparent {
+        if let Some(child_entry) = index.projects.get_mut(&child_uuid) {
+            child_entry.parent = Some(GLOBAL_PROJECT_UUID);
+        }
+    }
+
+    // Finally, delete the project entry
+    index.projects.remove(&target_uuid)
+}
+
+/// Collects all descendant UUIDs of an initial node.
+pub fn get_all_descendants(index: &GlobalIndex, start_uuid: Uuid) -> Vec<Uuid> {
+    let mut descendants = Vec::new();
+    let mut to_visit = vec![start_uuid];
+
+    while let Some(current_uuid) = to_visit.pop() {
+        let children: Vec<Uuid> = index
+            .projects
+            .iter()
+            .filter(|(_, entry)| entry.parent == Some(current_uuid))
+            .map(|(uuid, _)| *uuid)
+            .collect();
+
+        descendants.extend(&children);
+        to_visit.extend(children);
+    }
+    descendants
+}
+
+pub fn remove_from_index(index: &mut GlobalIndex, uuids_to_remove: &[Uuid]) -> usize {
+    let mut removed_count = 0;
+    let remove_set: std::collections::HashSet<Uuid> = uuids_to_remove.iter().cloned().collect();
+
+    index.projects.retain(|uuid, _| {
+        if remove_set.contains(uuid) {
+            removed_count += 1;
+            false
+        } else {
+            true
+        }
+    });
+
+    removed_count
+}
+
+/// Reparents the direct children of a project, handling name collisions automatically.
+/// Returns a list of warnings for any automatic renames that occurred.
+pub fn reparent_children(
+    index: &mut GlobalIndex,
+    old_parent_uuid: Uuid,
+    new_parent_uuid: Uuid,
+) -> Result<Vec<String>, IndexError> {
+    let mut warnings = Vec::new();
+    let old_parent_name = index.projects.get(&old_parent_uuid).unwrap().name.clone();
+
+    // Collect children to avoid borrowing issues
+    let children_uuids: Vec<Uuid> = index
+        .projects
+        .values()
+        .filter(|e| e.parent == Some(old_parent_uuid))
+        .map(|e| index.projects.iter().find(|(_, val)| *val == e).unwrap().0) // Find UUID for entry
+        .cloned()
+        .collect();
+
+    for child_uuid in children_uuids {
+        let mut child_name = index.projects.get(&child_uuid).unwrap().name.clone();
+
+        // Check for initial collision
+        let sibling_names: HashSet<String> = index
+            .projects
+            .values()
+            .filter(|e| e.parent == Some(new_parent_uuid))
+            .map(|e| e.name.clone())
+            .collect();
+
+        if sibling_names.contains(&child_name) {
+            // Collision detected, try automatic rename
+            let new_child_name = format!("{}_{}", old_parent_name, child_name);
+            if sibling_names.contains(&new_child_name) {
+                // Automatic rename also fails, abort entire operation
+                return Err(IndexError::NameAlreadyExists {
+                    name: new_child_name,
+                });
+            }
+
+            // Automatic rename is safe, update name and add a warning
+            warnings.push(format!(
+                "Child '{}' was automatically renamed to '{}' to avoid collision.",
+                child_name, new_child_name
+            ));
+            child_name = new_child_name;
+        }
+
+        // Apply changes
+        let child_entry = index.projects.get_mut(&child_uuid).unwrap();
+        child_entry.name = child_name;
+        child_entry.parent = Some(new_parent_uuid);
+    }
+
+    Ok(warnings)
+}
+
+/// Reconstructs a project's qualified name by traversing up the parent tree.
+pub fn build_qualified_name(start_uuid: Uuid, index: &GlobalIndex) -> Option<String> {
+    let mut parts = Vec::new();
+    let mut current_uuid = Some(start_uuid);
+
+    while let Some(uuid) = current_uuid {
+        if let Some(entry) = index.projects.get(&uuid) {
+            parts.push(entry.name.clone());
+            current_uuid = entry.parent;
+            // If parent is `None`, we have reached the root of the `axes` tree.
+            if entry.parent.is_none() {
+                break;
+            }
+        } else {
+            // Broken link, unable to build full name.
+            return None;
+        }
+    }
+
+    parts.reverse();
+    Some(parts.join("/"))
+}
+
+// Alias Handlers
+
+/// Sets or updates an alias in the index.
+pub fn set_alias(index: &mut GlobalIndex, name: String, target_uuid: Uuid) {
+    index.aliases.insert(name, target_uuid);
+}
+
+/// Deletes an alias from the index. Returns `true` if the alias existed.
+pub fn remove_alias(index: &mut GlobalIndex, name: &str) -> bool {
+    index.aliases.remove(name).is_some()
+}
+
+===== core\interpolator.rs =====
+// EN: src/core/interpolator.rs
+
+// EN: src/core/interpolator.rs
+
+use crate::{
+    CancellationToken, // We need the executor for <axes::run::...>
+    models::{Command as ProjectCommand, ResolvedConfig, Runnable},
+    system::executor,
+};
+use anyhow::{Context, Result, anyhow};
+use regex::Regex;
+use std::collections::HashSet;
+
+use colored::Colorize;
+
+const MAX_RECURSION_DEPTH: u32 = 32;
+
+#[derive(Clone)]
+pub struct Interpolator<'a> {
+    config: &'a ResolvedConfig,
+    // For direct cycle detection (a -> b -> a)
+    recursion_stack: HashSet<String>,
+    // For runaway recursion protection (a -> b -> c -> ...)
+    recursion_depth: u32,
+}
+
+impl<'a> Interpolator<'a> {
+    pub fn new(config: &'a ResolvedConfig) -> Self {
+        Self {
+            config,
+            recursion_stack: HashSet::new(),
+            recursion_depth: 0,
+        }
+    }
+
+    /// Creates a new interpolator for a deeper recursion level.
+    fn new_for_recursion(&self) -> Self {
+        Self {
+            config: self.config,
+            recursion_stack: self.recursion_stack.clone(),
+            recursion_depth: self.recursion_depth + 1,
+        }
+    }
+
+    /// Recursively expands all `<axes::...>` tokens in a string.
+    pub fn expand_string(
+        &mut self,
+        template: &str,
+        cancellation_token: &CancellationToken,
+    ) -> Result<String> {
+        // Protection against runaway recursion.
+        if self.recursion_depth >= MAX_RECURSION_DEPTH {
+            return Err(anyhow!(
+                "Maximum recursion depth ({}) exceeded during expansion. Check for indirect cycles.",
+                MAX_RECURSION_DEPTH
+            ));
+        }
+
+        let mut current_str = template.to_string();
+        let re = Regex::new(r"<axes::(.+?)>").unwrap();
+
+        while let Some(captures) = re.captures(&current_str.clone()) {
+            let full_match = captures.get(0).unwrap().as_str();
+            let token_path = captures.get(1).unwrap().as_str();
+
+            // Create a new interpolator for the sub-expansion to manage its own depth.
+            let mut sub_interpolator = self.new_for_recursion();
+            let expanded_value = sub_interpolator.expand_token(token_path, cancellation_token)?;
+            current_str = current_str.replace(full_match, &expanded_value);
+        }
+
+        Ok(current_str)
+    }
+
+    /// Expands a single token path (e.g., "name" or "scripts::test").
+    fn expand_token(
+        &mut self,
+        token_path: &str,
+        cancellation_token: &CancellationToken,
+    ) -> Result<String> {
+        let parts: Vec<&str> = token_path.split("::").collect();
+
+        if parts.len() > 1 {
+            return self.expand_qualified_token(&parts, cancellation_token);
+        }
+
+        let key = parts[0];
+
+        // Precedence: Reserved -> Vars -> Scripts (scripts for now)
+        if let Some(value) = self.get_reserved_metadata(key) {
+            return Ok(value);
+        }
+        if self.config.vars.contains_key(key) {
+            return self.expand_qualified_token(&["vars", key], cancellation_token);
+        }
+        // TODO: Change "scripts" to "scripts" in a future refactor
+        if self.config.scripts.contains_key(key) {
+            return self.expand_qualified_token(&["scripts", key], cancellation_token);
+        }
+
+        Err(anyhow!("<axes::{}> not found.", token_path))
+    }
+
+    fn expand_qualified_token(
+        &mut self,
+        parts: &[&str],
+        cancellation_token: &CancellationToken,
+    ) -> Result<String> {
+        match parts.first() {
+            Some(&"vars") => {
+                let key = parts
+                    .get(1)
+                    .ok_or_else(|| anyhow!("<axes::vars::> is missing a key."))?;
+                self.config
+                    .vars
+                    .get(*key)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("<axes::vars::{}> not found.", key))
+            }
+            Some(&"env") => {
+                let key = parts
+                    .get(1)
+                    .ok_or_else(|| anyhow!("<axes::env::> is missing a key."))?;
+                self.config
+                    .env
+                    .get(*key)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("<axes::env::{}> not found.", key))
+            }
+            // TODO: Change "scripts" to "scripts" in a future refactor
+            Some(&"scripts") => {
+                let key = parts
+                    .get(1)
+                    .ok_or_else(|| anyhow!("<axes::scripts::> is missing a key."))?;
+                self.expand_script(key, cancellation_token)
+            }
+            // NOTE: The new, powerful run command
+            Some(&"run") => {
+                let sub_path = &parts[1..];
+                if sub_path.is_empty() {
+                    return Err(anyhow!(
+                        "<axes::run::> must be followed by a path or script."
+                    ));
+                }
+                self.expand_run(sub_path, cancellation_token)
+            }
+            Some(&key) if self.get_reserved_metadata(key).is_some() => {
+                Ok(self.get_reserved_metadata(key).unwrap())
+            }
+            _ => Err(anyhow!(
+                "Unknown token namespace: '<axes::{}::...>'.",
+                parts.join("::")
+            )),
+        }
+    }
+
+    /// Expands the content of an internal script, with cycle detection.
+    fn expand_script(
+        &mut self,
+        script_name: &str,
+        cancellation_token: &CancellationToken,
+    ) -> Result<String> {
+        if self.recursion_stack.contains(script_name) {
+            let path = self
+                .recursion_stack
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" -> ");
+            return Err(anyhow!(
+                "Cyclical script reference detected: {} -> {}",
+                path,
+                script_name
+            ));
+        }
+        self.recursion_stack.insert(script_name.to_string());
+
+        let command_def = self
+            .config
+            .scripts
+            .get(script_name)
+            .ok_or_else(|| anyhow!("<axes::scripts::{}> not found.", script_name))?;
+
+        let raw_content = match command_def {
+            ProjectCommand::Simple(s) => s.clone(),
+            ProjectCommand::Sequence(s) => s.join(" && "),
+            ProjectCommand::Extended(ext) => match &ext.run {
+                Runnable::Single(s) => s.clone(),
+                Runnable::Sequence(s) => s.join(" && "),
+            },
+            ProjectCommand::Platform(pc) => {
+                let os_runnable = if cfg!(target_os = "windows") {
+                    pc.windows.as_ref()
+                } else if cfg!(target_os = "linux") {
+                    pc.linux.as_ref()
+                } else if cfg!(target_os = "macos") {
+                    pc.macos.as_ref()
+                } else {
+                    None
+                };
+                let runnable = os_runnable.or(pc.default.as_ref()).ok_or_else(|| {
+                    anyhow!("Script '{}' has no platform implementation.", script_name)
+                })?;
+                match runnable {
+                    Runnable::Single(s) => s.clone(),
+                    Runnable::Sequence(s) => s.join(" && "),
+                }
+            }
+        };
+
+        // Recursively expand the content of the script itself.
+        let expanded_content = self.expand_string(&raw_content, cancellation_token)?;
+
+        self.recursion_stack.remove(script_name);
+
+        Ok(expanded_content)
+    }
+
+    /// Executes a command and returns its output for substitution.
+    fn expand_run(
+        &mut self,
+        sub_path: &[&str],
+        cancellation_token: &CancellationToken,
+    ) -> Result<String> {
+        let command_to_run =
+            if sub_path.first() == Some(&"scripts") || sub_path.first() == Some(&"scripts") {
+                // Case: <axes::run::scripts::my_script>
+                let script_name = sub_path
+                    .get(1)
+                    .ok_or_else(|| anyhow!("<axes::run::scripts::> is missing a key."))?;
+                self.expand_script(script_name, cancellation_token)?
+            } else {
+                // Case: <axes::run::./get_version.sh>
+                sub_path.join("::")
+            };
+
+        // Recursively expand any tokens *within* the command to be run.
+        let final_command = self.expand_string(&command_to_run, cancellation_token)?;
+
+        println!(
+            "    {}",
+            format!(" script Executing for substitution: '{}'", final_command).dimmed()
+        );
+
+        let output = executor::execute_and_capture_output(
+            &final_command,
+            &self.config.project_root,
+            &self.config.env,
+            cancellation_token,
+        )
+        .with_context(|| format!("Execution of '{}' for substitution failed.", final_command))?;
+
+        // Clean up the output by trimming whitespace and newlines.
+        Ok(output.trim().to_string())
+    }
+
+    /// Helper to get a value from the project's reserved metadata.
+    fn get_reserved_metadata(&self, key: &str) -> Option<String> {
+        match key {
+            "name" => Some(self.config.qualified_name.clone()),
+            "uuid" => Some(self.config.uuid.to_string()),
+            // Always return a clean, canonical path.
+            "path" => Some(
+                dunce::simplified(&self.config.project_root)
+                    .to_string_lossy()
+                    .to_string(),
+            ),
+            "version" => self.config.version.clone(),
+            _ => None,
+        }
+    }
+}
+
+===== core\mod.rs =====
+// src/core/mod.rs
+
+pub mod config_resolver;
+pub mod context_resolver;
+pub mod graph_display;
+pub mod index_manager;
+pub mod interpolator;
+pub mod onboarding_manager;
+pub mod paths;
+
+===== core\onboarding_manager.rs =====
+// src/core/onboarding_manager.rs
+
+use crate::CancellationToken;
+use crate::cli::handlers::commons::check_for_cancellation;
+use crate::core::index_manager::{self, GLOBAL_PROJECT_UUID};
+use crate::models::{GlobalIndex, IndexEntry, ProjectRef};
+use dialoguer::{
+    Confirm, Error as DialoguerError, Input, MultiSelect, Select, theme::ColorfulTheme,
+};
+use std::fs;
+use std::path::{Path, PathBuf};
+use thiserror::Error;
+use uuid::Uuid;
+
+#[derive(Error, Debug)]
+pub enum OnboardingError {
+    #[error("Filesystem Error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Index Error: {0}")]
+    Index(#[from] crate::core::index_manager::IndexError),
+    #[error("User Interface Error: {0}")]
+    Dialoguer(#[from] DialoguerError),
+    #[error("El directorio '{0}' no parece ser un proyecto de `axes` (falta '.axes/axes.toml').")]
+    NotAnAxesProject(String),
+    #[error("Project path is already registered with a different UUID.")]
+    PathAlreadyRegistered,
+    #[error("UUID conflict: project already registered at another path: '{0}'.")]
+    UuidConflict(String),
+    #[error("Project path does not have a valid name: '{0}'.")]
+    InvalidProjectRootName(String),
+    #[error("Operation cancelled by user.")]
+    Cancelled,
+}
+type OnboardingResult<T> = Result<T, OnboardingError>;
+
+pub struct OnboardingOptions {
+    pub autosolve: bool,
+    pub suggested_parent_uuid: Option<Uuid>,
+}
+
+/// The main function of the onboarding state machine.
+pub fn register_project(
+    path: &Path,
+    index: &mut GlobalIndex,
+    options: &OnboardingOptions,
+    cancellation_token: &CancellationToken,
+) -> OnboardingResult<()> {
+    let project_root = dunce::canonicalize(path)?;
+    println!(
+        "\n--- Analizando proyecto en: {} ---",
+        project_root.display()
+    );
+
+    if !project_root.join(".axes/axes.toml").exists() {
+        return Err(OnboardingError::NotAnAxesProject(
+            project_root.display().to_string(),
+        ));
+    }
+
+    // Check if the PATH is already registered. If so, skip to child scan.
+    if let Some((uuid, _)) = index.projects.iter().find(|(_, e)| e.path == project_root) {
+        println!("This project is already registered. Moving to child scan...");
+        scan_and_register_children(&project_root, *uuid, index, options, cancellation_token)?;
+        return Ok(());
+    }
+
+    // Try to read local identity
+    match index_manager::read_project_ref(&project_root) {
+        Ok(pref) => {
+            // Case 1: `project_ref.bin` exists.
+            handle_registration_with_ref(
+                project_root.clone(),
+                pref,
+                index,
+                options,
+                cancellation_token,
+            )?;
+        }
+        Err(_) => {
+            // Case 2: `project_ref.bin` does not exist.
+            handle_registration_without_ref(
+                project_root.clone(),
+                index,
+                options,
+                cancellation_token,
+            )?;
+        }
+    };
+
+    // Get the newly registered UUID for child scanning.
+    if let Some((uuid, _)) = index.projects.iter().find(|(_, e)| e.path == project_root) {
+        scan_and_register_children(&project_root, *uuid, index, options, cancellation_token)?;
+    }
+
+    Ok(())
+}
+
+fn handle_registration_with_ref(
+    project_root: PathBuf,
+    mut pref: ProjectRef, // Make it mutable to be able to correct it
+    index: &mut GlobalIndex,
+    options: &OnboardingOptions,
+    cancellation_token: &CancellationToken,
+) -> OnboardingResult<()> {
+    println!("Local reference (`project_ref.bin`) found. Validating...");
+
+    // 1. Validate UUID and Path
+    if let Some(existing_entry) = index.projects.get(&pref.self_uuid)
+        && existing_entry.path != project_root
+    {
+        // UUID Conflict
+        if options.autosolve {
+            return Err(OnboardingError::UuidConflict(
+                existing_entry.path.display().to_string(),
+            ));
+        }
+        let prompt = format!(
+            "This project's UUID is already registered at another path ({}). Update path to current location?",
+            existing_entry.path.display()
+        );
+        if !Confirm::with_theme(&ColorfulTheme::default())
+            .with_prompt(prompt)
+            .default(true)
+            .interact()?
+        {
+            return Err(OnboardingError::Cancelled);
+        }
+        // The user accepted, the path update will be done at the end.
+    }
+
+    // 2. Validate Parent
+    if let Some(parent_uuid) = pref.parent_uuid
+        && !index.projects.contains_key(&parent_uuid)
+    {
+        if options.autosolve {
+            return Err(OnboardingError::Index(
+                index_manager::IndexError::ProjectNotFoundInIndex { uuid: parent_uuid },
+            ));
+        }
+        println!(
+            "Warning: The parent of this project (UUID: {}) is not registered.",
+            parent_uuid
+        );
+        pref.parent_uuid = Some(choose_parent(index, None, cancellation_token)?); // Ask for new parent
+    }
+
+    // 3. Validate Name
+    loop {
+        let name_conflict = index
+            .projects
+            .values()
+            .any(|entry| entry.parent == pref.parent_uuid && entry.name == pref.name);
+        if !name_conflict {
+            break; // The name is valid, exit the loop
+        }
+
+        if options.autosolve {
+            return Err(OnboardingError::Index(
+                index_manager::IndexError::NameAlreadyExists { name: pref.name },
+            ));
+        }
+
+        println!(
+            "Conflicto de nombre: El padre seleccionado ya tiene un hijo llamado '{}'.",
+            pref.name
+        );
+        pref.name = Input::with_theme(&ColorfulTheme::default())
+            .with_prompt("Por favor, introduce un nuevo nombre para este proyecto")
+            .interact_text()?;
+        check_for_cancellation(cancellation_token).map_err(|_| OnboardingError::Cancelled)?;
+    }
+
+    // 4. Register/Update in the index
+    let final_entry = IndexEntry {
+        name: pref.name.clone(),
+        path: project_root.clone(),
+        parent: pref.parent_uuid,
+    };
+    index.projects.insert(pref.self_uuid, final_entry);
+
+    // 5. Update the local `project_ref.bin` to be consistent
+    index_manager::write_project_ref(&project_root, &pref)?;
+
+    println!("Project '{}' successfully registered/updated.", pref.name);
+    Ok(())
+}
+
+fn handle_registration_without_ref(
+    project_root: PathBuf,
+    index: &mut GlobalIndex,
+    options: &OnboardingOptions,
+    cancellation_token: &CancellationToken,
+) -> OnboardingResult<()> {
+    if options.autosolve {
+        if let Some(parent_uuid) = options.suggested_parent_uuid {
+            let name = project_root
+                .file_name()
+                .ok_or_else(|| {
+                    OnboardingError::InvalidProjectRootName(project_root.display().to_string())
+                })?
+                .to_string_lossy()
+                .into_owned();
+            println!(
+                "Modo --autosolve: registrando '{}' como hijo de proyecto sugerido.",
+                name
+            );
+            let (new_uuid, _) = index_manager::add_project_to_index(
+                index,
+                name.clone(),
+                project_root.clone(),
+                Some(parent_uuid),
+            )?;
+            let new_ref = ProjectRef {
+                self_uuid: new_uuid,
+                parent_uuid: Some(parent_uuid),
+                name,
+            };
+            index_manager::write_project_ref(&project_root, &new_ref)?;
+        } else {
+            return Err(OnboardingError::Cancelled);
+        }
+    } else {
+        println!("No local reference found. Details will be requested.");
+
+        let name_default = project_root
+            .file_name()
+            .ok_or_else(|| {
+                OnboardingError::InvalidProjectRootName(project_root.display().to_string())
+            })?
+            .to_string_lossy()
+            .into_owned();
+
+        let name: String = Input::with_theme(&ColorfulTheme::default())
+            .with_prompt("Nombre para este proyecto:")
+            .default(name_default)
+            .interact_text()?;
+        check_for_cancellation(cancellation_token).map_err(|_| OnboardingError::Cancelled)?;
+
+        let parent_uuid = choose_parent(index, options.suggested_parent_uuid, cancellation_token)?;
+        let (new_uuid, _) = index_manager::add_project_to_index(
+            index,
+            name.clone(),
+            project_root.clone(),
+            Some(parent_uuid),
+        )?;
+        let new_ref = ProjectRef {
+            self_uuid: new_uuid,
+            parent_uuid: Some(parent_uuid),
+            name,
+        };
+        index_manager::write_project_ref(&project_root, &new_ref)?;
+        println!(
+            "Project '{}' successfully registered and linked.",
+            new_ref.name
+        );
+    }
+    Ok(())
+}
+
+fn scan_and_register_children(
+    project_root: &Path,
+    parent_uuid: Uuid,
+    index: &mut GlobalIndex,
+    options: &OnboardingOptions,
+    cancellation_token: &CancellationToken,
+) -> OnboardingResult<()> {
+    if !options.autosolve
+        && !Confirm::with_theme(&ColorfulTheme::default())
+            .with_prompt("Scan subdirectories for unregistered children?")
+            .default(true)
+            .interact()?
+    {
+        return Ok(());
+    }
+
+    println!("Escaneando hijos...");
+    let mut unregistered_children = Vec::new();
+    for entry in fs::read_dir(project_root)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() && path.join(".axes/axes.toml").exists() {
+            // It's an axes project. Is it already registered?
+            if !index.projects.values().any(|e| e.path == path) {
+                unregistered_children.push(path);
+            }
+        }
+    }
+
+    if unregistered_children.is_empty() {
+        println!("No se encontraron hijos no registrados.");
+        return Ok(());
+    }
+
+    let children_to_register = if options.autosolve {
+        unregistered_children
+    } else {
+        let child_names: Vec<_> = unregistered_children
+            .iter()
+            .filter_map(|p| p.file_name().map(|f| f.to_string_lossy()))
+            .collect();
+        let selections = MultiSelect::with_theme(&ColorfulTheme::default())
+            .with_prompt("The following unregistered children were found. Select which ones to register (space to toggle, enter to continue):")
+            .items(&child_names)
+            .interact()?;
+        check_for_cancellation(cancellation_token).map_err(|_| OnboardingError::Cancelled)?;
+
+        selections
+            .iter()
+            .map(|i| unregistered_children[*i].clone())
+            .collect()
+    };
+
+    for child_path in children_to_register {
+        let child_options = OnboardingOptions {
+            autosolve: options.autosolve,
+            suggested_parent_uuid: Some(parent_uuid),
+        };
+        // RECURSIVE CALL
+        register_project(&child_path, index, &child_options, cancellation_token)?;
+    }
+
+    Ok(())
+}
+
+fn choose_parent(
+    index: &GlobalIndex,
+    suggested_parent: Option<Uuid>,
+    cancellation_token: &CancellationToken,
+) -> OnboardingResult<Uuid> {
+    let mut parents: Vec<(Uuid, String)> = index
+        .projects
+        .iter()
+        .map(|(uuid, entry)| (*uuid, entry.name.clone()))
+        .collect();
+    parents.sort_by_key(|(_, name)| name.clone());
+
+    let parent_names: Vec<String> = parents.iter().map(|(_, name)| name.clone()).collect();
+
+    let default_selection = suggested_parent
+        .and_then(|s_uuid| parents.iter().position(|(uuid, _)| *uuid == s_uuid))
+        .unwrap_or_else(|| {
+            parents
+                .iter()
+                .position(|(uuid, _)| *uuid == GLOBAL_PROJECT_UUID)
+                .unwrap()
+        });
+
+    let selection = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("Selecciona el proyecto padre:")
+        .items(&parent_names)
+        .default(default_selection)
+        .interact()?;
+    check_for_cancellation(cancellation_token).map_err(|_| OnboardingError::Cancelled)?;
+
+    Ok(parents[selection].0)
+}
+
+===== core\paths.rs =====
+// src/core/paths.rs
+
+use crate::constants::GLOBAL_INDEX_FILENAME; // Use the new constant
+use std::fs;
+use std::path::PathBuf;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum PathError {
+    #[error("Could not find system config directory.")]
+    ConfigDirNotFound,
+    #[error("Could not create config directory at '{path}': {source}")]
+    ConfigDirCreation {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+/// Returns the path to the Axes configuration directory.
+/// Creates it if it doesn't exist.
+pub fn get_axes_config_dir() -> Result<PathBuf, PathError> {
+    let config_path = dirs::config_dir()
+        .ok_or(PathError::ConfigDirNotFound)?
+        .join("axes");
+
+    if !config_path.exists() {
+        fs::create_dir_all(&config_path).map_err(|e| PathError::ConfigDirCreation {
+            path: config_path.display().to_string(),
+            source: e,
+        })?;
+    }
+    Ok(config_path)
+}
+
+/// Returns the path to the global `index.toml` file.
+/// This is the main file in the axes configuration directory.
+pub fn get_global_index_path() -> Result<PathBuf, PathError> {
+    get_axes_config_dir().map(|dir| dir.join(GLOBAL_INDEX_FILENAME))
+}
+
+===== lib.rs =====
+// src/lib.rs
+
+include!(concat!(env!("OUT_DIR"), "/translations.rs"));
+
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+pub type CancellationToken = Arc<AtomicBool>;
+
+pub mod cli;
+pub mod constants;
+pub mod core;
+pub mod models;
+pub mod system;
+
+===== models.rs =====
+// src/models.rs
+
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
+
+// --- PUBLIC COMMAND MODELS (FOR TOML) ---
+// These are what the user sees and uses in axes.toml
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(untagged)]
+pub enum Runnable {
+    Sequence(Vec<String>),
+    Single(String),
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct ExtendedCommand {
+    pub run: Runnable,
+    pub desc: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct PlatformCommand {
+    #[serde(default)]
+    pub default: Option<Runnable>,
+    pub windows: Option<Runnable>,
+    pub linux: Option<Runnable>,
+    pub macos: Option<Runnable>,
+    pub desc: Option<String>,
+}
+
+/// Represents a command in `axes.toml`. Uses `untagged` for flexible syntax.
+/// It's only for deserializing from TOML, not for serializing to bincode.
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(untagged)]
+pub enum Command {
+    Sequence(Vec<String>),
+    Simple(String),
+    Extended(ExtendedCommand),
+    Platform(PlatformCommand),
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct OptionsConfig {
+    // Explicit fields for key options
+    pub at_start: Option<String>,
+    pub at_exit: Option<String>,
+    pub shell: Option<String>,
+
+    // The `open_with` sub-table
+    #[serde(default)]
+    pub open_with: HashMap<String, String>,
+}
+
+// --- `axes.toml` MODELS (What is read from the configuration file) ---
+
+/// Represents the deserialized structure of an `axes.toml` file.
+/// Only needs `Deserialize`.
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct ProjectConfig {
+    pub name: Option<String>,
+    pub version: Option<String>,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub scripts: HashMap<String, Command>,
+    #[serde(default)]
+    pub options: OptionsConfig,
+    #[serde(default)]
+    pub vars: HashMap<String, String>,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+}
+
+impl ProjectConfig {
+    /// Creates a new, default ProjectConfig. This is used to generate
+    /// the initial `axes.toml` for the global project and for `axes init`.
+    pub fn new() -> Self {
+        let mut open_with_defaults = HashMap::new();
+
+        // --- Editor scripts ---
+        // Uses a variable `<axes::vars::editor_cmd>` so the user can easily
+        // override it (e.g., to "code-insiders" or "vim").
+        open_with_defaults.insert(
+            "editor".to_string(),
+            "<axes::vars::editor_cmd> \"<axes::path>\"".to_string(),
+        );
+        open_with_defaults.insert(
+            "idea".to_string(),
+            "<axes::vars::idea_cmd> \"<axes::path>\"".to_string(),
+        );
+
+        // --- OS-Specific File Explorer scripts ---
+        if cfg!(target_os = "windows") {
+            open_with_defaults.insert(
+                "explorer".to_string(),
+                "-explorer \"<axes::path>\"".to_string(),
+            );
+            // The default action on Windows is to open the file explorer.
+            open_with_defaults.insert("default".to_string(), "explorer".to_string());
+        } else if cfg!(target_os = "macos") {
+            open_with_defaults.insert("finder".to_string(), "open \"<axes::path>\"".to_string());
+            open_with_defaults.insert("default".to_string(), "finder".to_string());
+        } else {
+            // Linux and other Unix-like systems.
+            open_with_defaults.insert("files".to_string(), "xdg-open \"<axes::path>\"".to_string());
+            open_with_defaults.insert("default".to_string(), "files".to_string());
+        }
+
+        // --- Terminal/Shell Command ---
+        // This is useful for quickly opening a new terminal session at the project root.
+        // It doesn't start an `axes` session, just a native terminal.
+        if cfg!(target_os = "windows") {
+            open_with_defaults.insert(
+                "shell".to_string(),
+                "start cmd.exe /K \"cd /D <axes::path>\"".to_string(),
+            );
+        } else {
+            // This is more complex on Linux/macOS as it depends on the terminal emulator.
+            // We provide a common default that users can override.
+            open_with_defaults.insert(
+                "shell".to_string(),
+                "<axes::vars::terminal_cmd>".to_string(),
+            );
+        }
+
+        // --- Default Variables ---
+        let mut vars_defaults = HashMap::new();
+        vars_defaults.insert("editor_cmd".to_string(), "code".to_string());
+        vars_defaults.insert("idea_cmd".to_string(), "idea".to_string());
+
+        // A sensible default for terminal command on non-Windows systems.
+        // The user is expected to change this to their preferred terminal (e.g., "kitty", "alacritty").
+        vars_defaults.insert(
+            "terminal_cmd".to_string(),
+            "gnome-terminal --working-directory=<axes::path>".to_string(),
+        );
+
+        Self {
+            // For `init`, these provide a nice starting point.
+            // For `global`, they serve as documentation.
+            name: Some("global".to_string()),
+            version: Some("0.1.0".to_string()),
+            description: Some("A new project managed by `axes`.".to_string()),
+
+            // `scripts` is empty by default. `init` could add a "hello" script,
+            // but the `global` project itself doesn't need it.
+            scripts: HashMap::new(),
+
+            options: OptionsConfig {
+                open_with: open_with_defaults,
+                at_start: None,
+                at_exit: None,
+                shell: None,
+            },
+
+            vars: vars_defaults,
+
+            env: HashMap::new(),
+        }
+    }
+
+    /// Creates a minimal yet structurally complete ProjectConfig for `axes init`.
+    /// It acts as a scaffold, guiding the user without being prescriptive.
+    pub fn new_for_init(name: &str, version: &str, description: &str) -> Self {
+        let mut scripts = HashMap::new();
+        let mut vars = HashMap::new();
+
+        // --- A single, simple command to verify the setup ---
+        scripts.insert(
+            "test".to_string(),
+            Command::Extended(ExtendedCommand {
+                desc: Some("Run a simple test echo command.".to_string()),
+                run: Runnable::Single("echo \"Test for '<axes::name>' successful!\"".to_string()),
+            }),
+        );
+
+        // --- A placeholder variable ---
+        vars.insert("GREETING".to_string(), "Hello from there!".to_string());
+
+        // --- Placeholders for session hooks in [options] ---
+        // We use a command that is unlikely to exist to prevent accidental execution,
+        // but shows the user where to put their real scripts.
+        // A commented-out example is even better, but TOML serialization
+        // of comments is not standard. An empty string is the cleanest approach.
+        let options = OptionsConfig {
+            at_start: Some("".to_string()), // Placeholder for environment setup (e.g., `source .venv/bin/activate`)
+            at_exit: Some("".to_string()),  // Placeholder for cleanup (e.g., `docker-compose down`)
+            ..Default::default()
+        };
+
+        Self {
+            name: Some(name.to_string()),
+            version: Some(version.to_string()),
+            description: Some(description.to_string()),
+            scripts,
+            vars,
+            options,
+            env: HashMap::new(),
+        }
+    }
+}
+
+// --- GLOBAL INDEX MODELS ---
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]
+pub struct IndexEntry {
+    pub name: String,
+    pub path: PathBuf,
+    pub parent: Option<Uuid>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct GlobalIndex {
+    #[serde(default)]
+    pub projects: HashMap<Uuid, IndexEntry>,
+    #[serde(default)]
+    pub aliases: HashMap<String, Uuid>,
+    pub last_used: Option<Uuid>,
+}
+
+// --- LOCAL CACHE MODELS ---
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct ChildCache {
+    #[serde(default)]
+    pub children: HashMap<String, Uuid>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct LastUsedCache {
+    pub child_uuid: Option<Uuid>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ProjectRef {
+    pub self_uuid: Uuid,
+    pub parent_uuid: Option<Uuid>,
+    pub name: String,
+}
+
+// --- IN-MEMORY MODELS (Our internal working representation) ---
+
+/// The final, merged view of the configuration.
+/// Does not need `Serialize` or `Deserialize` because it is NEVER directly written/read.
+#[derive(Debug, Clone)]
+pub struct ResolvedConfig {
+    pub uuid: Uuid,
+    pub qualified_name: String,
+    pub project_root: PathBuf,
+    pub version: Option<String>,
+    pub description: Option<String>,
+    pub scripts: HashMap<String, Command>,
+    pub options: OptionsConfig,
+    pub vars: HashMap<String, String>,
+    pub env: HashMap<String, String>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct ShellConfig {
+    pub path: PathBuf,
+    pub interactive_args: Option<Vec<String>>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct ShellsConfig {
+    #[serde(default)]
+    pub shells: HashMap<String, ShellConfig>,
+}
+
+// --- SERIALIZATION SUBSTITUTES MODELS (For the binary cache) ---
+// These are private to the crate and are only used for conversion.
+
+/// A substitute `enum` for `Command` that is explicit and serializable by `bincode`.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub(crate) enum SerializableCommand {
+    Sequence(Vec<String>),
+    Simple(String),
+    Extended(SerializableExtendedCommand),
+    Platform(SerializablePlatformCommand),
+}
+
+/// Substitute for `Runnable` that is bincode-safe (tagged).
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub(crate) enum SerializableRunnable {
+    Sequence(Vec<String>),
+    Single(String),
+}
+
+/// Substitute for `ExtendedCommand` that uses `SerializableRunnable`.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub(crate) struct SerializableExtendedCommand {
+    pub run: SerializableRunnable,
+    pub desc: Option<String>,
+}
+
+/// Substitute for `PlatformCommand` that uses `SerializableRunnable`.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub(crate) struct SerializablePlatformCommand {
+    #[serde(default)]
+    pub default: Option<SerializableRunnable>,
+    pub windows: Option<SerializableRunnable>,
+    pub linux: Option<SerializableRunnable>,
+    pub macos: Option<SerializableRunnable>,
+    pub desc: Option<String>,
+}
+
+/// A `SystemTime` wrapper that is serializable.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub(crate) struct SerializableSystemTime(Duration);
+
+/// The substitute for `ResolvedConfig` that uses serializable types (`String` instead of `PathBuf`).
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub(crate) struct SerializableResolvedConfig {
+    pub uuid: Uuid,
+    pub qualified_name: String,
+    pub project_root: String,
+    pub version: Option<String>,
+    pub description: Option<String>,
+    pub scripts: HashMap<String, SerializableCommand>,
+    pub options: OptionsConfig,
+    pub vars: HashMap<String, String>,
+    pub env: HashMap<String, String>,
+}
+
+/// The main container for the configuration cache that is written to disk.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub(crate) struct SerializableConfigCache {
+    pub resolved_config: SerializableResolvedConfig,
+    pub dependencies: HashMap<String, SerializableSystemTime>,
+}
+
+/// --- Conversions TO Serializable models (for writing the cache) ---
+impl From<&Runnable> for SerializableRunnable {
+    fn from(value: &Runnable) -> Self {
+        match value {
+            Runnable::Sequence(s) => SerializableRunnable::Sequence(s.clone()),
+            Runnable::Single(s) => SerializableRunnable::Single(s.clone()),
+        }
+    }
+}
+
+impl From<&ExtendedCommand> for SerializableExtendedCommand {
+    fn from(value: &ExtendedCommand) -> Self {
+        Self {
+            run: (&value.run).into(),
+            desc: value.desc.clone(),
+        }
+    }
+}
+
+impl From<&PlatformCommand> for SerializablePlatformCommand {
+    fn from(value: &PlatformCommand) -> Self {
+        Self {
+            // Here we correctly handle Option using .map() instead of a forbidden impl
+            default: value.default.as_ref().map(|v| v.into()),
+            windows: value.windows.as_ref().map(|v| v.into()),
+            linux: value.linux.as_ref().map(|v| v.into()),
+            macos: value.macos.as_ref().map(|v| v.into()),
+            desc: value.desc.clone(),
+        }
+    }
+}
+
+// This is the only implementation for From<&Command>
+impl From<&Command> for SerializableCommand {
+    fn from(value: &Command) -> Self {
+        match value {
+            Command::Sequence(s) => SerializableCommand::Sequence(s.clone()),
+            Command::Simple(s) => SerializableCommand::Simple(s.clone()),
+            // `e` is already a reference, `into()` will work directly
+            Command::Extended(e) => SerializableCommand::Extended(e.into()),
+            Command::Platform(p) => SerializableCommand::Platform(p.into()),
+        }
+    }
+}
+
+impl From<&ResolvedConfig> for SerializableResolvedConfig {
+    fn from(value: &ResolvedConfig) -> Self {
+        Self {
+            uuid: value.uuid,
+            qualified_name: value.qualified_name.clone(),
+            project_root: value.project_root.to_string_lossy().into_owned(),
+            version: value.version.clone(),
+            description: value.description.clone(),
+            scripts: value
+                .scripts
+                .iter()
+                .map(|(k, v)| (k.clone(), v.into()))
+                .collect(),
+            options: value.options.clone(),
+            vars: value.vars.clone(),
+            env: value.env.clone(),
+        }
+    }
+}
+
+// --- Conversions FROM Serializable models (for reading the cache) ---
+
+impl From<SerializableRunnable> for Runnable {
+    fn from(value: SerializableRunnable) -> Self {
+        match value {
+            SerializableRunnable::Sequence(s) => Runnable::Sequence(s),
+            SerializableRunnable::Single(s) => Runnable::Single(s),
+        }
+    }
+}
+
+impl From<SerializableExtendedCommand> for ExtendedCommand {
+    fn from(value: SerializableExtendedCommand) -> Self {
+        Self {
+            run: value.run.into(),
+            desc: value.desc,
+        }
+    }
+}
+
+impl From<SerializablePlatformCommand> for PlatformCommand {
+    fn from(value: SerializablePlatformCommand) -> Self {
+        Self {
+            default: value.default.map(|v| v.into()),
+            windows: value.windows.map(|v| v.into()),
+            linux: value.linux.map(|v| v.into()),
+            macos: value.macos.map(|v| v.into()),
+            desc: value.desc,
+        }
+    }
+}
+
+impl From<SerializableCommand> for Command {
+    fn from(value: SerializableCommand) -> Self {
+        match value {
+            SerializableCommand::Sequence(s) => Command::Sequence(s),
+            SerializableCommand::Simple(s) => Command::Simple(s),
+            SerializableCommand::Extended(e) => Command::Extended(e.into()),
+            SerializableCommand::Platform(p) => Command::Platform(p.into()),
+        }
+    }
+}
+
+impl From<SerializableResolvedConfig> for ResolvedConfig {
+    fn from(value: SerializableResolvedConfig) -> Self {
+        Self {
+            uuid: value.uuid,
+            qualified_name: value.qualified_name,
+            project_root: PathBuf::from(value.project_root),
+            version: value.version,
+            description: value.description,
+            scripts: value
+                .scripts
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
+            options: value.options,
+            vars: value.vars,
+            env: value.env,
+        }
+    }
+}
+
+// --- Conversions for SystemTime ---
+
+impl From<SystemTime> for SerializableSystemTime {
+    fn from(time: SystemTime) -> Self {
+        Self(time.duration_since(UNIX_EPOCH).unwrap_or_default())
+    }
+}
+
+impl From<SerializableSystemTime> for SystemTime {
+    fn from(time: SerializableSystemTime) -> Self {
+        UNIX_EPOCH + time.0
+    }
+}
+
+===== system\executor.rs =====
+// EN: src/system/executor.rs
+
+use crate::{CancellationToken, cli::handlers::commons};
+use dunce;
+use std::collections::HashMap;
+use std::io::ErrorKind;
+use std::path::Path;
+use std::process::{Command as StdCommand, Stdio};
+use std::time::Duration;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum ExecutionError {
+    #[error("Command could not be parsed: {0}")]
+    CommandParse(String),
+    #[error("No command specified to run.")]
+    EmptyCommand,
+    #[error("Command '{0}' could not be executed: {1}")]
+    CommandFailed(String, std::io::Error),
+    #[error("Command '{0}' exited with a non-zero error code.")]
+    NonZeroExitStatus(String),
+    #[error("Command '{command}' produced output that was not valid UTF-8")]
+    InvalidUtf8Output {
+        command: String,
+        #[source]
+        source: std::string::FromUtf8Error,
+    },
+    #[error("Operation was cancelled by the user.")]
+    Cancelled,
+}
+
+/// Executes a system command robustly and predictably, with support for graceful cancellation.
+/// This function will not return until the command has finished, but it can be
+/// interrupted by the CancellationToken.
+pub fn execute_command(
+    command_line: &str,
+    cwd: &Path,
+    env_vars: &HashMap<String, String>,
+    cancellation_token: &CancellationToken,
+) -> Result<(), ExecutionError> {
+    let trimmed_command = command_line.trim();
+    if trimmed_command.is_empty() {
+        return Ok(()); // An empty command is a success, not an error.
+    }
+
+    let (final_command_line, ignore_errors) = if trimmed_command.starts_with('-') {
+        (trimmed_command.strip_prefix('-').unwrap().trim(), true)
+    } else {
+        (trimmed_command, false)
+    };
+
+    if final_command_line.is_empty() {
+        return Ok(());
+    }
+
+    let parts = shlex::split(final_command_line)
+        .ok_or_else(|| ExecutionError::CommandParse(final_command_line.to_string()))?;
+    if parts.is_empty() {
+        return Ok(());
+    }
+
+    let program = &parts[0];
+    let args = &parts[1..];
+    let clean_cwd = dunce::simplified(cwd);
+
+    let mut command = StdCommand::new(program);
+    command
+        .args(args)
+        .current_dir(clean_cwd)
+        .envs(env_vars)
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+
+    // Fallback logic for Windows built-in scripts like `echo`.
+    // We try to spawn directly first. If it fails with `NotFound`, we try with `cmd /C`.
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(e) if e.kind() == ErrorKind::NotFound && cfg!(target_os = "windows") => {
+            log::debug!("Command '{}' not found. Retrying with cmd /C.", program);
+            StdCommand::new("cmd")
+                .arg("/C")
+                .arg(final_command_line) // Pass the full, unparsed line to cmd
+                .current_dir(clean_cwd)
+                .envs(env_vars)
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .map_err(|e| ExecutionError::CommandFailed(final_command_line.to_string(), e))?
+        }
+        Err(e) => {
+            return Err(ExecutionError::CommandFailed(
+                final_command_line.to_string(),
+                e,
+            ));
+        }
+    };
+
+    // Non-blocking wait loop to allow for cancellation.
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                // Process has finished.
+                if !status.success() && !ignore_errors {
+                    return Err(ExecutionError::NonZeroExitStatus(
+                        final_command_line.to_string(),
+                    ));
+                }
+                return Ok(());
+            }
+            Ok(None) => {
+                // Process is still running. Check for cancellation signal.
+                if commons::check_for_cancellation(cancellation_token).is_err() {
+                    log::debug!(
+                        "Cancellation requested, killing child process (PID: {})...",
+                        child.id()
+                    );
+                    if let Err(e) = child.kill() {
+                        log::warn!("Failed to kill child process {}: {}", child.id(), e);
+                    }
+                    // Wait briefly for the process to die after being killed.
+                    child.wait().ok();
+                    return Err(ExecutionError::Cancelled);
+                }
+                // Wait briefly to avoid a tight loop consuming CPU.
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => {
+                // Error while trying to get the process status.
+                return Err(ExecutionError::CommandFailed(
+                    final_command_line.to_string(),
+                    e,
+                ));
+            }
+        }
+    }
+}
+
+/// Executes a command and captures its standard output.
+/// Stderr is passed through to the user's terminal.
+/// NOTE: This operation is blocking and only checks for cancellation *before* starting.
+/// It is intended for short-running scripts used for text substitution.
+pub fn execute_and_capture_output(
+    command_line: &str,
+    cwd: &Path,
+    env_vars: &HashMap<String, String>,
+    cancellation_token: &CancellationToken,
+) -> Result<String, ExecutionError> {
+    // Pre-flight cancellation check.
+    if commons::check_for_cancellation(cancellation_token).is_err() {
+        return Err(ExecutionError::Cancelled);
+    }
+
+    let trimmed_command = command_line.trim();
+    if trimmed_command.is_empty() {
+        return Ok(String::new());
+    }
+
+    let parts = shlex::split(trimmed_command)
+        .ok_or_else(|| ExecutionError::CommandParse(trimmed_command.to_string()))?;
+    if parts.is_empty() {
+        return Ok(String::new());
+    }
+
+    let program = &parts[0];
+    let args = &parts[1..];
+    let clean_cwd = dunce::simplified(cwd);
+
+    let command_output = StdCommand::new(program)
+        .args(args)
+        .current_dir(clean_cwd)
+        .envs(env_vars)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .output()
+        .map_err(|e| ExecutionError::CommandFailed(trimmed_command.to_string(), e))?;
+
+    if !command_output.status.success() {
+        return Err(ExecutionError::NonZeroExitStatus(
+            trimmed_command.to_string(),
+        ));
+    }
+
+    String::from_utf8(command_output.stdout).map_err(|e| ExecutionError::InvalidUtf8Output {
+        command: trimmed_command.to_string(),
+        source: e,
+    })
+}
+
+===== system\mod.rs =====
+// src/system/mod.rs
+
+pub mod executor;
+pub mod shell;
+
+===== system\shell.rs =====
+// src/system/shell.rs
+
+use crate::CancellationToken;
+use crate::models::{ResolvedConfig, ShellConfig, ShellsConfig};
+use crate::system::executor;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::{env, fs};
+use tempfile::NamedTempFile;
+use thiserror::Error;
+
+use crate::core::interpolator::Interpolator;
+
+#[derive(Error, Debug)]
+pub enum ShellError {
+    #[error("Filesystem Error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Error con el archivo temporal: {0}")]
+    TempFile(#[from] tempfile::PersistError),
+    #[error("Could not find axes config directory.")]
+    ConfigDirNotFound,
+    #[error("Requested shell '{0}' is not defined in shells.toml.")]
+    ShellNotDefined(String),
+    #[error("No se pudo determinar una shell por defecto para este sistema operativo.")]
+    NoDefaultShell,
+    #[error("Error al parsear shells.toml: {0}")]
+    TomlParse(#[from] toml::de::Error),
+    #[error("Error serializing shells config to TOML: {0}")]
+    TomlSerialize(#[from] toml::ser::Error),
+    #[error("Failed to expand tokens in command: {0}")]
+    InterpolationFailed(String),
+}
+
+/// Launches an interactive sub-shell for a project.
+pub fn launch_interactive_shell(
+    config: &ResolvedConfig,
+    cancellation_token: &CancellationToken,
+) -> Result<(), ShellError> {
+    let shells_config = load_shells_config()?;
+
+    // 1. Determine which shell to use
+    let shell_name = match &config.options.shell {
+        Some(shell_from_config) => shell_from_config.clone(), // Use the config value
+        None => get_default_shell_name() // If there's nothing, use the system default
+            .ok_or(ShellError::NoDefaultShell)?
+            .to_string(),
+    };
+
+    let shell_config = shells_config
+        .shells
+        .get(&shell_name)
+        .ok_or_else(|| ShellError::ShellNotDefined(shell_name.clone()))?;
+
+    // 2. Create the temporary initialization script
+    let is_windows_shell = shell_name == "cmd" || shell_name == "powershell";
+    let script_extension = if is_windows_shell { ".bat" } else { ".sh" };
+    let temp_script_file = NamedTempFile::with_prefix("axes-init-")?
+        .into_temp_path()
+        .with_extension(script_extension);
+
+    let script_content = build_init_script(config, is_windows_shell);
+
+    fs::write(&temp_script_file, script_content)?;
+
+    log::debug!(
+        "Temporary initialization script created at: {}",
+        temp_script_file.display()
+    );
+
+    // 3. Build and execute the command
+    let mut cmd = Command::new(&shell_config.path);
+    cmd.current_dir(&config.project_root);
+
+    // Inject axes session variables
+    cmd.env("AXES_PROJECT_ROOT", config.project_root.as_os_str());
+    cmd.env("AXES_PROJECT_NAME", &config.qualified_name);
+    cmd.env("AXES_PROJECT_UUID", config.uuid.to_string());
+
+    if let Some(args) = &shell_config.interactive_args {
+        for arg in args {
+            cmd.arg(arg);
+        }
+        cmd.arg(&temp_script_file);
+    }
+
+    // 4. Launch the shell and wait for it to finish
+    let status = cmd
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()?;
+
+    if !status.success() {
+        log::warn!(
+            "Interactive shell finished with error code: {:?}",
+            status.code()
+        );
+    }
+
+    // 5. Execute the `at_exit` hook
+    if let Some(at_exit_command) = &config.options.at_exit
+        && !at_exit_command.trim().is_empty()
+    {
+        println!("\nExecuting 'at_exit' hook...");
+
+        // NOTE: CORRECTED API USAGE
+        // 1. Create a mutable interpolator instance.
+        let mut interpolator = Interpolator::new(config);
+        // 2. Call the new method `expand_string`, which returns a Result.
+        let final_command = interpolator
+            .expand_string(at_exit_command, cancellation_token)
+            .map_err(|e| ShellError::InterpolationFailed(e.to_string()))?;
+
+        if let Err(e) = executor::execute_command(
+            &final_command,
+            &config.project_root,
+            &config.env,
+            cancellation_token,
+        ) {
+            eprintln!("\nWarning: 'at_exit' hook failed to execute: {}", e);
+        }
+    }
+
+    // 6. Cleanup of the temporary file (handled by `tempfile`)
+
+    Ok(())
+}
+
+/// Builds the content of the initialization script.
+fn build_init_script(config: &ResolvedConfig, is_windows: bool) -> String {
+    let mut script = String::new();
+
+    // Silence scripts
+    if is_windows {
+        script.push_str("@echo off\n");
+    } else {
+        // We could use `set +v` or simply put nothing for POSIX shells
+    }
+
+    // Add [env] variables
+    for (key, value) in &config.env {
+        if is_windows {
+            script.push_str(&format!("set \"{}={}\"\n", key, value));
+        } else {
+            script.push_str(&format!("export {}='{}'\n", key, value));
+        }
+    }
+
+    // Add at_start hook
+    if let Some(at_start) = &config.options.at_start
+        && !at_start.trim().is_empty()
+    {
+        if is_windows {
+            script.push_str(&format!("call {}\n", at_start));
+        } else {
+            // `source` is more robust than `.`
+            script.push_str(&format!("source \"{}\" || . \"{}\"\n", at_start, at_start));
+        }
+    }
+
+    // Welcome message
+    let welcome_message = format!(
+        "--- axes session for '{}' started. Type 'exit' to exit. ---",
+        config.qualified_name
+    );
+    if is_windows {
+        script.push_str(&format!("\necho.\necho {}\n", welcome_message));
+    } else {
+        script.push_str(&format!("\necho ''\necho '{}'\n", welcome_message));
+    }
+
+    script
+}
+
+/// Loads shell configuration from disk.
+/// If the file does not exist, it generates it with default values and saves it.
+fn load_shells_config() -> Result<ShellsConfig, ShellError> {
+    let config_dir =
+        crate::core::paths::get_axes_config_dir().map_err(|_| ShellError::ConfigDirNotFound)?;
+    let shells_path = config_dir.join("shells.toml");
+
+    if !shells_path.exists() {
+        log::warn!("'shells.toml' not found. Generating default config file.");
+        let default_config = generate_default_shells_config();
+        let toml_string = toml::to_string_pretty(&default_config)?;
+        fs::write(&shells_path, toml_string)?;
+        println!("Shells config file created at: {}", shells_path.display());
+        return Ok(default_config);
+    }
+
+    let content = fs::read_to_string(shells_path)?;
+    Ok(toml::from_str(&content)?)
+}
+
+/// Generates a default shell configuration, detecting what is available.
+fn generate_default_shells_config() -> ShellsConfig {
+    let mut shells = HashMap::new();
+
+    // Always add `cmd` on Windows.
+    if cfg!(target_os = "windows") {
+        shells.insert(
+            "cmd".to_string(),
+            ShellConfig {
+                path: PathBuf::from("cmd.exe"),
+                interactive_args: Some(vec!["/K".to_string()]),
+            },
+        );
+
+        // Try to detect PowerShell.
+        if is_executable_in_path("powershell.exe") {
+            shells.insert(
+                "powershell".to_string(),
+                ShellConfig {
+                    path: PathBuf::from("powershell.exe"),
+                    interactive_args: Some(vec!["-NoExit".to_string(), "-File".to_string()]),
+                },
+            );
+        }
+    }
+
+    // Try to detect `bash` on any system.
+    let bash_path_str = if cfg!(target_os = "windows") {
+        "bash.exe"
+    } else {
+        "bash"
+    };
+    if is_executable_in_path(bash_path_str) {
+        shells.insert(
+            "bash".to_string(),
+            ShellConfig {
+                path: PathBuf::from(bash_path_str),
+                interactive_args: Some(vec!["--rcfile".to_string()]),
+            },
+        );
+    }
+
+    // More detectors for zsh, fish, etc. could be added here.
+
+    ShellsConfig { shells }
+}
+
+/// Checks if an executable exists in the system's PATH.
+fn is_executable_in_path(executable_name: &str) -> bool {
+    if let Ok(path_var) = env::var("PATH") {
+        for path in env::split_paths(&path_var) {
+            let full_path = path.join(executable_name);
+            if full_path.is_file() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Returns the default shell name for the current OS.
+fn get_default_shell_name() -> Option<&'static str> {
+    if cfg!(target_os = "windows") {
+        Some("cmd")
+    } else {
+        // On non-Windows systems, `bash` is a safe assumption, but
+        // could be improved by reading the SHELL environment variable.
+        env::var("SHELL")
+            .ok()
+            .and_then(|s| {
+                s.split('/').next_back().map(|name| {
+                    if name == "zsh" {
+                        "zsh"
+                    } else if name == "fish" {
+                        "fish"
+                    } else {
+                        "bash"
+                    } // Fallback
+                })
+            })
+            .or(Some("bash"))
+    }
+}

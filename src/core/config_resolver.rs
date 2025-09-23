@@ -124,7 +124,7 @@ fn merge_chain_into_config(chain: Vec<ProjectConfig>) -> ResolvedConfig {
         project_root: PathBuf::new(),
         version: None,
         description: None,
-        commands: HashMap::new(),
+        scripts: HashMap::new(),
         options: OptionsConfig::default(),
         vars: HashMap::new(),
         env: HashMap::new(),
@@ -139,7 +139,7 @@ fn merge_chain_into_config(chain: Vec<ProjectConfig>) -> ResolvedConfig {
         resolved.options.open_with.extend(config.options.open_with);
         resolved.vars.extend(config.vars);
         resolved.env.extend(config.env);
-        resolved.commands.extend(config.commands);
+        resolved.scripts.extend(config.scripts);
     }
 
     resolved

@@ -127,3 +127,8 @@
 "info.script_type.platform" = "Platform specific"
 "info.script_type.sequence" = "Sequence"
 "info.error.unexpected_args" = "'info' command does not take any additional arguments."
+
+# Shell / Session
+"shell.info.welcome" = "--- `axes` session for '{name}' started. Type 'exit' to leave. ---"
+"shell.info.executing_at_exit" = "Executing 'at_exit' hook..."
+"shell.warning.at_exit_failed" = "Warning: 'at_exit' hook failed to execute: {error}"

@@ -2,7 +2,7 @@ name = "src"
 version = "0.1.0"
 description = "A new project named 'src', managed by `axes`."
 
-[commands.test]
+[scripts.test]
 run = """echo "Test for '<axes::name>' successful!""""
 desc = "Run a simple test echo command."
 

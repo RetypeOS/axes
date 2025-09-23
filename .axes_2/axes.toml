@@ -6,7 +6,7 @@ description = "The development workflow configuration for the `axes` project its
 
 # === Development Scripts ===
 # Defines workflows for building, testing, and managing the tool.
-[commands] # TODO: Rename to [scripts] in a future version.
+[scripts] # TODO: Rename to [scripts] in a future version.
 
 # --- Build Workflows ---
 build = { desc = "Builds the project in debug mode with fast compilation.", run = "cargo build" }
@@ -24,29 +24,29 @@ fmt_fix = { desc = "Formats the code automatically.", run = "cargo fmt --all" }
 
 # --- Composite and Utility Workflows ---
 quality = { desc = "Runs all quality checks in sequence (fmt, check, lint, test).", run = [
-    "-<axes::commands::fmt>",
-    "-<axes::commands::check>",
-    "-<axes::commands::lint>",
-    "<axes::commands::test>",
+    "-<axes::scripts::fmt>",
+    "-<axes::scripts::check>",
+    "-<axes::scripts::lint>",
+    "<axes::scripts::test>",
 ]}
 doc = { desc = "Builds and opens the project documentation in the browser.", run = "cargo doc --open" }
 clean = { desc = "Removes the target directory and build artifacts.", run = "cargo clean" }
 
 # --- Local Installation Workflow ---
-[commands.install]
+[scripts.install]
 desc = "Builds in release and copies the artifact to a local installation path."
 #run = "echo K loko merijein..."
 windows = [
-    "<axes::commands::build_release>",
+    "<axes::scripts::build_release>",
     # Uses `xcopy` to create the directory if it doesn't exist and suppress the prompt.
     "xcopy /Y \"<axes::path>\\target\\release\\axes.exe\" \"<axes::vars::install_path_win>\""
 ]
 linux = [
-    "<axes::commands::build_release>",
+    "<axes::scripts::build_release>",
     "install -m 755 -D \"<axes::path>/target/release/axes\" \"<axes::vars::install_path_nix>\""
 ]
 macos = [
-    "<axes::commands::build_release>",
+    "<axes::scripts::build_release>",
     "install -m 755 -D \"<axes::path>/target/release/axes\" \"<axes::vars::install_path_nix>\""
 ]
 

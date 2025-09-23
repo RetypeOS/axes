@@ -5,10 +5,12 @@ use crate::models::{ResolvedConfig, ShellConfig, ShellsConfig};
 use crate::system::executor;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Command};
 use std::{env, fs};
 use tempfile::NamedTempFile;
 use thiserror::Error;
+
+use colored::Colorize;
 
 use crate::core::interpolator::Interpolator;
 
@@ -33,6 +35,7 @@ pub enum ShellError {
 }
 
 /// Launches an interactive sub-shell for a project.
+/// Launches an interactive sub-shell for a project.
 pub fn launch_interactive_shell(
     config: &ResolvedConfig,
     cancellation_token: &CancellationToken,
@@ -40,39 +43,48 @@ pub fn launch_interactive_shell(
     let shells_config = load_shells_config()?;
 
     // 1. Determine which shell to use
-    let shell_name = match &config.options.shell {
-        Some(shell_from_config) => shell_from_config.clone(), // Use the config value
-        None => get_default_shell_name() // If there's nothing, use the system default
-            .ok_or(ShellError::NoDefaultShell)?
-            .to_string(),
-    };
-
+    let shell_name = config
+        .options
+        .shell
+        .as_deref()
+        .unwrap_or(get_default_shell_name());
     let shell_config = shells_config
         .shells
-        .get(&shell_name)
-        .ok_or_else(|| ShellError::ShellNotDefined(shell_name.clone()))?;
+        .get(shell_name)
+        .ok_or_else(|| ShellError::ShellNotDefined(shell_name.to_string()))?;
 
-    // 2. Create the temporary initialization script
+    // 2. Create the interpolator EARLY. FIXED.
+    let mut interpolator = Interpolator::new(config);
+
+    // 3. Expand the `at_start` command BEFORE building the script.
+    let expanded_at_start_cmd = match &config.options.at_start {
+        Some(cmd) if !cmd.trim().is_empty() => Some(
+            interpolator
+                .expand_string(cmd, cancellation_token)
+                .map_err(|e| ShellError::InterpolationFailed(e.to_string()))?,
+        ),
+        _ => None,
+    };
+
+    // 4. Build the temporary initialization script using the EXPANDED command.
     let is_windows_shell = shell_name == "cmd" || shell_name == "powershell";
     let script_extension = if is_windows_shell { ".bat" } else { ".sh" };
-    let temp_script_file = NamedTempFile::with_prefix("axes-init-")?
+    let temp_script_file = NamedTempFile::with_prefix("axes-init-")
+        .unwrap()
         .into_temp_path()
         .with_extension(script_extension);
 
-    let script_content = build_init_script(config, is_windows_shell);
-
-    fs::write(&temp_script_file, script_content)?;
-
-    log::debug!(
-        "Temporary initialization script created at: {}",
-        temp_script_file.display()
+    let script_content = build_init_script(
+        config,
+        expanded_at_start_cmd.as_deref(),
+        is_windows_shell,
     );
+    fs::write(&temp_script_file, script_content)?;
+    log::debug!("Temporary init script created at: {}", temp_script_file.display());
 
-    // 3. Build and execute the command
+    // 5. Build and execute the shell command
     let mut cmd = Command::new(&shell_config.path);
     cmd.current_dir(&config.project_root);
-
-    // Inject axes session variables
     cmd.env("AXES_PROJECT_ROOT", config.project_root.as_os_str());
     cmd.env("AXES_PROJECT_NAME", &config.qualified_name);
     cmd.env("AXES_PROJECT_UUID", config.uuid.to_string());
@@ -83,59 +95,45 @@ pub fn launch_interactive_shell(
         }
         cmd.arg(&temp_script_file);
     }
-
-    // 4. Launch the shell and wait for it to finish
-    let status = cmd
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()?;
-
+    
+    let status = cmd.status()?;
     if !status.success() {
-        log::warn!(
-            "Interactive shell finished with error code: {:?}",
-            status.code()
-        );
+        log::warn!("Interactive shell finished with code: {:?}", status.code());
     }
 
-    // 5. Execute the `at_exit` hook
-    if let Some(at_exit_command) = &config.options.at_exit
-        && !at_exit_command.trim().is_empty()
-    {
-        println!("\nExecuting 'at_exit' hook...");
+    // 6. Execute the `at_exit` hook, using the same interpolator instance.
+    if let Some(at_exit_command) = &config.options.at_exit {
+        if !at_exit_command.trim().is_empty() {
+            println!("\n{}", t!("shell.info.executing_at_exit").dimmed());
 
-        // NOTE: CORRECTED API USAGE
-        // 1. Create a mutable interpolator instance.
-        let mut interpolator = Interpolator::new(config);
-        // 2. Call the new method `expand_string`, which returns a Result.
-        let final_command = interpolator
-            .expand_string(at_exit_command, cancellation_token)
-            .map_err(|e| ShellError::InterpolationFailed(e.to_string()))?;
+            let final_command = interpolator
+                .expand_string(at_exit_command, cancellation_token)
+                .map_err(|e| ShellError::InterpolationFailed(e.to_string()))?;
 
-        if let Err(e) = executor::execute_command(
-            &final_command,
-            &config.project_root,
-            &config.env,
-            cancellation_token,
-        ) {
-            eprintln!("\nWarning: 'at_exit' hook failed to execute: {}", e);
+            if let Err(e) = executor::execute_command(
+                &final_command,
+                &config.project_root,
+                &config.env,
+                cancellation_token,
+            ) {
+                eprintln!("\n{}", format!(t!("shell.warning.at_exit_failed"), error = e).yellow());
+            }
         }
     }
-
-    // 6. Cleanup of the temporary file (handled by `tempfile`)
 
     Ok(())
 }
 
 /// Builds the content of the initialization script.
-fn build_init_script(config: &ResolvedConfig, is_windows: bool) -> String {
+fn build_init_script(
+    config: &ResolvedConfig,
+    expanded_at_start: Option<&str>,
+    is_windows: bool,
+) -> String {
     let mut script = String::new();
 
-    // Silence commands
     if is_windows {
         script.push_str("@echo off\n");
-    } else {
-        // We could use `set +v` or simply put nothing for POSIX shells
     }
 
     // Add [env] variables
@@ -147,23 +145,19 @@ fn build_init_script(config: &ResolvedConfig, is_windows: bool) -> String {
         }
     }
 
-    // Add at_start hook
-    if let Some(at_start) = &config.options.at_start
-        && !at_start.trim().is_empty()
-    {
-        if is_windows {
-            script.push_str(&format!("call {}\n", at_start));
-        } else {
-            // `source` is more robust than `.`
-            script.push_str(&format!("source \"{}\" || . \"{}\"\n", at_start, at_start));
+    // Use the pre-expanded `at_start` command
+    if let Some(at_start) = expanded_at_start {
+        if !at_start.trim().is_empty() {
+             if is_windows {
+                script.push_str(&format!("call {}\n", at_start));
+            } else {
+                script.push_str(&format!("source \"{}\" || . \"{}\"\n", at_start, at_start));
+            }
         }
     }
 
     // Welcome message
-    let welcome_message = format!(
-        "--- axes session for '{}' started. Type 'exit' to exit. ---",
-        config.qualified_name
-    );
+    let welcome_message = format!(t!("shell.info.welcome"), name = config.qualified_name);
     if is_windows {
         script.push_str(&format!("\necho.\necho {}\n", welcome_message));
     } else {
@@ -254,25 +248,11 @@ fn is_executable_in_path(executable_name: &str) -> bool {
 }
 
 /// Returns the default shell name for the current OS.
-fn get_default_shell_name() -> Option<&'static str> {
+fn get_default_shell_name() -> &'static str {
     if cfg!(target_os = "windows") {
-        Some("cmd")
+        "cmd"
     } else {
-        // On non-Windows systems, `bash` is a safe assumption, but
-        // could be improved by reading the SHELL environment variable.
-        env::var("SHELL")
-            .ok()
-            .and_then(|s| {
-                s.split('/').next_back().map(|name| {
-                    if name == "zsh" {
-                        "zsh"
-                    } else if name == "fish" {
-                        "fish"
-                    } else {
-                        "bash"
-                    } // Fallback
-                })
-            })
-            .or(Some("bash"))
+        // --- NOTE: This could be improved by reading the SHELL env var, but `bash` is a safe default.
+        "bash"
     }
 }

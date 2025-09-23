@@ -88,7 +88,7 @@ impl<'a> CommandExecutor<'a> {
     ) -> Result<()> {
         let command_def = self
             .config
-            .commands
+            .scripts
             .get(script_name)
             .ok_or_else(|| anyhow!(t!("run.error.script_not_found"), script = script_name))?;
 
@@ -142,7 +142,7 @@ impl<'a> CommandExecutor<'a> {
     ) -> Result<()> {
         println!(
             "{}",
-            format!("⚡ Running {} commands in parallel...", batch.len()).blue()
+            format!("⚡ Running {} scripts in parallel...", batch.len()).blue()
         );
 
         let results: Result<Vec<()>> = batch
@@ -165,8 +165,7 @@ impl<'a> CommandExecutor<'a> {
         cli_params: &[String],
         interpolator: &mut Interpolator,
     ) -> Result<()> {
-        // NOTE: Corrected regex to handle whitespace correctly
-        let re = regex::Regex::new(r"^\s*<axes::(commands|scripts)::([^>]+)>\s*$").unwrap();
+        let re = regex::Regex::new(r"^\s*<axes::scripts::([^>]+)>\s*$").unwrap();
         if let Some(caps) = re.captures(template) {
             let script_name = &caps[2];
             return self.execute_internal_script(script_name, cli_params, interpolator);

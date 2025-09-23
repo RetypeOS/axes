@@ -76,20 +76,19 @@ fn print_metadata(config: &ResolvedConfig) {
     }
 }
 
-/// Prints the list of available scripts (commands).
+/// Prints the list of available scripts (scripts).
 fn print_scripts(config: &ResolvedConfig) {
-    // TODO: Change `config.commands` to `config.scripts` in the future.
-    if config.commands.is_empty() {
+    if config.scripts.is_empty() {
         println!("\n  {}", t!("info.label.no_scripts").dimmed());
         return;
     }
 
     println!("\n  {}:", t!("info.label.available_scripts").blue());
-    let mut cmd_names: Vec<_> = config.commands.keys().collect();
+    let mut cmd_names: Vec<_> = config.scripts.keys().collect();
     cmd_names.sort();
 
     for cmd_name in cmd_names {
-        if let Some(command_def) = config.commands.get(cmd_name) {
+        if let Some(command_def) = config.scripts.get(cmd_name) {
             print!("    - {}", cmd_name.cyan());
 
             match command_def {

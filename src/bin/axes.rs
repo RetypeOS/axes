@@ -103,7 +103,7 @@ async fn main() -> Result<()> {
     let main_logic_token = cancellation_token.clone();
 
     tokio::select! {
-        // Tarea A: La lógica principal de la aplicación.
+        // Work A: Main logic of aplication.
         result = run_cli_wrapper(cli, main_logic_token) => {
             if let Err(e) = result {
                 if !cancellation_token.load(Ordering::SeqCst) {
@@ -115,7 +115,7 @@ async fn main() -> Result<()> {
             }
         }
 
-        // Tarea B: Esperar la señal de Ctrl+C.
+        // Work B: Wait the signal of Ctrl+C.
         _ = tokio::signal::ctrl_c() => {
             if signal_token.load(Ordering::SeqCst) {
                 signal_token.store(false, Ordering::SeqCst);

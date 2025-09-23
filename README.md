@@ -146,7 +146,7 @@ Abre el archivo `.axes/axes.toml` dentro del proyecto `api` y añade un comando:
 version = "0.1.0"
 description = "El servicio de API principal."
 
-[commands]
+[scripts]
 dev = "cargo watch -x run"
 check = ["cargo check", "cargo clippy -- -D warnings", "echo 'API verificada!'"]
 ```
@@ -305,7 +305,7 @@ at_start = "source ./.venv/bin/activate"
 FLASK_APP = "app.py"
 FLASK_ENV = "development"
 
-[commands]
+[scripts]
 # Secuencia para la configuración inicial
 setup = [
     "python3 -m venv .venv",
@@ -374,7 +374,7 @@ El comando `run` es el corazón de la ejecución de tareas.
 - **Comandos Multiplataforma:** Define diferentes comandos para cada sistema operativo.
 
     ```toml
-    [commands.open-docs.platform]
+    [scripts.open-docs.platform]
     desc = "Abre la documentación en el navegador."
     windows = "start http://localhost:3000"
     linux = "xdg-open http://localhost:3000"
@@ -416,7 +416,7 @@ version = "1.0.0"
 description = "Una descripción de mi proyecto."
 
 # --- Comandos Personalizados ---
-[commands]
+[scripts]
 test = "cargo test -- --nocapture"
 lint = { run = "cargo clippy {clippy_args}", desc = "Ejecuta el linter usando la variable guardada 'clippy_args'" }
 deploy = [
@@ -426,7 +426,7 @@ deploy = [
 
 # --- Variables de Interpolación ---
 [vars]
-# Se pueden usar en `commands`, `options`, e incluso en otras variables.
+# Se pueden usar en `scripts`, `options`, e incluso en otras variables.
 target_dir = "build/output"
 final_artifact = "{target_dir}/app.exe"
 clippy_args = "--all-targets"
@@ -484,7 +484,7 @@ Puedes usar tokens en casi cualquier valor de string en tu `axes.toml`.
 | `axes <contexto> tree`                            | Muestra el sub-árbol de proyectos a partir del `<contexto>`.                                               |
 | `axes <contexto> info`                            | Muestra toda la configuración fusionada para un proyecto e info general.                                                  |
 | `axes <contexto> start`                           | Inicia una sesión de shell interactiva en el contexto del proyecto.                                        |
-| `axes <contexto> run <script> [params...]`        | Ejecuta un script definido en `[commands]`.                                                                |
+| `axes <contexto> run <script> [params...]`        | Ejecuta un script definido en `[scripts]`.                                                                |
 | `axes <contexto> open [with] [app]`               | Abre el proyecto usando una aplicación definida en `[options.open_with]`.                                  |
 | `axes <contexto> rename <nuevo-nombre>`           | Renombra un proyecto de forma segura.                                                                      |
 | `axes <contexto> link <nuevo-padre>`              | Cambia el padre de un proyecto, moviéndolo en el árbol.                                                    |

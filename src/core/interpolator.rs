@@ -86,16 +86,15 @@ impl<'a> Interpolator<'a> {
 
         let key = parts[0];
 
-        // Precedence: Reserved -> Vars -> Scripts (Commands for now)
+        // Precedence: Reserved -> Vars -> Scripts
         if let Some(value) = self.get_reserved_metadata(key) {
             return Ok(value);
         }
         if self.config.vars.contains_key(key) {
             return self.expand_qualified_token(&["vars", key], cancellation_token);
         }
-        // TODO: Change "commands" to "scripts" in a future refactor
-        if self.config.commands.contains_key(key) {
-            return self.expand_qualified_token(&["commands", key], cancellation_token);
+        if self.config.scripts.contains_key(key) {
+            return self.expand_qualified_token(&["scripts", key], cancellation_token);
         }
 
         Err(anyhow!("<axes::{}> not found.", token_path))
@@ -127,11 +126,10 @@ impl<'a> Interpolator<'a> {
                     .cloned()
                     .ok_or_else(|| anyhow!("<axes::env::{}> not found.", key))
             }
-            // TODO: Change "commands" to "scripts" in a future refactor
-            Some(&"commands") => {
+            Some(&"scripts") => {
                 let key = parts
                     .get(1)
-                    .ok_or_else(|| anyhow!("<axes::commands::> is missing a key."))?;
+                    .ok_or_else(|| anyhow!("<axes::scripts::> is missing a key."))?;
                 self.expand_script(key, cancellation_token)
             }
             // NOTE: The new, powerful run command
@@ -177,9 +175,9 @@ impl<'a> Interpolator<'a> {
 
         let command_def = self
             .config
-            .commands
+            .scripts
             .get(script_name)
-            .ok_or_else(|| anyhow!("<axes::commands::{}> not found.", script_name))?;
+            .ok_or_else(|| anyhow!("<axes::scripts::{}> not found.", script_name))?;
 
         let raw_content = match command_def {
             ProjectCommand::Simple(s) => s.clone(),
@@ -223,7 +221,7 @@ impl<'a> Interpolator<'a> {
         cancellation_token: &CancellationToken,
     ) -> Result<String> {
         let command_to_run =
-            if sub_path.first() == Some(&"commands") || sub_path.first() == Some(&"scripts") {
+            if sub_path.first() == Some(&"scripts") {
                 // Case: <axes::run::scripts::my_script>
                 let script_name = sub_path
                     .get(1)

@@ -71,7 +71,7 @@ pub fn execute_command(
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
 
-    // Fallback logic for Windows built-in commands like `echo`.
+    // Fallback logic for Windows built-in scripts like `echo`.
     // We try to spawn directly first. If it fails with `NotFound`, we try with `cmd /C`.
     let mut child = match command.spawn() {
         Ok(child) => child,
@@ -138,7 +138,7 @@ pub fn execute_command(
 /// Executes a command and captures its standard output.
 /// Stderr is passed through to the user's terminal.
 /// NOTE: This operation is blocking and only checks for cancellation *before* starting.
-/// It is intended for short-running commands used for text substitution.
+/// It is intended for short-running scripts used for text substitution.
 pub fn execute_and_capture_output(
     command_line: &str,
     cwd: &Path,

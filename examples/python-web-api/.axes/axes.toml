@@ -35,10 +35,10 @@ FLASK_ENV = "development"
 API_GREETING = "Hello from the axes-powered API!"
 
 # --- Comandos Personalizados ---
-[commands]
+[scripts]
 # El comando de configuración inicial. Es una secuencia de pasos.
 # El usuario solo necesita ejecutar `axes <contexto> setup` una vez.
-[commands.setup.platform]
+[scripts.setup.platform]
 desc = "Crea el entorno virtual e instala las dependencias."
 # Versión para Windows
 windows = [
@@ -56,23 +56,23 @@ default = [
 ]
 
 # El comando para iniciar el servidor de desarrollo.
-[commands.dev]
+[scripts.dev]
 desc = "Inicia el servidor de desarrollo de Flask."
 run = "flask run"
 
 # El comando para ejecutar las pruebas.
-[commands.test]
+[scripts.test]
 desc = "Ejecuta la suite de pruebas con pytest."
 run = "pytest"
 
 # El comando para verificar el estilo del código.
-[commands.lint]
+[scripts.lint]
 desc = "Ejecuta el linter flake8."
 run = "flake8 ."
 
 # Un comando compuesto. Demuestra cómo los comandos de `axes` pueden llamar a otros.
 # Esto crea flujos de trabajo complejos a partir de bloques simples.
-[commands.check]
+[scripts.check]
 desc = "Ejecuta el linter y las pruebas."
 run = [
     "axes run lint", # Ejecuta el comando `lint` de este mismo proyecto.

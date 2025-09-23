@@ -83,7 +83,7 @@ Veamos el flujo completo de un comando como `axes mi-app/api check`:
         - Escribe esta `ResolvedConfig` en un nuevo `config.cache.bin`.
 6. **`dispatch_action` -> `execute_project_action` -> `handle_run`:**
     - `handle_run` recibe la `ResolvedConfig` completa.
-    - Encuentra el comando `check` en `config.commands`.
+    - Encuentra el comando `check` en `config.scripts`.
     - Si es una secuencia `["cargo check", "echo OK"]`, entra en un bucle.
     - Para cada comando de la secuencia:
         - Llama al **`interpolator`** para reemplazar `{name}`, `{path}`, etc.
@@ -117,7 +117,7 @@ La robustez de `axes` reside en la clara separación de sus modelos de datos.
 ### La Configuración Resuelta (`ResolvedConfig`)
 
 - **Ubicación:** Solo en memoria. Es el producto final del `config_resolver`.
-- **Contenido:** La `struct` con la que opera la mayor parte de la aplicación. Contiene las secciones `commands`, `vars`, `env`, etc., ya fusionadas desde toda la cadena de herencia. Contiene rutas absolutas y toda la información necesaria para ejecutar una acción.
+- **Contenido:** La `struct` con la que opera la mayor parte de la aplicación. Contiene las secciones `scripts`, `vars`, `env`, etc., ya fusionadas desde toda la cadena de herencia. Contiene rutas absolutas y toda la información necesaria para ejecutar una acción.
 - **Propósito:** Proporciona una vista completa y autocontenida de la configuración de un proyecto en un momento dado, eliminando la necesidad de que los `handles` (`handle_run`, `handle_open`) se preocupen por la herencia.
 
 ## Flujos de Datos Clave

@@ -65,7 +65,7 @@ pub struct ProjectConfig {
     pub version: Option<String>,
     pub description: Option<String>,
     #[serde(default)]
-    pub commands: HashMap<String, Command>,
+    pub scripts: HashMap<String, Command>,
     #[serde(default)]
     pub options: OptionsConfig,
     #[serde(default)]
@@ -80,7 +80,7 @@ impl ProjectConfig {
     pub fn new() -> Self {
         let mut open_with_defaults = HashMap::new();
 
-        // --- Editor Commands ---
+        // --- Editor scripts ---
         // Uses a variable `<axes::vars::editor_cmd>` so the user can easily
         // override it (e.g., to "code-insiders" or "vim").
         open_with_defaults.insert(
@@ -92,7 +92,7 @@ impl ProjectConfig {
             "<axes::vars::idea_cmd> \"<axes::path>\"".to_string(),
         );
 
-        // --- OS-Specific File Explorer Commands ---
+        // --- OS-Specific File Explorer scripts ---
         if cfg!(target_os = "windows") {
             open_with_defaults.insert(
                 "explorer".to_string(),
@@ -145,9 +145,9 @@ impl ProjectConfig {
             version: Some("0.1.0".to_string()),
             description: Some("A new project managed by `axes`.".to_string()),
 
-            // `commands` is empty by default. `init` could add a "hello" script,
+            // `scripts` is empty by default. `init` could add a "hello" script,
             // but the `global` project itself doesn't need it.
-            commands: HashMap::new(),
+            scripts: HashMap::new(),
 
             options: OptionsConfig {
                 open_with: open_with_defaults,
@@ -165,11 +165,11 @@ impl ProjectConfig {
     /// Creates a minimal yet structurally complete ProjectConfig for `axes init`.
     /// It acts as a scaffold, guiding the user without being prescriptive.
     pub fn new_for_init(name: &str, version: &str, description: &str) -> Self {
-        let mut commands = HashMap::new();
+        let mut scripts = HashMap::new();
         let mut vars = HashMap::new();
 
         // --- A single, simple command to verify the setup ---
-        commands.insert(
+        scripts.insert(
             "test".to_string(),
             Command::Extended(ExtendedCommand {
                 desc: Some("Run a simple test echo command.".to_string()),
@@ -182,7 +182,7 @@ impl ProjectConfig {
 
         // --- Placeholders for session hooks in [options] ---
         // We use a command that is unlikely to exist to prevent accidental execution,
-        // but shows the user where to put their real commands.
+        // but shows the user where to put their real scripts.
         // A commented-out example is even better, but TOML serialization
         // of comments is not standard. An empty string is the cleanest approach.
         let options = OptionsConfig {
@@ -195,7 +195,7 @@ impl ProjectConfig {
             name: Some(name.to_string()),
             version: Some(version.to_string()),
             description: Some(description.to_string()),
-            commands,
+            scripts,
             vars,
             options,
             env: HashMap::new(),
@@ -252,7 +252,7 @@ pub struct ResolvedConfig {
     pub project_root: PathBuf,
     pub version: Option<String>,
     pub description: Option<String>,
-    pub commands: HashMap<String, Command>,
+    pub scripts: HashMap<String, Command>,
     pub options: OptionsConfig,
     pub vars: HashMap<String, String>,
     pub env: HashMap<String, String>,
@@ -319,7 +319,7 @@ pub(crate) struct SerializableResolvedConfig {
     pub project_root: String,
     pub version: Option<String>,
     pub description: Option<String>,
-    pub commands: HashMap<String, SerializableCommand>,
+    pub scripts: HashMap<String, SerializableCommand>,
     pub options: OptionsConfig,
     pub vars: HashMap<String, String>,
     pub env: HashMap<String, String>,
@@ -385,8 +385,8 @@ impl From<&ResolvedConfig> for SerializableResolvedConfig {
             project_root: value.project_root.to_string_lossy().into_owned(),
             version: value.version.clone(),
             description: value.description.clone(),
-            commands: value
-                .commands
+            scripts: value
+                .scripts
                 .iter()
                 .map(|(k, v)| (k.clone(), v.into()))
                 .collect(),
@@ -448,8 +448,8 @@ impl From<SerializableResolvedConfig> for ResolvedConfig {
             project_root: PathBuf::from(value.project_root),
             version: value.version,
             description: value.description,
-            commands: value
-                .commands
+            scripts: value
+                .scripts
                 .into_iter()
                 .map(|(k, v)| (k, v.into()))
                 .collect(),
