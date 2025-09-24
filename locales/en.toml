@@ -42,6 +42,8 @@
 "run.error.script_not_found" = "Script '{script}' not found in project configuration."
 "run.info.executing_sequence" = "Executing script sequence for '{script}'..."
 "run.success.sequence_completed" = "✔ Sequence completed successfully."
+"run.error.params_not_accepted" = "The script was called with parameters, but is not configured to accept them. Add `<axes::params>` to the script definition in your `axes.toml` to specify where they should be injected."
+"run.error.params_not_used" = "Unused arguments were provided. The script is not configured to accept them or all explicit parameters have already been consumed."
 
 # Open command
 "open.error.too_many_args" = "'open' command accepts at most one argument (the application key)."
@@ -132,3 +134,10 @@
 "shell.info.welcome" = "--- `axes` session for '{name}' started. Type 'exit' to leave. ---"
 "shell.info.executing_at_exit" = "Executing 'at_exit' hook..."
 "shell.warning.at_exit_failed" = "Warning: 'at_exit' hook failed to execute: {error}"
+
+# Interpolator Errors
+"interpolator.error.max_depth" = "Maximum recursion depth ({depth}) exceeded during script expansion. Check for indirect or infinite cycles."
+"interpolator.error.token_not_found" = "Token '<axes::{token}>' could not be resolved. It is not a reserved keyword, variable, or script."
+"interpolator.error.invalid_param_spec" = "Unsupported parameter specifier: '{spec}'. Use a positional index (e.g., '0') or a mapped flag (e.g., 'flag=value')."
+"interpolator.error.unknown_namespace" = "Unknown token namespace: '<axes::{ns}>'. Supported namespaces are 'vars', 'env', 'scripts', and 'run'."
+"interpolator.error.cycle" = "Cyclical script reference detected: {path} -> {script}"

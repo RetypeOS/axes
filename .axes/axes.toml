@@ -9,7 +9,7 @@ description = "The development workflow configuration for the `axes` project its
 [scripts] # TODO: Rename to [scripts] in a future version.
 
 # --- Build Workflows ---
-build = { desc = "Builds the project in debug mode with fast compilation.", run = "cargo build" }
+build = { desc = "Builds the project in debug mode with fast compilation.", run = "cargo build <axes::params>" }
 build_release = { desc = "Builds the project in release mode for distribution.", run = "cargo build --release" }
 
 # --- Run and Test Workflows ---
@@ -19,7 +19,7 @@ test = { desc = "Runs all unit and integration tests.", run = "cargo test" }
 # --- Code Quality Workflows ---
 check = { desc = "Checks the project for errors without building.", run = "cargo check" }
 lint = { desc = "Lints the code for style and correctness issues.", run = "cargo clippy <axes::vars::clippy_args>" }
-fmt = { desc = "Checks if the code is formatted according to project style.", run = "cargo fmt --all -- --check" }
+fmt = { desc = "Checks if the code is formatted according to project style.", run = "cargo fmt <axes::params>" }
 fmt_fix = { desc = "Formats the code automatically.", run = "cargo fmt --all" }
 
 # --- Composite and Utility Workflows ---
@@ -33,9 +33,13 @@ doc = { desc = "Builds and opens the project documentation in the browser.", run
 clean = { desc = "Removes the target directory and build artifacts.", run = "cargo clean" }
 
 # --- Local Installation Workflow ---
+_install = [
+    "<axes::scripts::build_release>",
+    "xcopy /Y \"<axes::path>\\target\\release\\axes.exe\" \"C:\\scripts\\axes.exe\""
+]
+
 [scripts.install]
 desc = "Builds in release and copies the artifact to a local installation path."
-#run = "echo K loko merijein..."
 windows = [
     "<axes::scripts::build_release>",
     # Uses `xcopy` to create the directory if it doesn't exist and suppress the prompt.

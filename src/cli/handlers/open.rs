@@ -4,6 +4,7 @@ use anyhow::{Result, anyhow};
 use colored::*;
 
 use crate::CancellationToken;
+use crate::core::arg_parser::ParsedArgs;
 use crate::core::interpolator::Interpolator;
 use crate::system::executor;
 
@@ -67,7 +68,9 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     };
 
     // 4. Interpolate the command template using the new interpolator.
-    let mut interpolator = Interpolator::new(&config);
+    let empty_params = Vec::new();
+    let mut parsed_args = ParsedArgs::new(&empty_params)?;
+    let mut interpolator = Interpolator::new(&config, &mut parsed_args);
     let final_command = interpolator.expand_string(&command_template, cancellation_token)?;
 
     if final_command.trim().is_empty() {

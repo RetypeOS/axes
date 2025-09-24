@@ -1,11 +1,12 @@
 // src/system/shell.rs
 
 use crate::CancellationToken;
+use crate::core::arg_parser::ParsedArgs;
 use crate::models::{ResolvedConfig, ShellConfig, ShellsConfig};
 use crate::system::executor;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::{Command};
+use std::process::Command;
 use std::{env, fs};
 use tempfile::NamedTempFile;
 use thiserror::Error;
@@ -54,7 +55,10 @@ pub fn launch_interactive_shell(
         .ok_or_else(|| ShellError::ShellNotDefined(shell_name.to_string()))?;
 
     // 2. Create the interpolator EARLY. FIXED.
-    let mut interpolator = Interpolator::new(config);
+    let empty_params = Vec::new();
+    let mut parsed_args_for_start = ParsedArgs::new(&empty_params)
+        .map_err(|e| ShellError::InterpolationFailed(e.to_string()))?;
+    let mut interpolator = Interpolator::new(config, &mut parsed_args_for_start);
 
     // 3. Expand the `at_start` command BEFORE building the script.
     let expanded_at_start_cmd = match &config.options.at_start {
@@ -74,13 +78,13 @@ pub fn launch_interactive_shell(
         .into_temp_path()
         .with_extension(script_extension);
 
-    let script_content = build_init_script(
-        config,
-        expanded_at_start_cmd.as_deref(),
-        is_windows_shell,
-    );
+    let script_content =
+        build_init_script(config, expanded_at_start_cmd.as_deref(), is_windows_shell);
     fs::write(&temp_script_file, script_content)?;
-    log::debug!("Temporary init script created at: {}", temp_script_file.display());
+    log::debug!(
+        "Temporary init script created at: {}",
+        temp_script_file.display()
+    );
 
     // 5. Build and execute the shell command
     let mut cmd = Command::new(&shell_config.path);
@@ -95,7 +99,7 @@ pub fn launch_interactive_shell(
         }
         cmd.arg(&temp_script_file);
     }
-    
+
     let status = cmd.status()?;
     if !status.success() {
         log::warn!("Interactive shell finished with code: {:?}", status.code());
@@ -116,7 +120,10 @@ pub fn launch_interactive_shell(
                 &config.env,
                 cancellation_token,
             ) {
-                eprintln!("\n{}", format!(t!("shell.warning.at_exit_failed"), error = e).yellow());
+                eprintln!(
+                    "\n{}",
+                    format!(t!("shell.warning.at_exit_failed"), error = e).yellow()
+                );
             }
         }
     }
@@ -148,7 +155,7 @@ fn build_init_script(
     // Use the pre-expanded `at_start` command
     if let Some(at_start) = expanded_at_start {
         if !at_start.trim().is_empty() {
-             if is_windows {
+            if is_windows {
                 script.push_str(&format!("call {}\n", at_start));
             } else {
                 script.push_str(&format!("source \"{}\" || . \"{}\"\n", at_start, at_start));
