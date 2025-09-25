@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./logo-formated.png" alt="axes Logo" width="200">
+  <img src="./logo.png" alt="axes Logo" width="200">
 </p>
 <h1 align="center">axes: El Control Remoto Universal para tu Ecosistema de Desarrollo</h1>
 
