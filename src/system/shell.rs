@@ -106,25 +106,25 @@ pub fn launch_interactive_shell(
     }
 
     // 6. Execute the `at_exit` hook, using the same interpolator instance.
-    if let Some(at_exit_command) = &config.options.at_exit {
-        if !at_exit_command.trim().is_empty() {
-            println!("\n{}", t!("shell.info.executing_at_exit").dimmed());
+    if let Some(at_exit_command) = &config.options.at_exit
+        && !at_exit_command.trim().is_empty()
+    {
+        println!("\n{}", t!("shell.info.executing_at_exit").dimmed());
 
-            let final_command = interpolator
-                .expand_string(at_exit_command, cancellation_token)
-                .map_err(|e| ShellError::InterpolationFailed(e.to_string()))?;
+        let final_command = interpolator
+            .expand_string(at_exit_command, cancellation_token)
+            .map_err(|e| ShellError::InterpolationFailed(e.to_string()))?;
 
-            if let Err(e) = executor::execute_command(
-                &final_command,
-                &config.project_root,
-                &config.env,
-                cancellation_token,
-            ) {
-                eprintln!(
-                    "\n{}",
-                    format!(t!("shell.warning.at_exit_failed"), error = e).yellow()
-                );
-            }
+        if let Err(e) = executor::execute_command(
+            &final_command,
+            &config.project_root,
+            &config.env,
+            cancellation_token,
+        ) {
+            eprintln!(
+                "\n{}",
+                format!(t!("shell.warning.at_exit_failed"), error = e).yellow()
+            );
         }
     }
 
@@ -153,13 +153,13 @@ fn build_init_script(
     }
 
     // Use the pre-expanded `at_start` command
-    if let Some(at_start) = expanded_at_start {
-        if !at_start.trim().is_empty() {
-            if is_windows {
-                script.push_str(&format!("call {}\n", at_start));
-            } else {
-                script.push_str(&format!("source \"{}\" || . \"{}\"\n", at_start, at_start));
-            }
+    if let Some(at_start) = expanded_at_start
+        && !at_start.trim().is_empty()
+    {
+        if is_windows {
+            script.push_str(&format!("call {}\n", at_start));
+        } else {
+            script.push_str(&format!("source \"{}\" || . \"{}\"\n", at_start, at_start));
         }
     }
 

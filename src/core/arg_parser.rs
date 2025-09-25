@@ -1,6 +1,6 @@
 // EN: src/core/arg_parser.rs
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -40,10 +40,8 @@ impl<'a> ParsedArgs<'a> {
         while let Some(param) = params_iter.next() {
             let name_opt = if let Some(name) = param.strip_prefix("--") {
                 Some(name)
-            } else if let Some(name) = param.strip_prefix('-') {
-                Some(name)
             } else {
-                None
+                param.strip_prefix('-')
             };
 
             if let Some(name) = name_opt {
@@ -134,14 +132,14 @@ impl<'a> ParsedArgs<'a> {
         named_keys.sort();
 
         for name in named_keys {
-            if let Some(arg) = self.named.get_mut(&name) {
-                if !arg.consumed {
-                    remaining_parts.push(format!("--{}", name));
-                    if let Some(val) = arg.value {
-                        remaining_parts.push(val.to_string());
-                    }
-                    arg.consumed = true;
+            if let Some(arg) = self.named.get_mut(&name)
+                && !arg.consumed
+            {
+                remaining_parts.push(format!("--{}", name));
+                if let Some(val) = arg.value {
+                    remaining_parts.push(val.to_string());
                 }
+                arg.consumed = true;
             }
         }
 
