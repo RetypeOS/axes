@@ -1,12 +1,12 @@
 // EN: src/core/task_executor.rs
 
 use crate::{
+    CancellationToken,
     core::parameters::ArgResolver,
     models::{ResolvedConfig, Task, TemplateComponent},
     system::executor,
-    CancellationToken,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use colored::*;
 use rayon::prelude::*;
 
@@ -23,12 +23,14 @@ pub fn assemble_final_command(
         match component {
             TemplateComponent::Literal(s) => final_command.push_str(s),
             TemplateComponent::Parameter(def) => {
-                let value = resolver.get_specific_value(&def.original_token).ok_or_else(|| {
-                    anyhow!(
-                        "Internal logic failure: resolved value not found for token '{}'",
-                        def.original_token
-                    )
-                })?;
+                let value = resolver
+                    .get_specific_value(&def.original_token)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "Internal logic failure: resolved value not found for token '{}'",
+                            def.original_token
+                        )
+                    })?;
                 final_command.push_str(value);
             }
             TemplateComponent::GenericParams => {
@@ -66,17 +68,21 @@ pub fn execute_task(
                 execute_parallel_batch(&parallel_batch, config, cancellation_token)?;
                 parallel_batch.clear();
             }
-            execute_single_command(trimmed_command, command_exec.ignore_errors, config, cancellation_token)?;
+            execute_single_command(
+                trimmed_command,
+                command_exec.ignore_errors,
+                config,
+                cancellation_token,
+            )?;
         }
     }
 
     if !parallel_batch.is_empty() {
         execute_parallel_batch(&parallel_batch, config, cancellation_token)?;
     }
-    
+
     Ok(())
 }
-
 
 fn execute_single_command(
     command_str: &str,
@@ -89,7 +95,7 @@ fn execute_single_command(
     } else {
         command_str.to_string()
     };
-    
+
     println!("\n> {}", command_str.green());
     Ok(executor::execute_command(
         &command_to_run,
@@ -115,7 +121,8 @@ fn execute_parallel_batch(
                 &config.project_root,
                 &config.env,
                 cancellation_token,
-            ).map_err(anyhow::Error::from)
+            )
+            .map_err(anyhow::Error::from)
         })
         .collect();
 

@@ -162,12 +162,11 @@ pub fn resolve_config_from_context_or_session(
     index: &GlobalIndex,
     cancellation_token: &CancellationToken,
 ) -> Result<ResolvedConfig> {
-
     match context_str {
         Some(context) => {
             // Contexto explícito, tiene prioridad
             let (uuid, qualified_name) =
-                context_resolver::resolve_context(&context, &index, cancellation_token)?;
+                context_resolver::resolve_context(&context, index, cancellation_token)?;
             Ok(config_resolver::resolve_config_for_uuid(
                 uuid,
                 qualified_name,
@@ -180,7 +179,7 @@ pub fn resolve_config_from_context_or_session(
                 let uuid = Uuid::parse_str(&uuid_str)
                     .with_context(|| "Invalid UUID found in AXES_PROJECT_UUID.")?;
                 let qualified_name =
-                    index_manager::build_qualified_name(uuid, &index).ok_or_else(|| {
+                    index_manager::build_qualified_name(uuid, index).ok_or_else(|| {
                         anyhow!("Could not build qualified name for session project.")
                     })?;
                 Ok(config_resolver::resolve_config_for_uuid(

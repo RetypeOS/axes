@@ -109,14 +109,17 @@ fn parse_modifiers_string(s: &str) -> Result<ParameterModifiers> {
             }
         }
     }
-    
+
     log::debug!("Parsed modifiers: {:?}", modifiers);
     Ok(modifiers)
 }
 
 /// Escanea una cadena y la descompone en una secuencia de `TemplateComponent`.
 pub fn discover_and_parse(fully_expanded_string: &str) -> Result<Vec<TemplateComponent>> {
-    log::debug!("Discovering parameters from string: '{}'", fully_expanded_string);
+    log::debug!(
+        "Discovering parameters from string: '{}'",
+        fully_expanded_string
+    );
     let re = Regex::new(r"<axes::(params(?:[^>])*)>").unwrap();
     let mut components = Vec::new();
     let mut last_match_end = 0;
@@ -199,11 +202,11 @@ impl CliInputState {
 
     /// Intenta consumir un argumento posicional por su índice.
     pub fn consume_positional(&mut self, index: usize) -> Option<String> {
-        if let Some(arg) = self.positional.get_mut(index) {
-            if !arg.consumed {
-                arg.consumed = true;
-                return arg.value.clone();
-            }
+        if let Some(arg) = self.positional.get_mut(index)
+            && !arg.consumed
+        {
+            arg.consumed = true;
+            return arg.value.clone();
         }
         None
     }
@@ -216,7 +219,7 @@ impl CliInputState {
         alias: Option<&str>,
     ) -> Result<Option<Option<String>>> {
         let name_present = self.named.contains_key(name);
-        let alias_present = alias.map_or(false, |a| self.named.contains_key(a));
+        let alias_present = alias.is_some_and(|a| self.named.contains_key(a));
 
         if name_present && alias_present {
             return Err(anyhow!(
@@ -293,10 +296,15 @@ fn resolve_parameter(def: &ParameterDef, cli_state: &mut CliInputState) -> Resul
     // --- FASE 1: Comprobar `required` ---
     if def.modifiers.required && !is_provided {
         let param_id = match &def.kind {
-            ParameterKind::Positional { index } => format!("Positional argument at index {}", index),
+            ParameterKind::Positional { index } => {
+                format!("Positional argument at index {}", index)
+            }
             ParameterKind::Named { name } => format!("Flag '--{}'", name),
         };
-        return Err(anyhow!("{} is required but was not provided.", param_id.cyan()));
+        return Err(anyhow!(
+            "{} is required but was not provided.",
+            param_id.cyan()
+        ));
     }
 
     // --- FASE 2: Si no se proporcionó, el valor es una cadena vacía y terminamos ---
@@ -311,12 +319,16 @@ fn resolve_parameter(def: &ParameterDef, cli_state: &mut CliInputState) -> Resul
     } else {
         def.modifiers.default_value.clone()
     };
-    
+
     // --- FASE 5 y 6: Formatear la SALIDA usando `map` ---
     let output_flag_name: Option<String> = match (&def.kind, &def.modifiers.map) {
         // Un `map` siempre tiene prioridad para el nombre del flag.
         (_, Some(map_str)) => {
-            if map_str.is_empty() { None } else { Some(map_str.clone()) }
+            if map_str.is_empty() {
+                None
+            } else {
+                Some(map_str.clone())
+            }
         }
         // Si no hay `map`, un parámetro nombrado usa su propio nombre.
         (ParameterKind::Named { name }, None) => Some(name.clone()),
@@ -329,7 +341,7 @@ fn resolve_parameter(def: &ParameterDef, cli_state: &mut CliInputState) -> Resul
         // Caso: Tiene flag y tiene valor (ej. --key value)
         (Some(flag), Some(val)) => Ok(format!("{} {}", flag, val)),
         // Caso: Tiene flag pero no valor (ej. --key)
-        (Some(flag), None) => Ok(format!("{}", flag)),
+        (Some(flag), None) => Ok(flag.to_string()),
         // Caso: No tiene flag pero sí valor (ej. un argumento posicional simple)
         (None, Some(val)) => Ok(val),
         // Caso: No tiene flag ni valor (no debería ocurrir si `is_provided` o `default` era Some)

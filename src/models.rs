@@ -156,28 +156,22 @@ impl ProjectConfig {
             );
             // The default action on Windows is to open the file explorer.
             open_with_defaults.insert(
-                "default".to_string(), 
-                Command::Simple("explorer".to_string())
+                "default".to_string(),
+                Command::Simple("explorer".to_string()),
             );
         } else if cfg!(target_os = "macos") {
             open_with_defaults.insert(
-                "finder".to_string(), 
-                Command::Simple("open \"<axes::path>\"".to_string())
+                "finder".to_string(),
+                Command::Simple("open \"<axes::path>\"".to_string()),
             );
-            open_with_defaults.insert(
-                "default".to_string(), 
-                Command::Simple("finder".to_string())
-            );
+            open_with_defaults.insert("default".to_string(), Command::Simple("finder".to_string()));
         } else {
             // Linux and other Unix-like systems.
             open_with_defaults.insert(
-                "files".to_string(), 
-                Command::Simple("xdg-open \"<axes::path>\"".to_string())
+                "files".to_string(),
+                Command::Simple("xdg-open \"<axes::path>\"".to_string()),
             );
-            open_with_defaults.insert(
-                "default".to_string(), 
-                Command::Simple("files".to_string())
-            );
+            open_with_defaults.insert("default".to_string(), Command::Simple("files".to_string()));
         }
 
         // --- Terminal/Shell Command ---
@@ -186,14 +180,14 @@ impl ProjectConfig {
         if cfg!(target_os = "windows") {
             open_with_defaults.insert(
                 "shell".to_string(),
-                Command::Simple("start cmd.exe /K \"cd /D <axes::path>\"".to_string())
+                Command::Simple("start cmd.exe /K \"cd /D <axes::path>\"".to_string()),
             );
         } else {
             // This is more complex on Linux/macOS as it depends on the terminal emulator.
             // We provide a common default that users can override.
             open_with_defaults.insert(
                 "shell".to_string(),
-                Command::Simple("<axes::vars::terminal_cmd>".to_string())
+                Command::Simple("<axes::vars::terminal_cmd>".to_string()),
             );
         }
 
@@ -258,7 +252,7 @@ impl ProjectConfig {
         // of comments is not standard. An empty string is the cleanest approach.
         let options = OptionsConfig {
             at_start: Some(Command::Simple("".to_string())), // Placeholder for environment setup (e.g., `source .venv/bin/activate`)
-            at_exit: Some(Command::Simple("".to_string())),  // Placeholder for cleanup (e.g., `docker-compose down`)
+            at_exit: Some(Command::Simple("".to_string())), // Placeholder for cleanup (e.g., `docker-compose down`)
             ..Default::default()
         };
 
@@ -499,8 +493,6 @@ impl From<&ResolvedConfig> for SerializableResolvedConfig {
         }
     }
 }
-
-
 
 // --- Conversions FROM Serializable models (for reading the cache) ---
 

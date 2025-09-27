@@ -1,9 +1,9 @@
 // EN: src/system/shell.rs
 
 use crate::{
+    CancellationToken,
     core::{parameters::ArgResolver, task_executor},
     models::{ResolvedConfig, ShellConfig, ShellsConfig, Task},
-    CancellationToken,
 };
 use anyhow::Result;
 use colored::Colorize;
@@ -43,14 +43,21 @@ pub fn launch_session(
     cancellation_token: &CancellationToken,
 ) -> Result<(), ShellError> {
     let shells_config = load_shells_config()?;
-    let shell_name = config.options.shell.as_deref().unwrap_or(get_default_shell_name());
-    let shell_config = shells_config.shells.get(shell_name)
+    let shell_name = config
+        .options
+        .shell
+        .as_deref()
+        .unwrap_or(get_default_shell_name());
+    let shell_config = shells_config
+        .shells
+        .get(shell_name)
         .ok_or_else(|| ShellError::ShellNotDefined(shell_name.to_string()))?;
 
     // 1. Assemble the commands for the `at_start` task. These will be written to a temporary script.
     let at_start_final_commands = if let Some(task) = &task_start {
         println!("\n{}", "Preparing `at_start` hook...".dimmed());
-        task.commands.iter()
+        task.commands
+            .iter()
             .map(|cmd| task_executor::assemble_final_command(&cmd.template, resolver))
             .collect::<Result<Vec<String>>>()?
     } else {
@@ -67,7 +74,10 @@ pub fn launch_session(
 
     let script_content = build_init_script(config, &at_start_final_commands, is_windows_shell);
     fs::write(&temp_script_path, script_content)?;
-    log::debug!("Temporary init script created at: {}", temp_script_path.display());
+    log::debug!(
+        "Temporary init script created at: {}",
+        temp_script_path.display()
+    );
 
     println!(
         "\n--- {} '{}' {}. ---",
@@ -75,18 +85,18 @@ pub fn launch_session(
         config.qualified_name.yellow().bold(),
         "started".green()
     );
-    
+
     let mut cmd = Command::new(&shell_config.path);
     cmd.current_dir(&config.project_root);
     cmd.env("AXES_PROJECT_ROOT", config.project_root.as_os_str());
     cmd.env("AXES_PROJECT_NAME", &config.qualified_name);
     cmd.env("AXES_PROJECT_UUID", config.uuid.to_string());
-    
+
     // Inject [env] vars so they are available to the init script and the user.
     for (key, value) in &config.env {
         cmd.env(key, value);
     }
-    
+
     // Pass the init script to the shell using its specific arguments.
     if let Some(args) = &shell_config.interactive_args {
         for arg in args {
@@ -102,7 +112,7 @@ pub fn launch_session(
 
     // Clean up the temporary script file.
     let _ = fs::remove_file(&temp_script_path);
-    
+
     // 3. Execute the `at_exit` task if it exists. This runs after the shell has closed.
     if let Some(task) = &task_exit {
         println!("\n{}", "\nExecuting `at_exit` hook...".dimmed());
@@ -121,7 +131,9 @@ fn build_init_script(
     is_windows: bool,
 ) -> String {
     let mut script = String::new();
-    if is_windows { script.push_str("@echo off\n"); }
+    if is_windows {
+        script.push_str("@echo off\n");
+    }
 
     // NOTE: Env vars are now set directly on the `Command` process,
     // so they don't strictly need to be in the script unless a command inside
@@ -179,24 +191,37 @@ fn generate_default_shells_config() -> ShellsConfig {
     let mut shells = HashMap::new();
 
     if cfg!(target_os = "windows") {
-        shells.insert("cmd".to_string(), ShellConfig {
-            path: PathBuf::from("cmd.exe"),
-            interactive_args: Some(vec!["/K".to_string()]),
-        });
+        shells.insert(
+            "cmd".to_string(),
+            ShellConfig {
+                path: PathBuf::from("cmd.exe"),
+                interactive_args: Some(vec!["/K".to_string()]),
+            },
+        );
         if is_executable_in_path("powershell.exe") {
-            shells.insert("powershell".to_string(), ShellConfig {
-                path: PathBuf::from("powershell.exe"),
-                interactive_args: Some(vec!["-NoExit".to_string(), "-File".to_string()]),
-            });
+            shells.insert(
+                "powershell".to_string(),
+                ShellConfig {
+                    path: PathBuf::from("powershell.exe"),
+                    interactive_args: Some(vec!["-NoExit".to_string(), "-File".to_string()]),
+                },
+            );
         }
     }
 
-    let bash_path_str = if cfg!(target_os = "windows") { "bash.exe" } else { "bash" };
+    let bash_path_str = if cfg!(target_os = "windows") {
+        "bash.exe"
+    } else {
+        "bash"
+    };
     if is_executable_in_path(bash_path_str) {
-        shells.insert("bash".to_string(), ShellConfig {
-            path: PathBuf::from(bash_path_str),
-            interactive_args: Some(vec!["--rcfile".to_string()]),
-        });
+        shells.insert(
+            "bash".to_string(),
+            ShellConfig {
+                path: PathBuf::from(bash_path_str),
+                interactive_args: Some(vec!["--rcfile".to_string()]),
+            },
+        );
     }
     ShellsConfig { shells }
 }
@@ -205,7 +230,9 @@ fn generate_default_shells_config() -> ShellsConfig {
 fn is_executable_in_path(executable_name: &str) -> bool {
     if let Ok(path_var) = env::var("PATH") {
         for path in env::split_paths(&path_var) {
-            if path.join(executable_name).is_file() { return true; }
+            if path.join(executable_name).is_file() {
+                return true;
+            }
         }
     }
     false
@@ -213,5 +240,9 @@ fn is_executable_in_path(executable_name: &str) -> bool {
 
 /// Returns the default shell name for the current OS.
 fn get_default_shell_name() -> &'static str {
-    if cfg!(target_os = "windows") { "cmd" } else { "bash" }
+    if cfg!(target_os = "windows") {
+        "cmd"
+    } else {
+        "bash"
+    }
 }

@@ -4,7 +4,10 @@ use anyhow::{Result, anyhow};
 use colored::*;
 
 use crate::{
-    constants::{AXES_DIR, PROJECT_CONFIG_FILENAME}, core::index_manager, models::{CacheableValue, Command as ProjectCommand, ResolvedConfig}, CancellationToken
+    CancellationToken,
+    constants::{AXES_DIR, PROJECT_CONFIG_FILENAME},
+    core::index_manager,
+    models::{CacheableValue, Command as ProjectCommand, ResolvedConfig},
 };
 
 use clap::Parser;
@@ -29,8 +32,11 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     let index = index_manager::load_and_ensure_global_project()?;
 
     // 2. Resolver la configuración usando el `context` parseado.
-    let config =
-        commons::resolve_config_from_context_or_session(info_args.context, &index, cancellation_token)?;
+    let config = commons::resolve_config_from_context_or_session(
+        info_args.context,
+        &index,
+        cancellation_token,
+    )?;
 
     // 3. El resto de la lógica de impresión no cambia.
     print_metadata(&config);
@@ -95,14 +101,14 @@ fn print_scripts(config: &ResolvedConfig) {
                 CacheableValue::Raw { desc, .. } => desc.as_deref(),
                 CacheableValue::Expanded(task) => task.desc.as_deref(),
             };
-            
+
             if let Some(d) = description {
                 // Si la descripción no está vacía, la mostramos.
                 if !d.trim().is_empty() {
                     print!(": {}", d.dimmed());
                 }
             }
-            
+
             // Opcional: Podríamos añadir un indicador visual del tipo de script,
             // pero por ahora, la descripción es lo más importante.
             // Ejemplo:
@@ -136,7 +142,7 @@ fn print_variables(config: &ResolvedConfig, key: &str, title: &str) {
                         } else {
                             "[complex raw value]".to_string()
                         }
-                    },
+                    }
                     CacheableValue::Expanded { .. } => "[expanded]".to_string(),
                 };
                 println!("    - {} = {}", k.cyan(), display_val);
@@ -151,7 +157,7 @@ fn print_variables(config: &ResolvedConfig, key: &str, title: &str) {
         sorted_keys.sort();
         for k in sorted_keys {
             if let Some(val) = config.env.get(k) {
-                println!("    - {} = {}", k.cyan(), format!("\"{}\"", val));
+                println!("    - {} = {}", k.cyan(), format_args!("\"{}\"", val));
             }
         }
     }

@@ -1,17 +1,13 @@
 // EN: src/cli/handlers/run.rs
 
 use crate::{
-    cli::handlers::commons,
-    core::{
-        config_resolver,
-        index_manager,
-        parameters::ArgResolver,
-    },
-    models::{TemplateComponent},
-    system::executor,
     CancellationToken,
+    cli::handlers::commons,
+    core::{config_resolver, index_manager, parameters::ArgResolver},
+    models::TemplateComponent,
+    system::executor,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use colored::*;
 use rayon::prelude::*;
@@ -36,8 +32,11 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     // 1. Initial argument parsing and configuration resolution.
     let run_args = RunArgs::try_parse_from(&args)?;
     let index = index_manager::load_and_ensure_global_project()?;
-    let mut config =
-        commons::resolve_config_from_context_or_session(Some(run_args.context.clone()), &index, cancellation_token)?;
+    let config = commons::resolve_config_from_context_or_session(
+        Some(run_args.context.clone()),
+        &index,
+        cancellation_token,
+    )?;
 
     println!(
         "\n▶️  Running script '{}' for project '{}'...",
@@ -47,7 +46,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
 
     // 2. Resolve the script into a `Task` object. This triggers lazy expansion if needed.
     // We clone the task to break the mutable borrow on `config`.
-    let task = config_resolver::resolve_task(&mut config, &run_args.script)?.clone();
+    let task = config_resolver::resolve_task(&config, &run_args.script)?.clone();
 
     if task.commands.is_empty() {
         println!("{}", "Script is empty. Nothing to execute.".yellow());
@@ -96,7 +95,12 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
                 parallel_batch.clear();
             }
             // Then execute the sequential command.
-            execute_single_command(trimmed_command, command_exec.ignore_errors, &config, cancellation_token)?;
+            execute_single_command(
+                trimmed_command,
+                command_exec.ignore_errors,
+                &config,
+                cancellation_token,
+            )?;
         }
     }
 
@@ -130,12 +134,14 @@ fn assemble_final_command(
         match component {
             TemplateComponent::Literal(s) => final_command.push_str(s),
             TemplateComponent::Parameter(def) => {
-                let value = resolver.get_specific_value(&def.original_token).ok_or_else(|| {
-                    anyhow!(
-                        "Internal logic failure: resolved value not found for token '{}'",
-                        def.original_token
-                    )
-                })?;
+                let value = resolver
+                    .get_specific_value(&def.original_token)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "Internal logic failure: resolved value not found for token '{}'",
+                            def.original_token
+                        )
+                    })?;
                 final_command.push_str(value);
             }
             TemplateComponent::GenericParams => {
@@ -161,7 +167,7 @@ fn execute_single_command(
     } else {
         command_str.to_string()
     };
-    
+
     println!("\n> {}", command_str.green());
     Ok(executor::execute_command(
         &command_to_run,
@@ -192,7 +198,8 @@ fn execute_parallel_batch(
                 &config.project_root,
                 &config.env,
                 cancellation_token,
-            ).map_err(anyhow::Error::from)
+            )
+            .map_err(anyhow::Error::from)
         })
         .collect();
 
