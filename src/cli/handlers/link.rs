@@ -22,8 +22,10 @@ struct LinkArgs {
 pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
     // 1. Resolve the project to be moved. This requires a context.
     let link_args = LinkArgs::try_parse_from(&args)?;
+    let mut index = index_manager::load_and_ensure_global_project()?;
     let config = commons::resolve_config_from_context_or_session(
         Some(link_args.context),
+        &index,
         cancellation_token,
     )?;
 
@@ -41,7 +43,6 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     );
 
     // 3. Load the index and resolve the new parent's UUID.
-    let mut index = index_manager::load_and_ensure_global_project()?;
     let (new_parent_uuid, new_parent_qualified_name) =
         context_resolver::resolve_context(new_parent_context, &index, cancellation_token)
             .with_context(|| {

@@ -159,9 +159,9 @@ fn check_reparent_collisions(
 /// Helper function to resolve a project's configuration from a context string.
 pub fn resolve_config_from_context_or_session(
     context_str: Option<String>,
+    index: &GlobalIndex,
     cancellation_token: &CancellationToken,
 ) -> Result<ResolvedConfig> {
-    let index = index_manager::load_and_ensure_global_project()?;
 
     match context_str {
         Some(context) => {
@@ -171,7 +171,7 @@ pub fn resolve_config_from_context_or_session(
             Ok(config_resolver::resolve_config_for_uuid(
                 uuid,
                 qualified_name,
-                &index,
+                index,
             )?)
         }
         None => {
@@ -186,7 +186,7 @@ pub fn resolve_config_from_context_or_session(
                 Ok(config_resolver::resolve_config_for_uuid(
                     uuid,
                     qualified_name,
-                    &index,
+                    index,
                 )?)
             } else {
                 // Ni explícito ni implícito

@@ -31,10 +31,12 @@ struct DeleteArgs {
 pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
     // Parse args.
     let delete_args = DeleteArgs::try_parse_from(&args)?;
+    let mut index = index_manager::load_and_ensure_global_project()?;
 
     // Solve config.
     let config = commons::resolve_config_from_context_or_session(
         Some(delete_args.context),
+        &index,
         cancellation_token,
     )?;
 
@@ -42,7 +44,6 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
         return Err(anyhow!(t!("delete.error.cannot_delete_global")));
     }
 
-    let mut index = index_manager::load_and_ensure_global_project()?;
     //println!("\n{}", t!("delete.warning.destructive_header").red().bold());
 
     // 1. Prepare the plan.

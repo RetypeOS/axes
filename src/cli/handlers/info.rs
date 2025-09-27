@@ -4,9 +4,7 @@ use anyhow::{Result, anyhow};
 use colored::*;
 
 use crate::{
-    CancellationToken,
-    constants::{AXES_DIR, PROJECT_CONFIG_FILENAME},
-    models::{Command as ProjectCommand, ResolvedConfig},
+    constants::{AXES_DIR, PROJECT_CONFIG_FILENAME}, core::index_manager, models::{CacheableValue, Command as ProjectCommand, ResolvedConfig}, CancellationToken
 };
 
 use clap::Parser;
@@ -28,10 +26,11 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     if args.len() > 1 {
         return Err(anyhow!(t!("info.error.unexpected_args")));
     }
+    let index = index_manager::load_and_ensure_global_project()?;
 
     // 2. Resolver la configuración usando el `context` parseado.
     let config =
-        commons::resolve_config_from_context_or_session(info_args.context, cancellation_token)?;
+        commons::resolve_config_from_context_or_session(info_args.context, &index, cancellation_token)?;
 
     // 3. El resto de la lógica de impresión no cambia.
     print_metadata(&config);
@@ -76,7 +75,7 @@ fn print_metadata(config: &ResolvedConfig) {
     }
 }
 
-/// Prints the list of available scripts (scripts).
+/// Prints the list of available scripts, including their descriptions if available.
 fn print_scripts(config: &ResolvedConfig) {
     if config.scripts.is_empty() {
         println!("\n  {}", t!("info.label.no_scripts").dimmed());
@@ -88,28 +87,30 @@ fn print_scripts(config: &ResolvedConfig) {
     cmd_names.sort();
 
     for cmd_name in cmd_names {
-        if let Some(command_def) = config.scripts.get(cmd_name) {
+        if let Some(cacheable_value) = config.scripts.get(cmd_name) {
             print!("    - {}", cmd_name.cyan());
 
-            match command_def {
-                ProjectCommand::Extended(ext) => {
-                    if let Some(d) = &ext.desc {
-                        print!(": {}", d.dimmed());
-                    }
+            // Extraemos la descripción del CacheableValue.
+            let description = match cacheable_value {
+                CacheableValue::Raw { desc, .. } => desc.as_deref(),
+                CacheableValue::Expanded(task) => task.desc.as_deref(),
+            };
+            
+            if let Some(d) = description {
+                // Si la descripción no está vacía, la mostramos.
+                if !d.trim().is_empty() {
+                    print!(": {}", d.dimmed());
                 }
-                ProjectCommand::Platform(pc) => {
-                    let type_info = format!("({})", t!("info.script_type.platform"));
-                    if let Some(d) = &pc.desc {
-                        print!(": {} {}", d.dimmed(), type_info.dimmed());
-                    } else {
-                        print!(" {}", type_info.dimmed());
-                    }
-                }
-                ProjectCommand::Sequence(_) => {
-                    print!(" ({})", t!("info.script_type.sequence").dimmed());
-                }
-                ProjectCommand::Simple(_) => { /* No extra info */ }
             }
+            
+            // Opcional: Podríamos añadir un indicador visual del tipo de script,
+            // pero por ahora, la descripción es lo más importante.
+            // Ejemplo:
+            // match cacheable_value {
+            //     CacheableValue::Raw { value, .. } if value.contains("&&") => print!(" {}", "(sequence)".dimmed()),
+            //     _ => {}
+            // }
+
             println!();
         }
     }
@@ -117,23 +118,41 @@ fn print_scripts(config: &ResolvedConfig) {
 
 /// A generic function to print key-value maps like [vars] and [env].
 fn print_variables(config: &ResolvedConfig, key: &str, title: &str) {
-    let map = match key {
-        "vars" => &config.vars,
-        "env" => &config.env,
-        _ => return,
-    };
-
-    if map.is_empty() {
-        return;
-    }
-
-    println!("\n  {}:", title.blue());
-    let mut sorted_keys: Vec<_> = map.keys().collect();
-    sorted_keys.sort();
-
-    for k in sorted_keys {
-        if let Some(val) = map.get(k) {
-            println!("    - {} = {}", k.cyan(), format_args!("\"{}\"", val));
+    if key == "vars" {
+        if config.vars.is_empty() {
+            return;
+        }
+        println!("\n  {}:", title.blue());
+        let mut sorted_keys: Vec<_> = config.vars.keys().collect();
+        sorted_keys.sort();
+        for k in sorted_keys {
+            if let Some(val) = config.vars.get(k) {
+                // Mostramos una representación del valor cacheable
+                let display_val = match val {
+                    CacheableValue::Raw { command, .. } => {
+                        // Un 'var' es un Simple(string)
+                        if let ProjectCommand::Simple(s) = command {
+                            format!("\"{}\" (raw)", s)
+                        } else {
+                            "[complex raw value]".to_string()
+                        }
+                    },
+                    CacheableValue::Expanded { .. } => "[expanded]".to_string(),
+                };
+                println!("    - {} = {}", k.cyan(), display_val);
+            }
+        }
+    } else if key == "env" {
+        if config.env.is_empty() {
+            return;
+        }
+        println!("\n  {}:", title.blue());
+        let mut sorted_keys: Vec<_> = config.env.keys().collect();
+        sorted_keys.sort();
+        for k in sorted_keys {
+            if let Some(val) = config.env.get(k) {
+                println!("    - {} = {}", k.cyan(), format!("\"{}\"", val));
+            }
         }
     }
 }

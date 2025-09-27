@@ -163,12 +163,13 @@ impl<'a, 'p> Interpolator<'a, 'p> {
         cancellation_token: &CancellationToken,
     ) -> Result<String> {
         match parts.first() {
-            Some(&"vars") => self
-                .config
-                .vars
-                .get(parts[1])
-                .cloned()
-                .ok_or_else(|| anyhow!("Var not found")),
+            // --- TODO: Aplicar correctamente esto con el nuevo interpolator.
+            //Some(&"vars") => self
+            //    .config
+            //    .vars
+            //    .get(parts[1])
+            //    .cloned()
+            //    .ok_or_else(|| anyhow!("Var not found")),
             Some(&"env") => self
                 .config
                 .env

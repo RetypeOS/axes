@@ -22,10 +22,12 @@ struct RenameArgs {
 pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
     // 1. Parse args.
     let rename_args = RenameArgs::try_parse_from(&args)?;
+    let mut index = index_manager::load_and_ensure_global_project()?;
 
     // 2. Solve config.
     let config = commons::resolve_config_from_context_or_session(
         Some(rename_args.context),
+        &index,
         cancellation_token,
     )?;
     let old_qualified_name = config.qualified_name.clone();
@@ -61,8 +63,6 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
         old_name = simple_name.yellow(),
         new_name = new_name.cyan()
     );
-
-    let mut index = index_manager::load_and_ensure_global_project()?;
 
     index_manager::rename_project(&mut index, config.uuid, &new_name)
         .with_context(|| anyhow!(t!("rename.error.rename_failed"), name = old_qualified_name))?;

@@ -6,6 +6,65 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
+// --- MODELOS PARA PARSEO DE PARÁMETROS ---
+// Estas son las estructuras primarias que se usarán tanto en tiempo de ejecución
+// como para la serialización en el caché binario.
+
+// NUEVAS ESTRUCTURAS PARA LA EJECUCIÓN
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CommandExecution {
+    pub template: Vec<TemplateComponent>,
+    pub ignore_errors: bool,
+    pub run_in_parallel: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct Task {
+    pub commands: Vec<CommandExecution>,
+    pub desc: Option<String>,
+}
+
+/// Representa un único componente de una plantilla de script pre-parseada.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum TemplateComponent {
+    Literal(String),
+    Parameter(ParameterDef),
+    GenericParams,
+}
+
+/// Define declarativamente un parámetro esperado por un script.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ParameterDef {
+    pub kind: ParameterKind,
+    pub modifiers: ParameterModifiers,
+    pub original_token: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ParameterKind {
+    Positional { index: usize },
+    Named { name: String },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct ParameterModifiers {
+    pub required: bool,
+    pub default_value: Option<String>,
+    pub alias: Option<String>,
+    pub map: Option<String>,
+}
+
+/// Representa un valor en el caché que puede estar en su estado crudo (del .toml)
+/// o ya expandido y parseado en componentes para una ejecución rápida.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum CacheableValue {
+    Raw {
+        command: Command,
+        desc: Option<String>,
+    },
+    Expanded(Task),
+}
+
 // --- PUBLIC COMMAND MODELS (FOR TOML) ---
 // These are what the user sees and uses in axes.toml
 
@@ -45,14 +104,11 @@ pub enum Command {
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct OptionsConfig {
-    // Explicit fields for key options
-    pub at_start: Option<String>,
-    pub at_exit: Option<String>,
+    pub at_start: Option<Command>,
+    pub at_exit: Option<Command>,
     pub shell: Option<String>,
-
-    // The `open_with` sub-table
     #[serde(default)]
-    pub open_with: HashMap<String, String>,
+    pub open_with: HashMap<String, Command>,
 }
 
 // --- `axes.toml` MODELS (What is read from the configuration file) ---
@@ -85,28 +141,43 @@ impl ProjectConfig {
         // override it (e.g., to "code-insiders" or "vim").
         open_with_defaults.insert(
             "editor".to_string(),
-            "<axes::vars::editor_cmd> \"<axes::path>\"".to_string(),
+            Command::Simple("<axes::vars::editor_cmd> \"<axes::path>\"".to_string()),
         );
         open_with_defaults.insert(
             "idea".to_string(),
-            "<axes::vars::idea_cmd> \"<axes::path>\"".to_string(),
+            Command::Simple("<axes::vars::idea_cmd> \"<axes::path>\"".to_string()),
         );
 
         // --- OS-Specific File Explorer scripts ---
         if cfg!(target_os = "windows") {
             open_with_defaults.insert(
                 "explorer".to_string(),
-                "-explorer \"<axes::path>\"".to_string(),
+                Command::Simple("-explorer \"<axes::path>\"".to_string()),
             );
             // The default action on Windows is to open the file explorer.
-            open_with_defaults.insert("default".to_string(), "explorer".to_string());
+            open_with_defaults.insert(
+                "default".to_string(), 
+                Command::Simple("explorer".to_string())
+            );
         } else if cfg!(target_os = "macos") {
-            open_with_defaults.insert("finder".to_string(), "open \"<axes::path>\"".to_string());
-            open_with_defaults.insert("default".to_string(), "finder".to_string());
+            open_with_defaults.insert(
+                "finder".to_string(), 
+                Command::Simple("open \"<axes::path>\"".to_string())
+            );
+            open_with_defaults.insert(
+                "default".to_string(), 
+                Command::Simple("finder".to_string())
+            );
         } else {
             // Linux and other Unix-like systems.
-            open_with_defaults.insert("files".to_string(), "xdg-open \"<axes::path>\"".to_string());
-            open_with_defaults.insert("default".to_string(), "files".to_string());
+            open_with_defaults.insert(
+                "files".to_string(), 
+                Command::Simple("xdg-open \"<axes::path>\"".to_string())
+            );
+            open_with_defaults.insert(
+                "default".to_string(), 
+                Command::Simple("files".to_string())
+            );
         }
 
         // --- Terminal/Shell Command ---
@@ -115,14 +186,14 @@ impl ProjectConfig {
         if cfg!(target_os = "windows") {
             open_with_defaults.insert(
                 "shell".to_string(),
-                "start cmd.exe /K \"cd /D <axes::path>\"".to_string(),
+                Command::Simple("start cmd.exe /K \"cd /D <axes::path>\"".to_string())
             );
         } else {
             // This is more complex on Linux/macOS as it depends on the terminal emulator.
             // We provide a common default that users can override.
             open_with_defaults.insert(
                 "shell".to_string(),
-                "<axes::vars::terminal_cmd>".to_string(),
+                Command::Simple("<axes::vars::terminal_cmd>".to_string())
             );
         }
 
@@ -186,8 +257,8 @@ impl ProjectConfig {
         // A commented-out example is even better, but TOML serialization
         // of comments is not standard. An empty string is the cleanest approach.
         let options = OptionsConfig {
-            at_start: Some("".to_string()), // Placeholder for environment setup (e.g., `source .venv/bin/activate`)
-            at_exit: Some("".to_string()),  // Placeholder for cleanup (e.g., `docker-compose down`)
+            at_start: Some(Command::Simple("".to_string())), // Placeholder for environment setup (e.g., `source .venv/bin/activate`)
+            at_exit: Some(Command::Simple("".to_string())),  // Placeholder for cleanup (e.g., `docker-compose down`)
             ..Default::default()
         };
 
@@ -241,6 +312,15 @@ pub struct ProjectRef {
     pub name: String,
 }
 
+// NEW: A resolved version of `OptionsConfig` that uses `CacheableValue`.
+#[derive(Debug, Clone, Default)]
+pub struct ResolvedOptionsConfig {
+    pub at_start: Option<CacheableValue>,
+    pub at_exit: Option<CacheableValue>,
+    pub shell: Option<String>,
+    pub open_with: HashMap<String, CacheableValue>,
+}
+
 // --- IN-MEMORY MODELS (Our internal working representation) ---
 
 /// The final, merged view of the configuration.
@@ -252,10 +332,10 @@ pub struct ResolvedConfig {
     pub project_root: PathBuf,
     pub version: Option<String>,
     pub description: Option<String>,
-    pub scripts: HashMap<String, Command>,
-    pub options: OptionsConfig,
-    pub vars: HashMap<String, String>,
+    pub scripts: HashMap<String, CacheableValue>,
+    pub vars: HashMap<String, CacheableValue>,
     pub env: HashMap<String, String>,
+    pub options: ResolvedOptionsConfig,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -319,10 +399,37 @@ pub(crate) struct SerializableResolvedConfig {
     pub project_root: String,
     pub version: Option<String>,
     pub description: Option<String>,
-    pub scripts: HashMap<String, SerializableCommand>,
-    pub options: OptionsConfig,
-    pub vars: HashMap<String, String>,
+    pub scripts: HashMap<String, CacheableValue>,
+    pub vars: HashMap<String, CacheableValue>,
     pub env: HashMap<String, String>,
+    pub options: SerializableResolvedOptionsConfig,
+}
+
+// ¡NUEVO! Sustituto serializable para `TemplateComponent`.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub(crate) enum SerializableTemplateComponent {
+    Literal(String),
+    // Almacenamos los componentes de ParameterDef directamente.
+    Parameter {
+        kind: SerializableParameterKind,
+        modifiers: SerializableParameterModifiers,
+        original_token: String,
+    },
+    GenericParams,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum SerializableParameterKind {
+    Positional { index: usize },
+    Named { name: String },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub(crate) struct SerializableParameterModifiers {
+    pub required: bool,
+    pub default_value: Option<String>,
+    pub alias: Option<String>,
+    pub map: Option<String>,
 }
 
 /// The main container for the configuration cache that is written to disk.
@@ -385,17 +492,15 @@ impl From<&ResolvedConfig> for SerializableResolvedConfig {
             project_root: value.project_root.to_string_lossy().into_owned(),
             version: value.version.clone(),
             description: value.description.clone(),
-            scripts: value
-                .scripts
-                .iter()
-                .map(|(k, v)| (k.clone(), v.into()))
-                .collect(),
-            options: value.options.clone(),
+            scripts: value.scripts.clone(),
             vars: value.vars.clone(),
             env: value.env.clone(),
+            options: (&value.options).into(),
         }
     }
 }
+
+
 
 // --- Conversions FROM Serializable models (for reading the cache) ---
 
@@ -448,14 +553,10 @@ impl From<SerializableResolvedConfig> for ResolvedConfig {
             project_root: PathBuf::from(value.project_root),
             version: value.version,
             description: value.description,
-            scripts: value
-                .scripts
-                .into_iter()
-                .map(|(k, v)| (k, v.into()))
-                .collect(),
-            options: value.options,
+            scripts: value.scripts,
             vars: value.vars,
             env: value.env,
+            options: value.options.into(),
         }
     }
 }
@@ -471,5 +572,39 @@ impl From<SystemTime> for SerializableSystemTime {
 impl From<SerializableSystemTime> for SystemTime {
     fn from(time: SerializableSystemTime) -> Self {
         UNIX_EPOCH + time.0
+    }
+}
+
+// Extras for change pos
+
+// NEW: A serializable version of `ResolvedOptionsConfig`.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub(crate) struct SerializableResolvedOptionsConfig {
+    pub at_start: Option<CacheableValue>,
+    pub at_exit: Option<CacheableValue>,
+    pub shell: Option<String>,
+    pub open_with: HashMap<String, CacheableValue>,
+}
+
+// NEW: Conversions for `ResolvedOptionsConfig`
+impl From<&ResolvedOptionsConfig> for SerializableResolvedOptionsConfig {
+    fn from(value: &ResolvedOptionsConfig) -> Self {
+        Self {
+            at_start: value.at_start.clone(),
+            at_exit: value.at_exit.clone(),
+            shell: value.shell.clone(),
+            open_with: value.open_with.clone(),
+        }
+    }
+}
+
+impl From<SerializableResolvedOptionsConfig> for ResolvedOptionsConfig {
+    fn from(value: SerializableResolvedOptionsConfig) -> Self {
+        Self {
+            at_start: value.at_start,
+            at_exit: value.at_exit,
+            shell: value.shell,
+            open_with: value.open_with,
+        }
     }
 }

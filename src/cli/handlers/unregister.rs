@@ -28,11 +28,12 @@ struct UnregisterArgs {
 
 pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
     let unregister_args = UnregisterArgs::try_parse_from(&args)?;
+    let mut index = index_manager::load_and_ensure_global_project()?;
     let config = commons::resolve_config_from_context_or_session(
         Some(unregister_args.context),
+        &index,
         cancellation_token,
     )?;
-    let mut index = index_manager::load_and_ensure_global_project()?;
 
     if config.uuid == index_manager::GLOBAL_PROJECT_UUID {
         return Err(anyhow!(t!("unregister.error.cannot_unregister_global")));

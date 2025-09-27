@@ -8,6 +8,15 @@ description = "The development workflow configuration for the `axes` project its
 # Defines workflows for building, testing, and managing the tool.
 [scripts]
 
+test_q = "-comando info <axes::vars::_param_1> <axes::params::1(map='--info', default='algo')>"
+
+test_w = [
+    "-comando 1",
+    "-comando 2",
+    "-comando 3",
+    "-comando 4"
+]
+
 # --- Build Workflows ---
 build = { desc = "Builds the project in debug mode with fast compilation.", run = "cargo build <axes::params>" }
 build_release = { desc = "Builds the project in release mode for distribution.", run = "cargo build --release" }
@@ -59,6 +68,7 @@ macos = [
 [vars]
 # Standard arguments for clippy to ensure consistency.
 clippy_args = "-- -D warnings"
+_param_1 = "pito"
 
 # --- Installation Paths (User Configurable) ---
 # NOTE: Change these paths to match a directory in your PATH.
