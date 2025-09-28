@@ -19,7 +19,7 @@ test_w = [
     "-comando 4"
 ]
 
-test_vel = "./.axes/command_test.ps1 <axes::params>"
+test_vel = "powershell ./.axes/command_test.ps1 '<axes::params>'"
 
 # --- Build Workflows ---
 build = { desc = "Builds the project in debug mode with fast compilation.", run = "cargo build <axes::params>" }

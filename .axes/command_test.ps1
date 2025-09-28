@@ -1,25 +1,28 @@
 param(
     [Parameter(Mandatory=$true)]
-    [string]$Comando,
+    [string]$Command,
 
     [Parameter(Mandatory=$true)]
-    [int]$Repeticiones
+    [int]$Repeat
 )
 
-# Validación
-if ($Repeticiones -le 0) {
-    Write-Error "La cantidad de repeticiones debe ser mayor que 0."
+if ($Repeat -le 0) {
+    Write-Error "Repetition quantity must be more than 0."
     exit
 }
 
-$totalTiempo = 0
+$totalTime = 0
+Write-Output "-----------------------------------"
+Write-Output "Executing... '$Command'"
+Write-Output "-----------------------------------"
 
-for ($i = 1; $i -le $Repeticiones; $i++) {
-    $tiempo = Measure-Command { Invoke-Expression $Comando }
-    $totalTiempo += $tiempo.TotalMilliseconds
-    Write-Output "Ejecución ${i}: $($tiempo.TotalMilliseconds) ms"
+for ($i = 1; $i -le $Repeat; $i++) {
+    $time = Measure-Command { Invoke-Expression $Command }
+    $totalTime += $time.TotalMilliseconds
+    Write-Output "Executing ${i}: $($time.TotalMilliseconds) ms"
 }
 
-$promedio = $totalTiempo / $Repeticiones
+$promediate = $totalTime / $Repeat
 Write-Output "-----------------------------------"
-Write-Output "Promedio de ejecución: $promedio ms"
+Write-Output "Execution Promediate: $promediate ms"
+Write-Output "-----------------------------------"
