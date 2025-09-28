@@ -1,4 +1,4 @@
-// EN: src/system/shell.rs
+// src/system/shell.rs
 
 use crate::{
     CancellationToken,

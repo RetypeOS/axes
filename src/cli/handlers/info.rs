@@ -1,4 +1,4 @@
-// EN: src/cli/handlers/info.rs
+// src/cli/handlers/info.rs
 
 use crate::{
     CancellationToken,
@@ -118,15 +118,12 @@ fn print_variables(config: &ResolvedConfig, key: &str, title: &str) {
                 let display_val = match val {
                     CacheableValue::Raw(fc) => {
                         // For a var, `command_lines` will have a single entry.
-                        fc.command_lines
-                            .first()
-                            .map_or("".to_string(), |s| s.to_string())
+                        fc.command_lines.join(" && ")
                     }
                     CacheableValue::Expanded(task) => {
                         // This case is unlikely for a var, but we handle it.
                         // We show a flattened representation.
-                        let flat_task = task
-                            .commands
+                        task.commands
                             .iter()
                             .map(|cmd| {
                                 cmd.template
@@ -141,8 +138,7 @@ fn print_variables(config: &ResolvedConfig, key: &str, title: &str) {
                                     .collect::<String>()
                             })
                             .collect::<Vec<_>>()
-                            .join(" && ");
-                        format!("[expanded: {}]", flat_task)
+                            .join(" && ")
                     }
                 };
                 println!(

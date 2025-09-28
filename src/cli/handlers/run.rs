@@ -1,4 +1,4 @@
-// EN: src/cli/handlers/run.rs
+// src/cli/handlers/run.rs
 
 use crate::{
     CancellationToken,

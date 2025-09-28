@@ -1,4 +1,4 @@
-// EN: src/cli/handlers/unregister.rs
+// src/cli/handlers/unregister.rs
 
 use anyhow::{Result, anyhow};
 use clap::Parser;

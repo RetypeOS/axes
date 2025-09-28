@@ -1,4 +1,4 @@
-// EN: src/cli/handlers/start.rs
+// src/cli/handlers/start.rs
 
 use crate::core::config_resolver::ValueKind;
 use crate::{

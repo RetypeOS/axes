@@ -1,4 +1,4 @@
-// EN: src/cli/handlers/rename.rs
+// src/cli/handlers/rename.rs
 
 use anyhow::{Context, Result, anyhow};
 use colored::*;

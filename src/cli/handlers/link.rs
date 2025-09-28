@@ -1,4 +1,4 @@
-// EN: src/cli/handlers/link.rs
+// src/cli/handlers/link.rs
 
 use anyhow::{Context, Result, anyhow};
 

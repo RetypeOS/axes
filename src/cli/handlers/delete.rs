@@ -1,4 +1,4 @@
-// EN: src/cli/handlers/delete.rs
+// src/cli/handlers/delete.rs
 
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;

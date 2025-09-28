@@ -1,4 +1,4 @@
-// EN: src/core/parameters.rs
+// src/core/parameters.rs
 
 use crate::models::{ParameterDef, ParameterKind, ParameterModifiers, TemplateComponent};
 use anyhow::{Context, Result, anyhow};
@@ -6,7 +6,7 @@ use colored::*;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 
-// --- ESTRUCTURAS DE DATOS ---
+// --- DATA STRUCTS ---
 
 /// Representa un único argumento de la CLI con su estado de consumo.
 #[derive(Debug, Clone)]

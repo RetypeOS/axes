@@ -1,4 +1,4 @@
-// EN: src/core/config_resolver.rs
+// src/core/config_resolver.rs
 
 use crate::constants::{
     AXES_DIR, CONFIG_CACHE_FILENAME, MAX_RECURSION_DEPTH, PROJECT_CONFIG_FILENAME,
@@ -159,14 +159,8 @@ fn expand_and_get_task_internal(
         } else {
             (false, false, line.as_str())
         };
-        let expanded_str = expand_composite_tokens_recursively(
-            key,
-            kind,
-            template_str,
-            config,
-            recursion_stack,
-            depth,
-        )?;
+        let expanded_str =
+            expand_composite_tokens_recursively(template_str, config, recursion_stack, depth)?;
         let mut components = parameters::discover_and_parse(&expanded_str)?;
         expand_simple_tokens_in_literals(&mut components, config);
 
@@ -187,8 +181,6 @@ fn expand_and_get_task_internal(
 
 /// Helper recursive function to expand composite tokens like `<axes::vars::...>`
 fn expand_composite_tokens_recursively(
-    key: &str,
-    kind: ValueKind,
     raw_string: &str,
     config: &mut ResolvedConfig,
     recursion_stack: &mut HashSet<String>,
@@ -197,25 +189,13 @@ fn expand_composite_tokens_recursively(
     if depth >= MAX_RECURSION_DEPTH {
         return Err(ResolverError::MaxRecursionDepth {
             depth,
-            key: key.to_string(),
-        });
-    }
-    let stack_key = format!("{:?}::{}", kind, key);
-    if !recursion_stack.insert(stack_key.clone()) {
-        let cycle_path = recursion_stack
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>()
-            .join(" -> ");
-        return Err(ResolverError::CircularDependency {
-            cycle_path: format!("{} -> {}", cycle_path, stack_key),
+            key: "expansion".to_string(),
         });
     }
 
     let re = Regex::new(r"<axes::(vars|scripts)::([^>]+)>").unwrap();
     let mut current_str = raw_string.to_string();
 
-    // Loop to handle multiple tokens in the same string
     loop {
         let captures: Vec<_> = re.captures_iter(&current_str).collect();
         if captures.is_empty() {
@@ -229,11 +209,27 @@ fn expand_composite_tokens_recursively(
             let full_match = caps.get(0).unwrap();
             let namespace = caps.get(1).unwrap().as_str();
             let sub_key = caps.get(2).unwrap().as_str();
+
             let sub_kind = if namespace == "vars" {
                 ValueKind::Variable
             } else {
                 ValueKind::Script
             };
+            let stack_key = format!("{:?}::{}", sub_kind, sub_key);
+
+            if !recursion_stack.insert(stack_key.clone()) {
+                let cycle_path = recursion_stack
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(" -> ");
+                return Err(ResolverError::CircularDependency {
+                    cycle_path: format!("{} -> {}", cycle_path, stack_key),
+                });
+            }
+
+            next_str.push_str(&current_str[last_match_end..full_match.start()]);
+
             let sub_task = expand_and_get_task_internal(
                 sub_key,
                 sub_kind,
@@ -241,9 +237,6 @@ fn expand_composite_tokens_recursively(
                 recursion_stack,
                 depth + 1,
             )?;
-
-            next_str.push_str(&current_str[last_match_end..full_match.start()]);
-
             let sub_value_str = sub_task
                 .commands
                 .iter()
@@ -260,7 +253,6 @@ fn expand_composite_tokens_recursively(
                 })
                 .collect::<Vec<_>>()
                 .join(" && ");
-
             next_str.push_str(&sub_value_str);
             last_match_end = full_match.end();
         }
@@ -268,7 +260,6 @@ fn expand_composite_tokens_recursively(
         current_str = next_str;
     }
 
-    recursion_stack.remove(&stack_key);
     Ok(current_str)
 }
 

@@ -1,4 +1,4 @@
-// EN: src/core/task_executor.rs
+// src/core/task_executor.rs
 
 use crate::{
     CancellationToken,
