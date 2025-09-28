@@ -5,8 +5,6 @@
 use anyhow::{Context, Result, anyhow};
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use uuid::Uuid;
 
 use crate::{
@@ -31,15 +29,6 @@ pub struct UnregisterPlan {
     pub summary_lines: Vec<String>,
 }
 
-#[inline]
-pub fn check_for_cancellation(cancellation_token: &Arc<AtomicBool>) -> Result<()> {
-    if !cancellation_token.load(Ordering::SeqCst) {
-        Err(anyhow!(t!("common.error.operation_cancelled")))
-    } else {
-        Ok(())
-    }
-}
-
 /// Prepares a plan for unregistering projects. This function is a "dry run"
 /// and does not modify the index; it only calculates the effects.
 pub fn prepare_unregister_plan(
@@ -47,7 +36,6 @@ pub fn prepare_unregister_plan(
     config: &ResolvedConfig,
     recursive: bool,
     reparent_to: Option<String>,
-    cancellation_token: &CancellationToken,
 ) -> Result<UnregisterPlan> {
     let mut uuids_to_remove = vec![config.uuid];
     let mut reparent_warnings = Vec::new();
@@ -160,7 +148,6 @@ fn check_reparent_collisions(
 pub fn resolve_config_from_context_or_session(
     context_str: Option<String>,
     index: &GlobalIndex,
-    cancellation_token: &CancellationToken,
 ) -> Result<ResolvedConfig> {
     match context_str {
         Some(context) => {
@@ -198,7 +185,6 @@ pub fn resolve_config_from_context_or_session(
 /// Interactive, multi-modal parent selector.
 pub fn choose_parent_interactive(
     index: &GlobalIndex,
-    cancellation_token: &CancellationToken,
 ) -> Result<Uuid> {
     loop {
         let items = &[
@@ -212,7 +198,6 @@ pub fn choose_parent_interactive(
             .items(items)
             .default(2) // Default to 'global'
             .interact()?;
-        check_for_cancellation(cancellation_token)?;
 
         match selection {
             0 => {
@@ -239,13 +224,11 @@ pub fn choose_parent_interactive(
 /// `Ok(None)` if the user cancels, and `Err` on I/O failure.
 fn select_parent_by_context(
     index: &GlobalIndex,
-    cancellation_token: &CancellationToken,
 ) -> Result<Option<Uuid>> {
     loop {
         let input: String = Input::with_theme(&ColorfulTheme::default())
             .with_prompt("Enter context path (leave empty to go back)")
             .interact_text()?;
-        check_for_cancellation(cancellation_token)?;
 
         if input.is_empty() {
             return Ok(None); // User wants to go back to the main menu
@@ -261,7 +244,6 @@ fn select_parent_by_context(
                 {
                     return Ok(Some(uuid));
                 };
-                check_for_cancellation(cancellation_token)?;
 
                 // If user says no, the loop continues to ask for another context.
             }
@@ -276,7 +258,6 @@ fn select_parent_by_context(
 /// Handles the visual browsing workflow.
 fn select_parent_by_browsing(
     index: &GlobalIndex,
-    cancellation_token: &CancellationToken,
 ) -> Result<Uuid> {
     let mut current_uuid_opt = None; // Start at the root view
 
@@ -332,7 +313,6 @@ fn select_parent_by_browsing(
             .items(&items)
             .default(0)
             .interact()?;
-        check_for_cancellation(cancellation_token)?;
 
         let selection_str = &items[selection_idx];
 

@@ -6,7 +6,7 @@ use dialoguer::{self, Error as DialoguerError, Input, theme::ColorfulTheme};
 use std::{collections::HashMap, env, fs, io, path::Path};
 use uuid::Uuid;
 
-use super::commons::{self, check_for_cancellation};
+use super::commons;
 use crate::{
     CancellationToken,
     cli::args::InitArgs,
@@ -40,20 +40,18 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     // 2. Resolve configuration details
     let project_name =
         resolve_project_name(&init_args, &target_dir, is_interactive, cancellation_token)?;
-    check_for_cancellation(cancellation_token)?;
+
     let parent_uuid = resolve_parent_project(&init_args, is_interactive, cancellation_token)?;
-    check_for_cancellation(cancellation_token)?;
 
     // --- Interactive step for version and description ---
     let version = resolve_project_version(&init_args, is_interactive, cancellation_token)?;
-    check_for_cancellation(cancellation_token)?;
+
     let description = resolve_project_description(
         &init_args,
         &project_name,
         is_interactive,
         cancellation_token,
     )?;
-    check_for_cancellation(cancellation_token)?;
 
     // 3. Build the project configuration object
     let mut project_config = ProjectConfig::new_for_init(&project_name, &version, &description);
@@ -118,7 +116,6 @@ fn resolve_project_name(
     args: &InitArgs,
     target_dir: &Path,
     is_interactive: bool,
-    cancellation_token: &CancellationToken,
 ) -> Result<String> {
     if let Some(name) = &args.name {
         // If name is provided via flag, validate it. Failure is a hard error.
@@ -139,17 +136,12 @@ fn resolve_project_name(
                 .default(default_name.clone())
                 .interact_text()
             {
-                Ok(value) => {
-                    check_for_cancellation(cancellation_token)?;
-                    value
-                }
+                Ok(value) => value,
                 Err(DialoguerError::IO(io_err)) if io_err.kind() == io::ErrorKind::Interrupted => {
                     return Err(anyhow!(t!("common.error.operation_cancelled")));
                 }
                 Err(e) => return Err(e.into()), // Otro error (I/O, etc.).
             };
-
-            check_for_cancellation(cancellation_token)?;
 
             match commons::validate_project_name(&input) {
                 Ok(name) => return Ok(name),
@@ -170,7 +162,6 @@ fn resolve_project_name(
 fn resolve_parent_project(
     args: &InitArgs,
     is_interactive: bool,
-    cancellation_token: &CancellationToken,
 ) -> Result<Uuid> {
     let index = index_manager::load_and_ensure_global_project()?;
 
@@ -197,7 +188,6 @@ fn resolve_parent_project(
 fn resolve_project_version(
     args: &InitArgs,
     is_interactive: bool,
-    cancellation_token: &CancellationToken,
 ) -> Result<String> {
     if let Some(version) = &args.version {
         return Ok(version.clone());
@@ -209,10 +199,7 @@ fn resolve_project_version(
             .interact_text()
             .map_err(|e| anyhow!(e))
         {
-            Ok(i) => {
-                check_for_cancellation(cancellation_token)?;
-                Ok(i)
-            }
+            Ok(i) => Ok(i),
             Err(e) => Err(e),
         }
     } else {
@@ -224,7 +211,6 @@ fn resolve_project_description(
     args: &InitArgs,
     name: &str,
     is_interactive: bool,
-    cancellation_token: &CancellationToken,
 ) -> Result<String> {
     if let Some(desc) = &args.description {
         return Ok(desc.clone());
@@ -237,10 +223,7 @@ fn resolve_project_description(
             .interact_text()
             .map_err(|e| anyhow!(e))
         {
-            Ok(i) => {
-                check_for_cancellation(cancellation_token)?;
-                Ok(i)
-            }
+            Ok(i) => Ok(i),
             Err(e) => Err(e),
         }
     } else {

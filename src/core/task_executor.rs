@@ -49,7 +49,6 @@ pub fn execute_task(
     task: &Task,
     config: &ResolvedConfig,
     resolver: &ArgResolver,
-    cancellation_token: &CancellationToken,
 ) -> Result<()> {
     let mut parallel_batch: Vec<String> = Vec::new();
 
@@ -88,7 +87,6 @@ fn execute_single_command(
     command_str: &str,
     ignore_errors: bool,
     config: &ResolvedConfig,
-    cancellation_token: &CancellationToken,
 ) -> Result<()> {
     let command_to_run = if ignore_errors {
         format!("-{}", command_str)
@@ -108,7 +106,6 @@ fn execute_single_command(
 fn execute_parallel_batch(
     batch: &[String],
     config: &ResolvedConfig,
-    cancellation_token: &CancellationToken,
 ) -> Result<()> {
     println!("\n⚡ Running {} scripts in parallel...", batch.len());
 

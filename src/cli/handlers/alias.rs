@@ -7,7 +7,6 @@ use dialoguer::{Confirm, console::measure_text_width, theme::ColorfulTheme};
 use std::env;
 
 use crate::CancellationToken;
-use crate::cli::handlers::commons::check_for_cancellation;
 
 use crate::core::{context_resolver, index_manager};
 
@@ -62,7 +61,6 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
                     return Ok(());
                 }
             }
-            check_for_cancellation(cancellation_token)?;
 
             let (target_uuid, target_name) =
                 context_resolver::resolve_context(&context, &index, cancellation_token)?;
@@ -120,7 +118,6 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
                     return Ok(());
                 }
             }
-            check_for_cancellation(cancellation_token)?;
 
             if index_manager::remove_alias(&mut index, &clean_name) {
                 index_manager::save_global_index(&index)?;

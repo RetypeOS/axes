@@ -1,19 +1,21 @@
 // EN: src/bin/axes.rs
 
 use anyhow::Result;
-use axes::CancellationToken;
-use axes::cli::{Cli, handlers};
-use axes::t;
+use axes::{
+    CancellationToken,
+    cli::{Cli, handlers},
+    system::executor,
+};
 use clap::Parser;
 use colored::*;
 use std::env;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 // --- Command Definition and Registry ---
 
-/// Defines a system command, its aliases, and its handler function.
-/// The handler now accepts a `CancellationToken` to allow for safe interruption.
+/// Defines a system command, its aliases, and its synchronous handler function.
+/// The handler signature is kept consistent across all commands for simplicity in the registry.
 struct CommandDefinition {
     name: &'static str,
     aliases: &'static [&'static str],
@@ -21,12 +23,18 @@ struct CommandDefinition {
 }
 
 /// The single source of truth for all system commands.
-/// To add a new command, simply add a new entry here.
+/// This declarative approach makes adding, removing, or modifying commands trivial.
+/// To add a new command, simply add a new entry to this static array.
 static COMMAND_REGISTRY: &[CommandDefinition] = &[
     CommandDefinition {
         name: "alias",
         aliases: &[],
         handler: handlers::alias::handle,
+    },
+    CommandDefinition {
+        name: "_cache",
+        aliases: &[],
+        handler: handlers::debug_cache::handle,
     },
     CommandDefinition {
         name: "delete",
@@ -92,65 +100,45 @@ fn find_command(name: &str) -> Option<&'static CommandDefinition> {
         .find(|cmd| cmd.name == name || cmd.aliases.contains(&name))
 }
 
-/// The main entry point of the application.
-#[tokio::main]
-async fn main() -> Result<()> {
-    let cancellation_token = Arc::new(AtomicBool::new(true));
+/// The main entry point of the `axes` application.
+/// It sets up logging, parses arguments, dispatches to the correct handler,
+/// and performs centralized error handling.
+fn main() {
+    // The CancellationToken is now a simple flag, primarily for future use in long-running,
+    // non-process tasks. The main Ctrl+C handling is managed by the executor.
+    let cancellation_token = Arc::new(AtomicBool::new(false));
     env_logger::init();
-    let cli = Cli::parse();
 
-    let signal_token = cancellation_token.clone();
-    let main_logic_token = cancellation_token.clone();
-
-    tokio::select! {
-        // Work A: Main logic of aplication.
-        result = run_cli_wrapper(cli, main_logic_token) => {
-            if let Err(e) = result {
-                if !cancellation_token.load(Ordering::SeqCst) {
-                    std::process::exit(130);
-                } else {
-                    eprintln!("\n{}: {}", "Error".red().bold(), e);
-                    std::process::exit(1);
-                }
+    // The entire application logic is wrapped in a Result to enable centralized error handling.
+    if let Err(e) = run_cli(Cli::parse(), cancellation_token) {
+        // --- Centralized Error Handling ---
+        // Check if the error is a command interruption (e.g., from Ctrl+C).
+        if let Some(exec_err) = e.downcast_ref::<executor::ExecutionError>()
+            && matches!(exec_err, executor::ExecutionError::Interrupted { .. }) {
+                // If so, exit silently with the standard exit code for interruption.
+                // This provides a clean, shell-like experience for the user.
+                std::process::exit(130);
             }
-        }
 
-        // Work B: Wait the signal of Ctrl+C.
-        _ = tokio::signal::ctrl_c() => {
-            if signal_token.load(Ordering::SeqCst) {
-                signal_token.store(false, Ordering::SeqCst);
-                println!(
-                    "\n{}",
-                    t!("common.info.cancellation_requested_interactive").yellow()
-                );
-            }
-        }
+        // For all other errors, print a formatted message to stderr and exit with a failure code.
+        eprintln!("\n{}: {}", "Error".red().bold(), e);
+        std::process::exit(1);
     }
-    Ok(())
-}
-
-/// A wrapper function needed because `tokio::select!` requires the futures to be `Send`.
-/// `run_cli` en sí no es `async`, por lo que lo envolvemos en un `tokio::task::spawn_blocking`.
-async fn run_cli_wrapper(cli: Cli, cancellation_token: CancellationToken) -> Result<()> {
-    tokio::task::spawn_blocking(move || run_cli(cli, cancellation_token)).await?
 }
 
 /// The main application dispatcher.
 ///
-/// This function is the primary router for the application. It determines the user's
-/// intent based on command-line arguments and the environment, then routes
-/// to the appropriate handler. It is designed to be highly maintainable and declarative.
-///
-/// # Arguments
-/// * `cli`: The parsed command-line arguments from `clap`.
-/// * `cancellation_token`: A shared token to signal graceful shutdown on Ctrl+C.
+/// This function is the primary router. It determines the user's intent based on
+/// command-line arguments and the environment (e.g., if inside an `axes` session),
+/// then routes to the appropriate handler with the correct arguments.
 fn run_cli(cli: Cli, cancellation_token: CancellationToken) -> Result<()> {
     log::debug!("CLI args parsed: {:?}", cli);
 
     let arg1 = match cli.context_or_action {
         Some(a) => a,
         None => {
-            println!("{}", t!("common.info.tui_placeholder"));
+            // If no arguments are provided, show a placeholder for the future TUI.
+            println!("Welcome to axes! (TUI placeholder)");
             return Ok(());
         }
     };
@@ -163,7 +151,7 @@ fn run_cli(cli: Cli, cancellation_token: CancellationToken) -> Result<()> {
 
     let (action_name, action_args) = if env::var("AXES_PROJECT_UUID").is_ok() {
         // --- Session Mode: Strict Grammar ---
-        // `arg1` is always the action or script name.
+        // The context is implicit, so `arg1` must be the action or script name.
         (arg1, remaining_args)
     } else {
         // --- Script Mode: Flexible Grammar ---
@@ -190,10 +178,11 @@ fn run_cli(cli: Cli, cancellation_token: CancellationToken) -> Result<()> {
 
     // --- Dispatch Logic ---
     if let Some(command) = find_command(&action_name) {
-        // A system command was found. Execute its handler.
+        // A known system command was found. Execute its handler.
         (command.handler)(action_args, &cancellation_token)
     } else {
-        // Not a system command, so it's a shortcut for `run`.
+        // Not a system command, so it's a script name. This is a shortcut for `run`.
+        // This case primarily handles session mode (`axes <script>`).
         let mut run_args = vec![action_name];
         run_args.extend(action_args);
         handlers::run::handle(run_args, &cancellation_token)

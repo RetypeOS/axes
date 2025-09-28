@@ -15,3 +15,5 @@ pub mod run;
 pub mod start;
 pub mod tree;
 pub mod unregister;
+
+pub mod debug_cache;

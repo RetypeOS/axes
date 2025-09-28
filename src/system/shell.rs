@@ -40,7 +40,6 @@ pub fn launch_session(
     task_start: Option<Task>,
     task_exit: Option<Task>,
     resolver: &ArgResolver,
-    cancellation_token: &CancellationToken,
 ) -> Result<(), ShellError> {
     let shells_config = load_shells_config()?;
     let shell_name = config
