@@ -6,10 +6,7 @@ use colored::*;
 use dialoguer::{Confirm, theme::ColorfulTheme};
 
 use super::commons;
-use crate::{
-    
-    core::{context_resolver, index_manager},
-};
+use crate::core::{context_resolver, index_manager};
 
 #[derive(Parser, Debug, Default)]
 #[command(no_binary_name = true)]
@@ -29,11 +26,8 @@ struct UnregisterArgs {
 pub fn handle(args: Vec<String>) -> Result<()> {
     let unregister_args = UnregisterArgs::try_parse_from(&args)?;
     let mut index = index_manager::load_and_ensure_global_project()?;
-    let config = commons::resolve_config_from_context_or_session(
-        Some(unregister_args.context),
-        &index,
-        
-    )?;
+    let config =
+        commons::resolve_config_from_context_or_session(Some(unregister_args.context), &index)?;
 
     if config.uuid == index_manager::GLOBAL_PROJECT_UUID {
         return Err(anyhow!(t!("unregister.error.cannot_unregister_global")));
@@ -45,7 +39,6 @@ pub fn handle(args: Vec<String>) -> Result<()> {
         &config,
         unregister_args.recursive,
         unregister_args.reparent_to.clone(),
-        
     )?;
 
     // 2. Present the plan to the user.

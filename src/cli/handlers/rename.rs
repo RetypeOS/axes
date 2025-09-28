@@ -5,7 +5,7 @@ use colored::*;
 use dialoguer::{Confirm, theme::ColorfulTheme};
 
 use super::commons;
-use crate::{ core::index_manager};
+use crate::core::index_manager;
 
 use clap::Parser;
 
@@ -25,11 +25,8 @@ pub fn handle(args: Vec<String>) -> Result<()> {
     let mut index = index_manager::load_and_ensure_global_project()?;
 
     // 2. Solve config.
-    let config = commons::resolve_config_from_context_or_session(
-        Some(rename_args.context),
-        &index,
-        
-    )?;
+    let config =
+        commons::resolve_config_from_context_or_session(Some(rename_args.context), &index)?;
     let old_qualified_name = config.qualified_name.clone();
 
     let simple_name = config

@@ -1,7 +1,6 @@
 // EN: src/cli/handlers/debug_cache.rs
 
 use crate::{
-    
     constants::{AXES_DIR, CONFIG_CACHE_FILENAME},
     models::SerializableConfigCache,
 };
@@ -36,10 +35,7 @@ pub fn handle(args: Vec<String>) -> Result<()> {
     match cache_args.command {
         CacheCommand::Inspect { context } => {
             let index = crate::core::index_manager::load_and_ensure_global_project()?;
-            let (uuid, _) = crate::core::context_resolver::resolve_context(
-                &context,
-                &index,
-            )?;
+            let (uuid, _) = crate::core::context_resolver::resolve_context(&context, &index)?;
             let project = index.projects.get(&uuid).unwrap();
             let cache_path = project.path.join(AXES_DIR).join(CONFIG_CACHE_FILENAME);
 
@@ -72,10 +68,7 @@ pub fn handle(args: Vec<String>) -> Result<()> {
         }
         CacheCommand::Clear { context } => {
             let index = crate::core::index_manager::load_and_ensure_global_project()?;
-            let (uuid, _) = crate::core::context_resolver::resolve_context(
-                &context,
-                &index,
-            )?;
+            let (uuid, _) = crate::core::context_resolver::resolve_context(&context, &index)?;
             let project = index.projects.get(&uuid).unwrap();
             let cache_path = project.path.join(AXES_DIR).join(CONFIG_CACHE_FILENAME);
 

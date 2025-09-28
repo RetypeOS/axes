@@ -3,13 +3,10 @@
 use anyhow::Result;
 use clap::Parser;
 
-use crate::{
-    
-    core::{
-        context_resolver,
-        graph_display::{self, DisplayOptions},
-        index_manager,
-    },
+use crate::core::{
+    context_resolver,
+    graph_display::{self, DisplayOptions},
+    index_manager,
 };
 
 #[derive(Parser, Debug, Default)]
@@ -39,8 +36,7 @@ pub fn handle(args: Vec<String>) -> Result<()> {
 
     // 3. Determine the starting node.
     let (start_node_uuid, header) = if let Some(context_str) = tree_args.context {
-        let (uuid, qualified_name) =
-            context_resolver::resolve_context(&context_str, &index)?;
+        let (uuid, qualified_name) = context_resolver::resolve_context(&context_str, &index)?;
         let header = format!(t!("tree.header.from_project"), name = qualified_name);
         (Some(uuid), header)
     } else {

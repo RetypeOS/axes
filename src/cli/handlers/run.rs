@@ -1,7 +1,6 @@
 // src/cli/handlers/run.rs
 
 use crate::{
-    
     cli::handlers::commons,
     core::{
         config_resolver::{self, ValueKind},
@@ -35,11 +34,8 @@ pub fn handle(args: Vec<String>) -> Result<()> {
     // 1. Initial argument parsing and configuration resolution.
     let run_args = RunArgs::try_parse_from(&args)?;
     let index = index_manager::load_and_ensure_global_project()?;
-    let mut config = commons::resolve_config_from_context_or_session(
-        Some(run_args.context.clone()),
-        &index,
-        
-    )?;
+    let mut config =
+        commons::resolve_config_from_context_or_session(Some(run_args.context.clone()), &index)?;
 
     println!(
         "\n▶️  Running script '{}' for project '{}'...",

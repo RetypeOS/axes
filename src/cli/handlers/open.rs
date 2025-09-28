@@ -1,7 +1,6 @@
 // src/cli/handlers/open.rs
 
 use crate::{
-    
     cli::handlers::commons,
     core::{
         config_resolver::{self, ValueKind},
@@ -31,11 +30,8 @@ pub fn handle(args: Vec<String>) -> Result<()> {
     // 1. Parse args and resolve config.
     let open_args = OpenArgs::try_parse_from(&args)?;
     let index = index_manager::load_and_ensure_global_project()?;
-    let mut config = commons::resolve_config_from_context_or_session(
-        Some(open_args.context),
-        &index,
-        
-    )?;
+    let mut config =
+        commons::resolve_config_from_context_or_session(Some(open_args.context), &index)?;
 
     // 2. Determine which `open_with` command to use, correctly handling the 'default' key.
     let app_key_from_user = open_args.app_key.as_deref().unwrap_or("default");

@@ -5,7 +5,6 @@ use clap::Parser;
 use std::{env, path::PathBuf};
 
 use crate::{
-    
     cli::args::RegisterArgs,
     core::{
         graph_display::{self, DisplayOptions},
@@ -53,18 +52,14 @@ pub fn handle(args: Vec<String>) -> Result<()> {
         suggested_parent_uuid: None,
     };
 
-    onboarding_manager::register_project(
-        &path_to_register,
-        &mut index,
-        &options,
-        
-    )
-    .with_context(|| {
-        anyhow!(
-            t!("register.error.failed"),
-            path = path_to_register.display()
-        )
-    })?;
+    onboarding_manager::register_project(&path_to_register, &mut index, &options).with_context(
+        || {
+            anyhow!(
+                t!("register.error.failed"),
+                path = path_to_register.display()
+            )
+        },
+    )?;
 
     // Save changes to disk
     index_manager::save_global_index(&index)?;

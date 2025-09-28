@@ -2,7 +2,6 @@
 
 use crate::core::config_resolver::ValueKind;
 use crate::{
-    
     cli::handlers::commons,
     core::{config_resolver, index_manager, parameters::ArgResolver},
     models::{ParameterDef, Task, TemplateComponent},
@@ -38,11 +37,8 @@ pub fn handle(args: Vec<String>) -> Result<()> {
 
     // 2. Load index and resolve the project configuration.
     let index = index_manager::load_and_ensure_global_project()?;
-    let mut config = commons::resolve_config_from_context_or_session(
-        Some(start_args.context),
-        &index,
-        
-    )?;
+    let mut config =
+        commons::resolve_config_from_context_or_session(Some(start_args.context), &index)?;
 
     // 3. Resolve `at_start` and `at_exit` into `Task` objects.
     let task_start = if config.options.at_start.is_some() {
@@ -94,13 +90,7 @@ pub fn handle(args: Vec<String>) -> Result<()> {
     let resolver = ArgResolver::new(&all_definitions, &start_args.params, has_generic_params)?;
 
     // 6. Delegate to the shell module to launch the session.
-    shell::launch_session(
-        &config,
-        task_start,
-        task_exit,
-        &resolver,
-        
-    )?;
+    shell::launch_session(&config, task_start, task_exit, &resolver)?;
 
     Ok(())
 }

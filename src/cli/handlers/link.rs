@@ -3,10 +3,7 @@
 use anyhow::{Context, Result, anyhow};
 
 use super::commons;
-use crate::{
-    
-    core::{context_resolver, index_manager},
-};
+use crate::core::{context_resolver, index_manager};
 
 use clap::Parser;
 
@@ -23,11 +20,7 @@ pub fn handle(args: Vec<String>) -> Result<()> {
     // 1. Resolve the project to be moved. This requires a context.
     let link_args = LinkArgs::try_parse_from(&args)?;
     let mut index = index_manager::load_and_ensure_global_project()?;
-    let config = commons::resolve_config_from_context_or_session(
-        Some(link_args.context),
-        &index,
-        
-    )?;
+    let config = commons::resolve_config_from_context_or_session(Some(link_args.context), &index)?;
 
     // 2. Get the new parent's context from the arguments.
     let new_parent_context = link_args.new_parent.trim();
@@ -44,13 +37,12 @@ pub fn handle(args: Vec<String>) -> Result<()> {
 
     // 3. Load the index and resolve the new parent's UUID.
     let (new_parent_uuid, new_parent_qualified_name) =
-        context_resolver::resolve_context(new_parent_context, &index)
-            .with_context(|| {
-                anyhow!(
-                    t!("link.error.cannot_resolve_parent"),
-                    parent = new_parent_context
-                )
-            })?;
+        context_resolver::resolve_context(new_parent_context, &index).with_context(|| {
+            anyhow!(
+                t!("link.error.cannot_resolve_parent"),
+                parent = new_parent_context
+            )
+        })?;
 
     // 4. Perform the link operation, which includes all critical validations.
     index_manager::link_project(&mut index, config.uuid, new_parent_uuid)

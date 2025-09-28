@@ -8,7 +8,6 @@ use uuid::Uuid;
 
 use super::commons;
 use crate::{
-    
     cli::args::InitArgs,
     constants::{AXES_DIR, PROJECT_CONFIG_FILENAME, PROJECT_REF_FILENAME},
     core::{context_resolver, index_manager},
@@ -38,20 +37,14 @@ pub fn handle(args: Vec<String>) -> Result<()> {
     let is_interactive = !init_args.autosolve;
 
     // 2. Resolve configuration details
-    let project_name =
-        resolve_project_name(&init_args, &target_dir, is_interactive)?;
+    let project_name = resolve_project_name(&init_args, &target_dir, is_interactive)?;
 
     let parent_uuid = resolve_parent_project(&init_args, is_interactive)?;
 
     // --- Interactive step for version and description ---
     let version = resolve_project_version(&init_args, is_interactive)?;
 
-    let description = resolve_project_description(
-        &init_args,
-        &project_name,
-        is_interactive,
-        
-    )?;
+    let description = resolve_project_description(&init_args, &project_name, is_interactive)?;
 
     // 3. Build the project configuration object
     let mut project_config = ProjectConfig::new_for_init(&project_name, &version, &description);
@@ -159,16 +152,12 @@ fn resolve_project_name(
 }
 
 /// Resuelve el UUID del padre, desde flags, interactivamente, o usando 'global' como default.
-fn resolve_parent_project(
-    args: &InitArgs,
-    is_interactive: bool,
-) -> Result<Uuid> {
+fn resolve_parent_project(args: &InitArgs, is_interactive: bool) -> Result<Uuid> {
     let index = index_manager::load_and_ensure_global_project()?;
 
     if let Some(parent_context) = &args.parent {
         println!("Resolving parent '{}'...", parent_context);
-        let (uuid, qualified_name) =
-            context_resolver::resolve_context(parent_context, &index)?;
+        let (uuid, qualified_name) = context_resolver::resolve_context(parent_context, &index)?;
         println!(
             "Parent project '{}' found (UUID: {}).",
             qualified_name, uuid
@@ -185,23 +174,16 @@ fn resolve_parent_project(
     }
 }
 
-fn resolve_project_version(
-    args: &InitArgs,
-    is_interactive: bool,
-) -> Result<String> {
+fn resolve_project_version(args: &InitArgs, is_interactive: bool) -> Result<String> {
     if let Some(version) = &args.version {
         return Ok(version.clone());
     }
     if is_interactive {
-        match Input::with_theme(&ColorfulTheme::default())
+        Input::with_theme(&ColorfulTheme::default())
             .with_prompt("Version")
             .default("0.1.0".to_string())
             .interact_text()
             .map_err(|e| anyhow!(e))
-        {
-            Ok(i) => Ok(i),
-            Err(e) => Err(e),
-        }
     } else {
         Ok("0.1.0".to_string())
     }
@@ -217,15 +199,11 @@ fn resolve_project_description(
     }
     let default_desc = format!("A new project named '{}', managed by `axes`.", name);
     if is_interactive {
-        match Input::with_theme(&ColorfulTheme::default())
+        Input::with_theme(&ColorfulTheme::default())
             .with_prompt("Description")
             .default(default_desc)
             .interact_text()
             .map_err(|e| anyhow!(e))
-        {
-            Ok(i) => Ok(i),
-            Err(e) => Err(e),
-        }
     } else {
         Ok(default_desc)
     }

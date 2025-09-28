@@ -2,7 +2,6 @@
 
 use anyhow::Result;
 use axes::{
-    
     cli::{Cli, handlers},
     system::executor,
 };
@@ -111,11 +110,12 @@ fn main() {
         // --- Centralized Error Handling ---
         // Check if the error is a command interruption (e.g., from Ctrl+C).
         if let Some(exec_err) = e.downcast_ref::<executor::ExecutionError>()
-            && matches!(exec_err, executor::ExecutionError::Interrupted { .. }) {
-                // If so, exit silently with the standard exit code for interruption.
-                // This provides a clean, shell-like experience for the user.
-                std::process::exit(130);
-            }
+            && matches!(exec_err, executor::ExecutionError::Interrupted { .. })
+        {
+            // If so, exit silently with the standard exit code for interruption.
+            // This provides a clean, shell-like experience for the user.
+            std::process::exit(130);
+        }
 
         // For all other errors, print a formatted message to stderr and exit with a failure code.
         eprintln!("\n{}: {}", "Error".red().bold(), e);

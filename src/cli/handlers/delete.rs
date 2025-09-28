@@ -7,7 +7,6 @@ use dialoguer::{Confirm, theme::ColorfulTheme};
 use std::{fs, path::PathBuf};
 
 use crate::{
-    
     cli::handlers::commons,
     constants::AXES_DIR,
     core::{context_resolver, index_manager},
@@ -34,11 +33,8 @@ pub fn handle(args: Vec<String>) -> Result<()> {
     let mut index = index_manager::load_and_ensure_global_project()?;
 
     // Solve config.
-    let config = commons::resolve_config_from_context_or_session(
-        Some(delete_args.context),
-        &index,
-        
-    )?;
+    let config =
+        commons::resolve_config_from_context_or_session(Some(delete_args.context), &index)?;
 
     if config.uuid == index_manager::GLOBAL_PROJECT_UUID {
         return Err(anyhow!(t!("delete.error.cannot_delete_global")));
@@ -52,7 +48,6 @@ pub fn handle(args: Vec<String>) -> Result<()> {
         &config,
         delete_args.recursive,
         delete_args.reparent_to.clone(),
-        
     )?;
 
     let paths_to_purge: Vec<PathBuf> = plan

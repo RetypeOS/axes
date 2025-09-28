@@ -1,7 +1,6 @@
 // src/core/task_executor.rs
 
 use crate::{
-    
     core::parameters::ArgResolver,
     models::{ResolvedConfig, Task, TemplateComponent},
     system::executor,
@@ -45,11 +44,7 @@ pub fn assemble_final_command(
 /// Executes a complete `Task` object, handling sequential and parallel commands.
 /// This is the main execution engine used by `run`, `start`, `open`, etc.
 ///
-pub fn execute_task(
-    task: &Task,
-    config: &ResolvedConfig,
-    resolver: &ArgResolver,
-) -> Result<()> {
+pub fn execute_task(task: &Task, config: &ResolvedConfig, resolver: &ArgResolver) -> Result<()> {
     let mut parallel_batch: Vec<String> = Vec::new();
 
     for command_exec in &task.commands {
@@ -67,12 +62,7 @@ pub fn execute_task(
                 execute_parallel_batch(&parallel_batch, config)?;
                 parallel_batch.clear();
             }
-            execute_single_command(
-                trimmed_command,
-                command_exec.ignore_errors,
-                config,
-                
-            )?;
+            execute_single_command(trimmed_command, command_exec.ignore_errors, config)?;
         }
     }
 
@@ -99,27 +89,18 @@ fn execute_single_command(
         &command_to_run,
         &config.project_root,
         &config.env,
-        
     )?)
 }
 
-fn execute_parallel_batch(
-    batch: &[String],
-    config: &ResolvedConfig,
-) -> Result<()> {
+fn execute_parallel_batch(batch: &[String], config: &ResolvedConfig) -> Result<()> {
     println!("\n⚡ Running {} scripts in parallel...", batch.len());
 
     let results: Result<Vec<()>> = batch
         .par_iter()
         .map(|command_str| {
             println!("  > {}", command_str.cyan());
-            executor::execute_command(
-                command_str,
-                &config.project_root,
-                &config.env,
-                
-            )
-            .map_err(anyhow::Error::from)
+            executor::execute_command(command_str, &config.project_root, &config.env)
+                .map_err(anyhow::Error::from)
         })
         .collect();
 

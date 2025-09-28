@@ -6,8 +6,6 @@ use colored::*;
 use dialoguer::{Confirm, console::measure_text_width, theme::ColorfulTheme};
 use std::env;
 
-
-
 use crate::core::{context_resolver, index_manager};
 
 #[derive(Parser, Debug)]
@@ -62,8 +60,7 @@ pub fn handle(args: Vec<String>) -> Result<()> {
                 }
             }
 
-            let (target_uuid, target_name) =
-                context_resolver::resolve_context(&context, &index)?;
+            let (target_uuid, target_name) = context_resolver::resolve_context(&context, &index)?;
             index_manager::set_alias(&mut index, clean_name.clone(), target_uuid);
             index_manager::save_global_index(&index)?;
 

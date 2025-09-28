@@ -1,7 +1,6 @@
 // src/cli/handlers/info.rs
 
 use crate::{
-    
     cli::handlers::commons,
     constants::{AXES_DIR, PROJECT_CONFIG_FILENAME},
     models::{CacheableValue, ResolvedConfig, TemplateComponent},
@@ -25,11 +24,7 @@ pub fn handle(args: Vec<String>) -> Result<()> {
 
     // 2. Load index and resolve configuration.
     let index = crate::core::index_manager::load_and_ensure_global_project()?;
-    let config = commons::resolve_config_from_context_or_session(
-        Some(info_args.context),
-        &index,
-        
-    )?;
+    let config = commons::resolve_config_from_context_or_session(Some(info_args.context), &index)?;
 
     // 3. Print all sections.
     print_metadata(&config);
