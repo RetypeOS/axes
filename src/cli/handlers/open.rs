@@ -3,10 +3,15 @@
 use crate::{
     CancellationToken,
     cli::handlers::commons,
-    core::{config_resolver, index_manager, parameters::ArgResolver, task_executor},
-    models::{CacheableValue, Command as ProjectCommand, TemplateComponent},
+    core::{
+        config_resolver::{self, ValueKind},
+        index_manager,
+        parameters::ArgResolver,
+        task_executor,
+    },
+    models::{CacheableValue, ParameterDef, TemplateComponent},
 };
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use clap::Parser;
 use colored::*;
 
@@ -26,7 +31,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     // 1. Parse args and resolve config.
     let open_args = OpenArgs::try_parse_from(&args)?;
     let index = index_manager::load_and_ensure_global_project()?;
-    let config = commons::resolve_config_from_context_or_session(
+    let mut config = commons::resolve_config_from_context_or_session(
         Some(open_args.context),
         &index,
         cancellation_token,
@@ -38,10 +43,8 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     let final_key = if app_key_from_user == "default" {
         config.options.open_with.get("default")
             .and_then(|val| match val {
-                CacheableValue::Raw { command, .. } => {
-                    if let ProjectCommand::Simple(s) = command { Some(s.clone()) } else { None }
-                },
-                // If default was somehow expanded, we can't resolve it. This is a config error.
+                // The 'default' key MUST be a simple string (Raw Simple Command)
+                CacheableValue::Raw(fc) if fc.command_lines.len() == 1 => Some(fc.command_lines[0].clone()),
                 _ => None,
             })
             .ok_or_else(|| anyhow!("No 'default' application key is defined in [options.open_with]. It should be a simple string like 'default = \"editor\"'."))?
@@ -52,17 +55,10 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     let task_key = format!("options::open_with::{}", final_key);
 
     // 3. Resolve the command into a Task.
-    let task = config_resolver::resolve_task(&config, &task_key)
-        .with_context(|| {
-            format!(
-                "The application key '{}' is not defined in [options.open_with]",
-                final_key
-            )
-        })?
-        .clone();
+    let task = config_resolver::resolve_task(&mut config, &task_key, ValueKind::Script)?;
 
     // 4. Collect definitions and resolve arguments for the task.
-    let definitions: Vec<_> = task
+    let definitions: Vec<ParameterDef> = task
         .commands
         .iter()
         .flat_map(|cmd| &cmd.template)
@@ -83,9 +79,6 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     // 5. Execute the task.
     println!("\n🚀 Opening with '{}'...", final_key.cyan());
     task_executor::execute_task(&task, &config, &resolver, cancellation_token)?;
-
-    // 6. Persist cache.
-    config_resolver::save_config_cache(&config, &index)?;
 
     Ok(())
 }

@@ -7,6 +7,7 @@ description = "The development workflow configuration for the `axes` project its
 # === Development Scripts ===
 # Defines workflows for building, testing, and managing the tool.
 [scripts]
+hello = "echo Hello, World!"
 
 test_q = "-comando info <axes::vars::_param_1> <axes::params::1(map='--info', default='algo')>"
 
@@ -68,7 +69,7 @@ macos = [
 [vars]
 # Standard arguments for clippy to ensure consistency.
 clippy_args = "-- -D warnings"
-_param_1 = "pito"
+_param_1 = "<axes::params::0(required)>"
 
 # --- Installation Paths (User Configurable) ---
 # NOTE: Change these paths to match a directory in your PATH.

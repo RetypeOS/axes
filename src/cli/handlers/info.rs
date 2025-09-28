@@ -1,44 +1,37 @@
 // EN: src/cli/handlers/info.rs
 
-use anyhow::{Result, anyhow};
-use colored::*;
-
 use crate::{
     CancellationToken,
+    cli::handlers::commons,
     constants::{AXES_DIR, PROJECT_CONFIG_FILENAME},
-    core::index_manager,
-    models::{CacheableValue, Command as ProjectCommand, ResolvedConfig},
+    models::{CacheableValue, ResolvedConfig, TemplateComponent},
 };
-
+use anyhow::Result;
 use clap::Parser;
-
-use super::commons;
+use colored::*;
 
 #[derive(Parser, Debug, Default)]
 #[command(no_binary_name = true)]
 struct InfoArgs {
     /// The project context to display information for.
-    context: Option<String>,
+    context: String,
 }
 
 /// The main handler for the `info` command.
 /// Displays detailed information about the resolved project configuration.
 pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
-    // 1. Parsear los argumentos específicos de `info`.
+    // 1. Parse arguments.
     let info_args = InfoArgs::try_parse_from(&args)?;
-    if args.len() > 1 {
-        return Err(anyhow!(t!("info.error.unexpected_args")));
-    }
-    let index = index_manager::load_and_ensure_global_project()?;
 
-    // 2. Resolver la configuración usando el `context` parseado.
+    // 2. Load index and resolve configuration.
+    let index = crate::core::index_manager::load_and_ensure_global_project()?;
     let config = commons::resolve_config_from_context_or_session(
-        info_args.context,
+        Some(info_args.context),
         &index,
         cancellation_token,
     )?;
 
-    // 3. El resto de la lógica de impresión no cambia.
+    // 3. Print all sections.
     print_metadata(&config);
     print_scripts(&config);
     print_variables(&config, "vars", t!("info.label.vars"));
@@ -81,7 +74,7 @@ fn print_metadata(config: &ResolvedConfig) {
     }
 }
 
-/// Prints the list of available scripts, including their descriptions if available.
+/// Prints the list of available scripts, including their descriptions.
 fn print_scripts(config: &ResolvedConfig) {
     if config.scripts.is_empty() {
         println!("\n  {}", t!("info.label.no_scripts").dimmed());
@@ -96,27 +89,16 @@ fn print_scripts(config: &ResolvedConfig) {
         if let Some(cacheable_value) = config.scripts.get(cmd_name) {
             print!("    - {}", cmd_name.cyan());
 
-            // Extraemos la descripción del CacheableValue.
             let description = match cacheable_value {
-                CacheableValue::Raw { desc, .. } => desc.as_deref(),
+                CacheableValue::Raw(fc) => fc.desc.as_deref(),
                 CacheableValue::Expanded(task) => task.desc.as_deref(),
             };
 
-            if let Some(d) = description {
-                // Si la descripción no está vacía, la mostramos.
-                if !d.trim().is_empty() {
-                    print!(": {}", d.dimmed());
-                }
+            if let Some(d) = description
+                && !d.trim().is_empty()
+            {
+                print!(": {}", d.dimmed());
             }
-
-            // Opcional: Podríamos añadir un indicador visual del tipo de script,
-            // pero por ahora, la descripción es lo más importante.
-            // Ejemplo:
-            // match cacheable_value {
-            //     CacheableValue::Raw { value, .. } if value.contains("&&") => print!(" {}", "(sequence)".dimmed()),
-            //     _ => {}
-            // }
-
             println!();
         }
     }
@@ -133,19 +115,41 @@ fn print_variables(config: &ResolvedConfig, key: &str, title: &str) {
         sorted_keys.sort();
         for k in sorted_keys {
             if let Some(val) = config.vars.get(k) {
-                // Mostramos una representación del valor cacheable
                 let display_val = match val {
-                    CacheableValue::Raw { command, .. } => {
-                        // Un 'var' es un Simple(string)
-                        if let ProjectCommand::Simple(s) = command {
-                            format!("\"{}\" (raw)", s)
-                        } else {
-                            "[complex raw value]".to_string()
-                        }
+                    CacheableValue::Raw(fc) => {
+                        // For a var, `command_lines` will have a single entry.
+                        fc.command_lines
+                            .first()
+                            .map_or("".to_string(), |s| s.to_string())
                     }
-                    CacheableValue::Expanded { .. } => "[expanded]".to_string(),
+                    CacheableValue::Expanded(task) => {
+                        // This case is unlikely for a var, but we handle it.
+                        // We show a flattened representation.
+                        let flat_task = task
+                            .commands
+                            .iter()
+                            .map(|cmd| {
+                                cmd.template
+                                    .iter()
+                                    .map(|c| match c {
+                                        TemplateComponent::Literal(s) => s.clone(),
+                                        TemplateComponent::Parameter(p) => p.original_token.clone(),
+                                        TemplateComponent::GenericParams => {
+                                            "<axes::params>".to_string()
+                                        }
+                                    })
+                                    .collect::<String>()
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" && ");
+                        format!("[expanded: {}]", flat_task)
+                    }
                 };
-                println!("    - {} = {}", k.cyan(), display_val);
+                println!(
+                    "    - {} = {}",
+                    k.cyan(),
+                    format_args!("\"{}\"", display_val)
+                );
             }
         }
     } else if key == "env" {

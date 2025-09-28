@@ -67,8 +67,6 @@ pub fn launch_session(
     // 2. Build and launch the interactive shell with the temporary init script.
     let is_windows_shell = shell_name == "cmd" || shell_name == "powershell";
     let script_extension = if is_windows_shell { ".bat" } else { ".sh" };
-    // We must ensure the temp file is not deleted before the shell command finishes.
-    // So we persist it and will manually delete it later.
     let temp_script_file = NamedTempFile::with_prefix("axes-init-")?.into_temp_path();
     let temp_script_path = temp_script_file.with_extension(script_extension);
 
@@ -92,12 +90,8 @@ pub fn launch_session(
     cmd.env("AXES_PROJECT_NAME", &config.qualified_name);
     cmd.env("AXES_PROJECT_UUID", config.uuid.to_string());
 
-    // Inject [env] vars so they are available to the init script and the user.
-    for (key, value) in &config.env {
-        cmd.env(key, value);
-    }
+    cmd.envs(&config.env);
 
-    // Pass the init script to the shell using its specific arguments.
     if let Some(args) = &shell_config.interactive_args {
         for arg in args {
             cmd.arg(arg);
@@ -110,10 +104,9 @@ pub fn launch_session(
         log::warn!("Interactive shell finished with code: {:?}", status.code());
     }
 
-    // Clean up the temporary script file.
     let _ = fs::remove_file(&temp_script_path);
 
-    // 3. Execute the `at_exit` task if it exists. This runs after the shell has closed.
+    // 3. Execute the `at_exit` task if it exists.
     if let Some(task) = &task_exit {
         println!("\n{}", "\nExecuting `at_exit` hook...".dimmed());
         task_executor::execute_task(task, config, resolver, cancellation_token)?;
@@ -122,9 +115,6 @@ pub fn launch_session(
     Ok(())
 }
 
-///
-/// Builds the content of the initialization script for the interactive shell.
-///
 fn build_init_script(
     config: &ResolvedConfig,
     at_start_commands: &[String],
@@ -135,9 +125,6 @@ fn build_init_script(
         script.push_str("@echo off\n");
     }
 
-    // NOTE: Env vars are now set directly on the `Command` process,
-    // so they don't strictly need to be in the script unless a command inside
-    // `at_start` launches a new process that needs them. It's safer to keep them.
     for (key, value) in &config.env {
         if is_windows {
             script.push_str(&format!("set \"{}={}\"\n", key, value));
@@ -148,7 +135,6 @@ fn build_init_script(
     }
     script.push('\n');
 
-    // Add the resolved `at_start` commands.
     for command in at_start_commands {
         if !command.trim().is_empty() {
             script.push_str(command);
@@ -156,7 +142,6 @@ fn build_init_script(
         }
     }
 
-    // Add a final welcome message.
     let exit_message = "--- Type 'exit' to leave. ---";
     if is_windows {
         script.push_str(&format!("\necho.\necho {}\necho.", exit_message));
@@ -166,30 +151,24 @@ fn build_init_script(
     script
 }
 
-/// Loads shell configuration from disk.
-/// If the file does not exist, it generates it with default values and saves it.
+// --- Shells.toml Management ---
+
 fn load_shells_config() -> Result<ShellsConfig, ShellError> {
     let config_dir =
         crate::core::paths::get_axes_config_dir().map_err(|_| ShellError::ConfigDirNotFound)?;
     let shells_path = config_dir.join("shells.toml");
-
     if !shells_path.exists() {
-        log::warn!("'shells.toml' not found. Generating default config file.");
         let default_config = generate_default_shells_config();
         let toml_string = toml::to_string_pretty(&default_config)?;
         fs::write(&shells_path, toml_string)?;
-        println!("Shells config file created at: {}", shells_path.display());
         return Ok(default_config);
     }
-
     let content = fs::read_to_string(shells_path)?;
     Ok(toml::from_str(&content)?)
 }
 
-/// Generates a default shell configuration, detecting what is available.
 fn generate_default_shells_config() -> ShellsConfig {
     let mut shells = HashMap::new();
-
     if cfg!(target_os = "windows") {
         shells.insert(
             "cmd".to_string(),
@@ -208,7 +187,6 @@ fn generate_default_shells_config() -> ShellsConfig {
             );
         }
     }
-
     let bash_path_str = if cfg!(target_os = "windows") {
         "bash.exe"
     } else {
@@ -226,7 +204,6 @@ fn generate_default_shells_config() -> ShellsConfig {
     ShellsConfig { shells }
 }
 
-/// Checks if an executable exists in the system's PATH.
 fn is_executable_in_path(executable_name: &str) -> bool {
     if let Ok(path_var) = env::var("PATH") {
         for path in env::split_paths(&path_var) {
@@ -238,7 +215,6 @@ fn is_executable_in_path(executable_name: &str) -> bool {
     false
 }
 
-/// Returns the default shell name for the current OS.
 fn get_default_shell_name() -> &'static str {
     if cfg!(target_os = "windows") {
         "cmd"
