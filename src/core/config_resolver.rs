@@ -427,7 +427,7 @@ fn load_project_config(entry: &IndexEntry) -> ResolverResult<ProjectConfig> {
     })
 }
 
-fn get_dependencies_timestamps<'a>(
+fn get_dependencies_timestamps(
     inheritance_chain: &[(&IndexEntry, ProjectConfig)],
 ) -> ResolverResult<HashMap<PathBuf, SystemTime>> {
     inheritance_chain
@@ -541,25 +541,18 @@ fn get_cacheable_value<'a>(
 ) -> ResolverResult<&'a CacheableValue> {
     let cacheable = match kind {
         ValueKind::Variable => config.vars.get(key),
-        ValueKind::Script => {
-            // Search in all script-like locations.
-            if let Some(c) = config.scripts.get(key) {
-                Some(c)
-            } else if let Some(c) = config
-                .options
-                .at_start
-                .as_ref()
-                .filter(|_| key == "at_start")
-            {
-                Some(c)
-            } else if let Some(c) = config.options.at_exit.as_ref().filter(|_| key == "at_exit") {
-                Some(c)
-            } else if let Some(c) = config.options.open_with.get(key) {
-                Some(c)
-            } else {
-                None
-            }
-        }
+        ValueKind::Script => config
+            .scripts
+            .get(key)
+            .or_else(|| {
+                config
+                    .options
+                    .at_start
+                    .as_ref()
+                    .filter(|_| key == "at_start")
+            })
+            .or_else(|| config.options.at_exit.as_ref().filter(|_| key == "at_exit"))
+            .or_else(|| config.options.open_with.get(key)),
     };
 
     cacheable.ok_or_else(|| ResolverError::ValueNotFound {
