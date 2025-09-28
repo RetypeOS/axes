@@ -1,7 +1,7 @@
 // src/cli/handlers/info.rs
 
 use crate::{
-    CancellationToken,
+    
     cli::handlers::commons,
     constants::{AXES_DIR, PROJECT_CONFIG_FILENAME},
     models::{CacheableValue, ResolvedConfig, TemplateComponent},
@@ -19,7 +19,7 @@ struct InfoArgs {
 
 /// The main handler for the `info` command.
 /// Displays detailed information about the resolved project configuration.
-pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+pub fn handle(args: Vec<String>) -> Result<()> {
     // 1. Parse arguments.
     let info_args = InfoArgs::try_parse_from(&args)?;
 
@@ -28,7 +28,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     let config = commons::resolve_config_from_context_or_session(
         Some(info_args.context),
         &index,
-        cancellation_token,
+        
     )?;
 
     // 3. Print all sections.

@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use super::commons;
 use crate::{
-    CancellationToken,
+    
     cli::args::InitArgs,
     constants::{AXES_DIR, PROJECT_CONFIG_FILENAME, PROJECT_REF_FILENAME},
     core::{context_resolver, index_manager},
@@ -19,7 +19,7 @@ use colored::Colorize;
 
 /// The main handler for the `init` command.
 /// Allows creating and registering new projects to axes.
-pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+pub fn handle(args: Vec<String>) -> Result<()> {
     // 1. Parse arguments
     let init_args = InitArgs::try_parse_from(&args)?;
 
@@ -39,18 +39,18 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
 
     // 2. Resolve configuration details
     let project_name =
-        resolve_project_name(&init_args, &target_dir, is_interactive, cancellation_token)?;
+        resolve_project_name(&init_args, &target_dir, is_interactive)?;
 
-    let parent_uuid = resolve_parent_project(&init_args, is_interactive, cancellation_token)?;
+    let parent_uuid = resolve_parent_project(&init_args, is_interactive)?;
 
     // --- Interactive step for version and description ---
-    let version = resolve_project_version(&init_args, is_interactive, cancellation_token)?;
+    let version = resolve_project_version(&init_args, is_interactive)?;
 
     let description = resolve_project_description(
         &init_args,
         &project_name,
         is_interactive,
-        cancellation_token,
+        
     )?;
 
     // 3. Build the project configuration object
@@ -168,7 +168,7 @@ fn resolve_parent_project(
     if let Some(parent_context) = &args.parent {
         println!("Resolving parent '{}'...", parent_context);
         let (uuid, qualified_name) =
-            context_resolver::resolve_context(parent_context, &index, cancellation_token)?;
+            context_resolver::resolve_context(parent_context, &index)?;
         println!(
             "Parent project '{}' found (UUID: {}).",
             qualified_name, uuid
@@ -178,7 +178,7 @@ fn resolve_parent_project(
 
     if is_interactive {
         // NOTE: Uses the new interactive tree selector.
-        commons::choose_parent_interactive(&index, cancellation_token)
+        commons::choose_parent_interactive(&index)
     } else {
         println!("No parent specified. Linking to 'global' project.");
         Ok(index_manager::GLOBAL_PROJECT_UUID)

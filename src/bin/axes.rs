@@ -2,15 +2,13 @@
 
 use anyhow::Result;
 use axes::{
-    CancellationToken,
+    
     cli::{Cli, handlers},
     system::executor,
 };
 use clap::Parser;
 use colored::*;
 use std::env;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 
 // --- Command Definition and Registry ---
 
@@ -19,7 +17,7 @@ use std::sync::atomic::AtomicBool;
 struct CommandDefinition {
     name: &'static str,
     aliases: &'static [&'static str],
-    handler: fn(Vec<String>, &CancellationToken) -> Result<()>,
+    handler: fn(Vec<String>) -> Result<()>,
 }
 
 /// The single source of truth for all system commands.
@@ -106,11 +104,10 @@ fn find_command(name: &str) -> Option<&'static CommandDefinition> {
 fn main() {
     // The CancellationToken is now a simple flag, primarily for future use in long-running,
     // non-process tasks. The main Ctrl+C handling is managed by the executor.
-    let cancellation_token = Arc::new(AtomicBool::new(false));
     env_logger::init();
 
     // The entire application logic is wrapped in a Result to enable centralized error handling.
-    if let Err(e) = run_cli(Cli::parse(), cancellation_token) {
+    if let Err(e) = run_cli(Cli::parse()) {
         // --- Centralized Error Handling ---
         // Check if the error is a command interruption (e.g., from Ctrl+C).
         if let Some(exec_err) = e.downcast_ref::<executor::ExecutionError>()
@@ -131,7 +128,7 @@ fn main() {
 /// This function is the primary router. It determines the user's intent based on
 /// command-line arguments and the environment (e.g., if inside an `axes` session),
 /// then routes to the appropriate handler with the correct arguments.
-fn run_cli(cli: Cli, cancellation_token: CancellationToken) -> Result<()> {
+fn run_cli(cli: Cli) -> Result<()> {
     log::debug!("CLI args parsed: {:?}", cli);
 
     let arg1 = match cli.context_or_action {
@@ -179,12 +176,12 @@ fn run_cli(cli: Cli, cancellation_token: CancellationToken) -> Result<()> {
     // --- Dispatch Logic ---
     if let Some(command) = find_command(&action_name) {
         // A known system command was found. Execute its handler.
-        (command.handler)(action_args, &cancellation_token)
+        (command.handler)(action_args)
     } else {
         // Not a system command, so it's a script name. This is a shortcut for `run`.
         // This case primarily handles session mode (`axes <script>`).
         let mut run_args = vec![action_name];
         run_args.extend(action_args);
-        handlers::run::handle(run_args, &cancellation_token)
+        handlers::run::handle(run_args)
     }
 }

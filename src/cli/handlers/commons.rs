@@ -8,7 +8,7 @@ use std::env;
 use uuid::Uuid;
 
 use crate::{
-    CancellationToken,
+    
     core::{
         config_resolver, context_resolver,
         index_manager::{self},
@@ -42,7 +42,7 @@ pub fn prepare_unregister_plan(
     let mut summary_lines = Vec::new();
 
     let new_parent_uuid = if let Some(ctx) = &reparent_to {
-        let (uuid, _) = context_resolver::resolve_context(ctx, index, cancellation_token)?;
+        let (uuid, _) = context_resolver::resolve_context(ctx, index)?;
         Some(uuid)
     } else {
         None
@@ -153,7 +153,7 @@ pub fn resolve_config_from_context_or_session(
         Some(context) => {
             // Contexto explícito, tiene prioridad
             let (uuid, qualified_name) =
-                context_resolver::resolve_context(&context, index, cancellation_token)?;
+                context_resolver::resolve_context(&context, index)?;
             Ok(config_resolver::resolve_config_for_uuid(
                 uuid,
                 qualified_name,
@@ -202,14 +202,14 @@ pub fn choose_parent_interactive(
         match selection {
             0 => {
                 // Enter a context path
-                if let Some(uuid) = select_parent_by_context(index, cancellation_token)? {
+                if let Some(uuid) = select_parent_by_context(index)? {
                     return Ok(uuid);
                 }
                 // If it returns None, the user cancelled, so we loop again.
             }
             1 => {
                 // Browse projects visually
-                return select_parent_by_browsing(index, cancellation_token);
+                return select_parent_by_browsing(index);
             }
             2 => {
                 // Use 'global'
@@ -234,7 +234,7 @@ fn select_parent_by_context(
             return Ok(None); // User wants to go back to the main menu
         }
 
-        match context_resolver::resolve_context(&input, index, cancellation_token) {
+        match context_resolver::resolve_context(&input, index) {
             Ok((uuid, qualified_name)) => {
                 let prompt = format!("Resolved to '{}'. Use this as the parent?", qualified_name);
                 if Confirm::with_theme(&ColorfulTheme::default())

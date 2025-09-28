@@ -1,6 +1,6 @@
 // EN: src/system/executor.rs
 
-use crate::CancellationToken;
+
 use dunce;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
@@ -44,8 +44,7 @@ pub enum ExecutionError {
 pub fn execute_command(
     command_line: &str,
     cwd: &Path,
-    env_vars: &HashMap<String, String>,
-    _cancellation_token: &CancellationToken, // Currently unused, but kept for API consistency.
+    env_vars: &HashMap<String, String>, // Currently unused, but kept for API consistency.
 ) -> Result<(), ExecutionError> {
     TOKIO_RT.block_on(async {
         let trimmed_command = command_line.trim();
@@ -145,8 +144,7 @@ pub fn execute_command(
 pub fn execute_and_capture_output(
     command_line: &str,
     cwd: &Path,
-    env_vars: &HashMap<String, String>,
-    _cancellation_token: &CancellationToken, // Ignored, kept for API consistency
+    env_vars: &HashMap<String, String>, // Ignored, kept for API consistency
 ) -> Result<String, ExecutionError> {
     TOKIO_RT.block_on(async {
         let trimmed_command = command_line.trim();

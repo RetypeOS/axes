@@ -1,7 +1,7 @@
 // src/cli/handlers/run.rs
 
 use crate::{
-    CancellationToken,
+    
     cli::handlers::commons,
     core::{
         config_resolver::{self, ValueKind},
@@ -31,14 +31,14 @@ struct RunArgs {
 /// Main entry point for the 'run' command.
 /// Orchestrates the entire script execution process based on the "Task" model.
 ///
-pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+pub fn handle(args: Vec<String>) -> Result<()> {
     // 1. Initial argument parsing and configuration resolution.
     let run_args = RunArgs::try_parse_from(&args)?;
     let index = index_manager::load_and_ensure_global_project()?;
     let mut config = commons::resolve_config_from_context_or_session(
         Some(run_args.context.clone()),
         &index,
-        cancellation_token,
+        
     )?;
 
     println!(
@@ -76,7 +76,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     let resolver = ArgResolver::new(&all_definitions, &run_args.params, has_generic_params)?;
 
     // 5. Execute the task using the shared task executor.
-    task_executor::execute_task(&task, &config, &resolver, cancellation_token)?;
+    task_executor::execute_task(&task, &config, &resolver)?;
 
     // 6. Persist any changes to the cache (from lazy expansions).
     // This is now a no-op since the cache is in-memory only, but we keep it for potential future use.

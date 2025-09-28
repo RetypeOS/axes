@@ -1,6 +1,6 @@
 // src/core/onboarding_manager.rs
 
-use crate::CancellationToken;
+
 use crate::core::index_manager::{self, GLOBAL_PROJECT_UUID};
 use crate::models::{GlobalIndex, IndexEntry, ProjectRef};
 use dialoguer::{
@@ -58,7 +58,7 @@ pub fn register_project(
     // Check if the PATH is already registered. If so, skip to child scan.
     if let Some((uuid, _)) = index.projects.iter().find(|(_, e)| e.path == project_root) {
         println!("This project is already registered. Moving to child scan...");
-        scan_and_register_children(&project_root, *uuid, index, options, cancellation_token)?;
+        scan_and_register_children(&project_root, *uuid, index, options)?;
         return Ok(());
     }
 
@@ -71,7 +71,7 @@ pub fn register_project(
                 pref,
                 index,
                 options,
-                cancellation_token,
+                
             )?;
         }
         Err(_) => {
@@ -80,14 +80,14 @@ pub fn register_project(
                 project_root.clone(),
                 index,
                 options,
-                cancellation_token,
+                
             )?;
         }
     };
 
     // Get the newly registered UUID for child scanning.
     if let Some((uuid, _)) = index.projects.iter().find(|(_, e)| e.path == project_root) {
-        scan_and_register_children(&project_root, *uuid, index, options, cancellation_token)?;
+        scan_and_register_children(&project_root, *uuid, index, options)?;
     }
 
     Ok(())
@@ -138,7 +138,7 @@ fn handle_registration_with_ref(
             "Warning: The parent of this project (UUID: {}) is not registered.",
             parent_uuid
         );
-        pref.parent_uuid = Some(choose_parent(index, None, cancellation_token)?); // Ask for new parent
+        pref.parent_uuid = Some(choose_parent(index, None)?); // Ask for new parent
     }
 
     // 3. Validate Name
@@ -230,7 +230,7 @@ fn handle_registration_without_ref(
             .default(name_default)
             .interact_text()?;
 
-        let parent_uuid = choose_parent(index, options.suggested_parent_uuid, cancellation_token)?;
+        let parent_uuid = choose_parent(index, options.suggested_parent_uuid)?;
         let (new_uuid, _) = index_manager::add_project_to_index(
             index,
             name.clone(),
@@ -308,7 +308,7 @@ fn scan_and_register_children(
             suggested_parent_uuid: Some(parent_uuid),
         };
         // RECURSIVE CALL
-        register_project(&child_path, index, &child_options, cancellation_token)?;
+        register_project(&child_path, index, &child_options)?;
     }
 
     Ok(())

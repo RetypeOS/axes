@@ -1,7 +1,6 @@
 // src/system/shell.rs
 
 use crate::{
-    CancellationToken,
     core::{parameters::ArgResolver, task_executor},
     models::{ResolvedConfig, ShellConfig, ShellsConfig, Task},
 };
@@ -108,7 +107,7 @@ pub fn launch_session(
     // 3. Execute the `at_exit` task if it exists.
     if let Some(task) = &task_exit {
         println!("\n{}", "\nExecuting `at_exit` hook...".dimmed());
-        task_executor::execute_task(task, config, resolver, cancellation_token)?;
+        task_executor::execute_task(task, config, resolver)?;
     }
 
     Ok(())

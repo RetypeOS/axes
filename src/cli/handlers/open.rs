@@ -1,7 +1,7 @@
 // src/cli/handlers/open.rs
 
 use crate::{
-    CancellationToken,
+    
     cli::handlers::commons,
     core::{
         config_resolver::{self, ValueKind},
@@ -27,14 +27,14 @@ struct OpenArgs {
     params: Vec<String>,
 }
 
-pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+pub fn handle(args: Vec<String>) -> Result<()> {
     // 1. Parse args and resolve config.
     let open_args = OpenArgs::try_parse_from(&args)?;
     let index = index_manager::load_and_ensure_global_project()?;
     let mut config = commons::resolve_config_from_context_or_session(
         Some(open_args.context),
         &index,
-        cancellation_token,
+        
     )?;
 
     // 2. Determine which `open_with` command to use, correctly handling the 'default' key.
@@ -78,7 +78,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
 
     // 5. Execute the task.
     println!("\n🚀 Opening with '{}'...", final_key.cyan());
-    task_executor::execute_task(&task, &config, &resolver, cancellation_token)?;
+    task_executor::execute_task(&task, &config, &resolver)?;
 
     Ok(())
 }

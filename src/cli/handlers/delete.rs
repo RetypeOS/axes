@@ -7,7 +7,7 @@ use dialoguer::{Confirm, theme::ColorfulTheme};
 use std::{fs, path::PathBuf};
 
 use crate::{
-    CancellationToken,
+    
     cli::handlers::commons,
     constants::AXES_DIR,
     core::{context_resolver, index_manager},
@@ -28,7 +28,7 @@ struct DeleteArgs {
     reparent_to: Option<String>,
 }
 
-pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+pub fn handle(args: Vec<String>) -> Result<()> {
     // Parse args.
     let delete_args = DeleteArgs::try_parse_from(&args)?;
     let mut index = index_manager::load_and_ensure_global_project()?;
@@ -37,7 +37,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     let config = commons::resolve_config_from_context_or_session(
         Some(delete_args.context),
         &index,
-        cancellation_token,
+        
     )?;
 
     if config.uuid == index_manager::GLOBAL_PROJECT_UUID {
@@ -52,7 +52,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
         &config,
         delete_args.recursive,
         delete_args.reparent_to.clone(),
-        cancellation_token,
+        
     )?;
 
     let paths_to_purge: Vec<PathBuf> = plan
@@ -94,7 +94,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     // 5. EXECUTE PLAN - INDEX PART
     if !delete_args.recursive {
         let new_parent_uuid = match delete_args.reparent_to {
-            Some(ctx) => context_resolver::resolve_context(&ctx, &index, cancellation_token)?.0,
+            Some(ctx) => context_resolver::resolve_context(&ctx, &index)?.0,
             None => index_manager::GLOBAL_PROJECT_UUID,
         };
         index_manager::reparent_children(&mut index, config.uuid, new_parent_uuid)?;

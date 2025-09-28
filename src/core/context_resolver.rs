@@ -6,7 +6,7 @@ use std::{env, fs, path::Path};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::CancellationToken;
+
 use crate::constants::AXES_DIR;
 use crate::constants::LAST_USED_CACHE_FILENAME;
 use crate::core::index_manager::{self, GLOBAL_PROJECT_UUID};
@@ -64,7 +64,6 @@ type ContextResult<T> = Result<T, ContextError>;
 pub fn resolve_context(
     context: &str,
     index: &GlobalIndex,
-    _cancellation_token: &CancellationToken,
 ) -> ContextResult<(Uuid, String)> {
     let parts: Vec<&str> = context.split('/').filter(|s| !s.is_empty()).collect();
     if parts.is_empty() {

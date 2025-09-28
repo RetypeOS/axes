@@ -1,7 +1,7 @@
 // src/core/task_executor.rs
 
 use crate::{
-    CancellationToken,
+    
     core::parameters::ArgResolver,
     models::{ResolvedConfig, Task, TemplateComponent},
     system::executor,
@@ -64,20 +64,20 @@ pub fn execute_task(
             parallel_batch.push(trimmed_command.to_string());
         } else {
             if !parallel_batch.is_empty() {
-                execute_parallel_batch(&parallel_batch, config, cancellation_token)?;
+                execute_parallel_batch(&parallel_batch, config)?;
                 parallel_batch.clear();
             }
             execute_single_command(
                 trimmed_command,
                 command_exec.ignore_errors,
                 config,
-                cancellation_token,
+                
             )?;
         }
     }
 
     if !parallel_batch.is_empty() {
-        execute_parallel_batch(&parallel_batch, config, cancellation_token)?;
+        execute_parallel_batch(&parallel_batch, config)?;
     }
 
     Ok(())
@@ -99,7 +99,7 @@ fn execute_single_command(
         &command_to_run,
         &config.project_root,
         &config.env,
-        cancellation_token,
+        
     )?)
 }
 
@@ -117,7 +117,7 @@ fn execute_parallel_batch(
                 command_str,
                 &config.project_root,
                 &config.env,
-                cancellation_token,
+                
             )
             .map_err(anyhow::Error::from)
         })

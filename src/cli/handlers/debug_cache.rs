@@ -1,7 +1,7 @@
 // EN: src/cli/handlers/debug_cache.rs
 
 use crate::{
-    CancellationToken,
+    
     constants::{AXES_DIR, CONFIG_CACHE_FILENAME},
     models::SerializableConfigCache,
 };
@@ -30,7 +30,7 @@ enum CacheCommand {
     },
 }
 
-pub fn handle(args: Vec<String>, _cancellation_token: &CancellationToken) -> Result<()> {
+pub fn handle(args: Vec<String>) -> Result<()> {
     let cache_args = CacheArgs::try_parse_from(&args)?;
 
     match cache_args.command {
@@ -39,7 +39,6 @@ pub fn handle(args: Vec<String>, _cancellation_token: &CancellationToken) -> Res
             let (uuid, _) = crate::core::context_resolver::resolve_context(
                 &context,
                 &index,
-                _cancellation_token,
             )?;
             let project = index.projects.get(&uuid).unwrap();
             let cache_path = project.path.join(AXES_DIR).join(CONFIG_CACHE_FILENAME);
@@ -76,7 +75,6 @@ pub fn handle(args: Vec<String>, _cancellation_token: &CancellationToken) -> Res
             let (uuid, _) = crate::core::context_resolver::resolve_context(
                 &context,
                 &index,
-                _cancellation_token,
             )?;
             let project = index.projects.get(&uuid).unwrap();
             let cache_path = project.path.join(AXES_DIR).join(CONFIG_CACHE_FILENAME);

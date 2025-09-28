@@ -7,7 +7,7 @@ use dialoguer::{Confirm, theme::ColorfulTheme};
 
 use super::commons;
 use crate::{
-    CancellationToken,
+    
     core::{context_resolver, index_manager},
 };
 
@@ -26,13 +26,13 @@ struct UnregisterArgs {
     reparent_to: Option<String>,
 }
 
-pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+pub fn handle(args: Vec<String>) -> Result<()> {
     let unregister_args = UnregisterArgs::try_parse_from(&args)?;
     let mut index = index_manager::load_and_ensure_global_project()?;
     let config = commons::resolve_config_from_context_or_session(
         Some(unregister_args.context),
         &index,
-        cancellation_token,
+        
     )?;
 
     if config.uuid == index_manager::GLOBAL_PROJECT_UUID {
@@ -45,7 +45,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
         &config,
         unregister_args.recursive,
         unregister_args.reparent_to.clone(),
-        cancellation_token,
+        
     )?;
 
     // 2. Present the plan to the user.
@@ -72,7 +72,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     // 4. Execute the plan.
     if !unregister_args.recursive {
         let new_parent_uuid = match unregister_args.reparent_to {
-            Some(ctx) => context_resolver::resolve_context(&ctx, &index, cancellation_token)?.0,
+            Some(ctx) => context_resolver::resolve_context(&ctx, &index)?.0,
             None => index_manager::GLOBAL_PROJECT_UUID,
         };
         // The real reparenting happens here, with automatic renames.

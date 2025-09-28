@@ -2,7 +2,7 @@
 
 use crate::core::config_resolver::ValueKind;
 use crate::{
-    CancellationToken,
+    
     cli::handlers::commons,
     core::{config_resolver, index_manager, parameters::ArgResolver},
     models::{ParameterDef, Task, TemplateComponent},
@@ -27,7 +27,7 @@ struct StartArgs {
 /// Main entry point for the `start` command.
 /// Orchestrates session setup, including parameter resolution for `at_start` and `at_exit`.
 ///
-pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+pub fn handle(args: Vec<String>) -> Result<()> {
     // 1. Parse args and prevent nested sessions.
     let start_args = StartArgs::try_parse_from(&args)?;
     if std::env::var("AXES_PROJECT_UUID").is_ok() {
@@ -41,7 +41,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     let mut config = commons::resolve_config_from_context_or_session(
         Some(start_args.context),
         &index,
-        cancellation_token,
+        
     )?;
 
     // 3. Resolve `at_start` and `at_exit` into `Task` objects.
@@ -99,7 +99,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
         task_start,
         task_exit,
         &resolver,
-        cancellation_token,
+        
     )?;
 
     Ok(())

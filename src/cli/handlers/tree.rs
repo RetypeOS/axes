@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Parser;
 
 use crate::{
-    CancellationToken,
+    
     core::{
         context_resolver,
         graph_display::{self, DisplayOptions},
@@ -31,7 +31,7 @@ struct TreeArgs {
     all: bool,
 }
 
-pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+pub fn handle(args: Vec<String>) -> Result<()> {
     let tree_args = TreeArgs::try_parse_from(&args)?;
 
     // 2. Load the index.
@@ -40,7 +40,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
     // 3. Determine the starting node.
     let (start_node_uuid, header) = if let Some(context_str) = tree_args.context {
         let (uuid, qualified_name) =
-            context_resolver::resolve_context(&context_str, &index, cancellation_token)?;
+            context_resolver::resolve_context(&context_str, &index)?;
         let header = format!(t!("tree.header.from_project"), name = qualified_name);
         (Some(uuid), header)
     } else {

@@ -5,7 +5,7 @@ use clap::Parser;
 use std::{env, path::PathBuf};
 
 use crate::{
-    CancellationToken,
+    
     cli::args::RegisterArgs,
     core::{
         graph_display::{self, DisplayOptions},
@@ -14,7 +14,7 @@ use crate::{
     },
 };
 
-pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+pub fn handle(args: Vec<String>) -> Result<()> {
     if env::var("AXES_PROJECT_UUID").is_ok() {
         return Err(anyhow!(
             "'register' command is not available inside a project session."
@@ -57,7 +57,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
         &path_to_register,
         &mut index,
         &options,
-        cancellation_token,
+        
     )
     .with_context(|| {
         anyhow!(

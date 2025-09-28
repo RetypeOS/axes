@@ -4,7 +4,7 @@ use anyhow::{Context, Result, anyhow};
 
 use super::commons;
 use crate::{
-    CancellationToken,
+    
     core::{context_resolver, index_manager},
 };
 
@@ -19,14 +19,14 @@ struct LinkArgs {
     new_parent: String,
 }
 
-pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Result<()> {
+pub fn handle(args: Vec<String>) -> Result<()> {
     // 1. Resolve the project to be moved. This requires a context.
     let link_args = LinkArgs::try_parse_from(&args)?;
     let mut index = index_manager::load_and_ensure_global_project()?;
     let config = commons::resolve_config_from_context_or_session(
         Some(link_args.context),
         &index,
-        cancellation_token,
+        
     )?;
 
     // 2. Get the new parent's context from the arguments.
@@ -44,7 +44,7 @@ pub fn handle(args: Vec<String>, cancellation_token: &CancellationToken) -> Resu
 
     // 3. Load the index and resolve the new parent's UUID.
     let (new_parent_uuid, new_parent_qualified_name) =
-        context_resolver::resolve_context(new_parent_context, &index, cancellation_token)
+        context_resolver::resolve_context(new_parent_context, &index)
             .with_context(|| {
                 anyhow!(
                     t!("link.error.cannot_resolve_parent"),

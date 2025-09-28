@@ -1,7 +1,7 @@
 // EN: src/core/interpolator.rs
 
 use crate::{
-    CancellationToken,
+    
     core::arg_parser::ParsedArgs,
     models::{Command as ProjectCommand, ResolvedConfig, Runnable},
     system::executor,
@@ -32,9 +32,9 @@ impl<'a, 'p> Interpolator<'a, 'p> {
     pub fn expand_string(
         &mut self,
         template: &str,
-        cancellation_token: &CancellationToken,
+        cancellation_token,
     ) -> Result<String> {
-        self.expand_string_recursive(template, &mut HashSet::new(), 0, cancellation_token)
+        self.expand_string_recursive(template, &mut HashSet::new(), 0)
     }
 
     /// The recursive engine. The state (`recursion_stack`, `depth`) is passed as arguments.
@@ -43,7 +43,7 @@ impl<'a, 'p> Interpolator<'a, 'p> {
         template: &str,
         recursion_stack: &mut HashSet<String>,
         depth: u32,
-        cancellation_token: &CancellationToken,
+        cancellation_token,
     ) -> Result<String> {
         if depth >= MAX_RECURSION_DEPTH {
             return Err(anyhow!(
@@ -70,7 +70,7 @@ impl<'a, 'p> Interpolator<'a, 'p> {
                     next_str.push_str(full_match.as_str());
                 } else {
                     let expanded_value =
-                        self.expand_token(token_path, recursion_stack, depth, cancellation_token)?;
+                        self.expand_token(token_path, recursion_stack, depth)?;
                     next_str.push_str(&expanded_value);
                     expansion_made = true;
                 }
@@ -96,7 +96,7 @@ impl<'a, 'p> Interpolator<'a, 'p> {
         token_path: &str,
         recursion_stack: &mut HashSet<String>,
         depth: u32,
-        cancellation_token: &CancellationToken,
+        cancellation_token,
     ) -> Result<String> {
         if let Some(param_spec) = token_path.strip_prefix("params::") {
             return self.expand_params_token(param_spec);
@@ -104,7 +104,7 @@ impl<'a, 'p> Interpolator<'a, 'p> {
 
         let parts: Vec<&str> = token_path.split("::").collect();
         if parts.len() > 1 {
-            return self.expand_qualified_token(&parts, recursion_stack, depth, cancellation_token);
+            return self.expand_qualified_token(&parts, recursion_stack, depth);
         }
 
         let key = parts[0];
@@ -116,7 +116,7 @@ impl<'a, 'p> Interpolator<'a, 'p> {
                 &["vars", key],
                 recursion_stack,
                 depth,
-                cancellation_token,
+                
             );
         }
         if self.config.scripts.contains_key(key) {
@@ -124,7 +124,7 @@ impl<'a, 'p> Interpolator<'a, 'p> {
                 &["scripts", key],
                 recursion_stack,
                 depth,
-                cancellation_token,
+                
             );
         }
 
@@ -160,7 +160,7 @@ impl<'a, 'p> Interpolator<'a, 'p> {
         parts: &[&str],
         recursion_stack: &mut HashSet<String>,
         depth: u32,
-        cancellation_token: &CancellationToken,
+        cancellation_token,
     ) -> Result<String> {
         match parts.first() {
             // --- TODO: Aplicar correctamente esto con el nuevo interpolator.
@@ -177,10 +177,10 @@ impl<'a, 'p> Interpolator<'a, 'p> {
                 .cloned()
                 .ok_or_else(|| anyhow!("Env not found")),
             Some(&"scripts") => {
-                self.expand_script(parts[1], recursion_stack, depth, cancellation_token)
+                self.expand_script(parts[1], recursion_stack, depth)
             }
             Some(&"run") => {
-                self.expand_run(&parts[1..], recursion_stack, depth, cancellation_token)
+                self.expand_run(&parts[1..], recursion_stack, depth)
             }
             Some(&key) if self.get_reserved_metadata(key).is_some() => {
                 Ok(self.get_reserved_metadata(key).unwrap())
@@ -197,7 +197,7 @@ impl<'a, 'p> Interpolator<'a, 'p> {
         script_name: &str,
         recursion_stack: &mut HashSet<String>,
         depth: u32,
-        cancellation_token: &CancellationToken,
+        cancellation_token,
     ) -> Result<String> {
         if recursion_stack.contains(script_name) {
             let path = recursion_stack
@@ -221,7 +221,7 @@ impl<'a, 'p> Interpolator<'a, 'p> {
         let raw_content = get_raw_content_from_def(command_def, script_name)?;
 
         let expanded_content =
-            self.expand_string_recursive(&raw_content, recursion_stack, depth, cancellation_token)?;
+            self.expand_string_recursive(&raw_content, recursion_stack, depth)?;
 
         recursion_stack.remove(script_name);
         Ok(expanded_content)
@@ -232,13 +232,13 @@ impl<'a, 'p> Interpolator<'a, 'p> {
         sub_path: &[&str],
         recursion_stack: &mut HashSet<String>,
         depth: u32,
-        cancellation_token: &CancellationToken,
+        cancellation_token,
     ) -> Result<String> {
         let command_to_run = if sub_path.first() == Some(&"scripts") {
             let script_name = sub_path
                 .get(1)
                 .ok_or_else(|| anyhow!("<axes::run::scripts::> missing key"))?;
-            self.expand_script(script_name, recursion_stack, depth, cancellation_token)?
+            self.expand_script(script_name, recursion_stack, depth)?
         } else {
             sub_path.join("::")
         };
@@ -247,7 +247,7 @@ impl<'a, 'p> Interpolator<'a, 'p> {
             &command_to_run,
             recursion_stack,
             depth,
-            cancellation_token,
+            
         )?;
 
         println!(
@@ -258,7 +258,7 @@ impl<'a, 'p> Interpolator<'a, 'p> {
             &final_command,
             &self.config.project_root,
             &self.config.env,
-            cancellation_token,
+            
         )?;
         Ok(output.trim().to_string())
     }
