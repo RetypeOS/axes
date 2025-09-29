@@ -1,6 +1,6 @@
 <p align="center">
   <strong>Read this in other languages:</strong><br>
-  <a href="./ROADMAP.md">English</a> |
+  <a href="./ROADMAP.md">English</a> •
   <a href="./docs/es/ROADMAP.md">Español</a>
 </p>
 

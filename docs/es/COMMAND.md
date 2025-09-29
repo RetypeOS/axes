@@ -1,6 +1,6 @@
 <p align="center">
   <strong>Read this in other languages:</strong><br>
-  <a href="../../COMMAND.md">English</a> |
+  <a href="../../COMMAND.md">English</a> •
   <a href="./COMMAND.md">Español</a>
 </p>
 

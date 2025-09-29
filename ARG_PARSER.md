@@ -1,6 +1,6 @@
 <p align="center">
   <strong>Read this in other languages:</strong><br>
-  <a href="./ARG_PARSER.md">English</a> |
+  <a href="./ARG_PARSER.md">English</a> •
   <a href="./docs/es/ARG_PARSER.md">Español</a>
 </p>
 
