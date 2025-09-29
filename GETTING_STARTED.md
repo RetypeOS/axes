@@ -78,7 +78,7 @@ Antes de empezar, es crucial entender cómo `axes` se refiere a los proyectos. A
 | `/`      | El separador de niveles en la jerarquía.                                   | `axes innovatech-website/blog info`                         |
 | `.`      | El proyecto del directorio actual, o el primer ancestro encontrado.        | `axes . info` (resuelve a `innovatech-website/blog`)        |
 | `_`      | El proyecto cuyo directorio raíz es *exactamente* el directorio actual.    | `axes _ info` (resuelve a `innovatech-website/blog`)        |
-| `..`     | El padre del proyecto de contexto actual o el primer ancestro encontrado.  | `axes . .. info` (resuelve a `innovatech-website`)          |
+| `..`     | El padre del proyecto de contexto actual o el primer ancestro encontrado.  | `axes .. info` (resuelve a `innovatech-website`)          |
 | `alias!` | Un atajo personalizado que creas.                                          | `axes blog! info` (si `blog!` apunta a nuestro proyecto)    |
 
 A lo largo de este tutorial, usaremos estos contextos para que veas lo fluidos y potentes que son.

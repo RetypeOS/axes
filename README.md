@@ -1,7 +1,7 @@
 <p align="center">
   <img src="logo.png" alt="axes Logo" width="200">
 </p>
-<h1 align="center">axes: El Control Remoto Universal para tu Ecosistema de Desarrollo</h1>
+<h1 align="center">axes: El Director de Orquesta para Tu Caos de Desarrollo</h1>
 
 <p align="center">
   <strong>Cualquier Proyecto. Cualquier Lenguaje. Un Solo Lenguaje de Comandos.</strong>
@@ -14,121 +14,150 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="License"></a>
 </p>
 
-¿Alguna vez has sentido esa micro-pausa al cambiar de proyecto? Esa fracción de segundo en la que tu cerebro intenta recordar: *«Espera, ¿en este proyecto el comando para levantar el entorno era `npm run dev`, `docker-compose up`, o `source .venv/bin/activate && flask run`?»*.
-
-Esa es una carga cognitiva que `axes` elimina casi por completo.
-
-`axes` es una herramienta de línea de comandos que actúa como una **capa de abstracción inteligente** sobre todo tu entorno de desarrollo. No busca reemplazar a `make`, `npm`, `just` o `docker-compose`. Al contrario, los utiliza. `axes` es el **director de orquesta** que les dice qué hacer, cuándo y cómo, usando un lenguaje de comandos simple, coherente y poderoso que TÚ defines.
-
-Y lo mejor de todo: la configuración vive en un directorio `.axes` que **viaja con tu repositorio**. Cuando un nuevo miembro del equipo clona el proyecto, ya tiene todos los flujos de trabajo listos para ejecutar. El onboarding nunca fue tan simple.
-
 ---
 
-## Del Caos a la Coherencia
+## ¿Tu flujo de trabajo se ve así?
 
-Imagina un proyecto web típico con un frontend y un backend.
+- **Terminal 1:** `cd frontend && npm run dev`
+- **Terminal 2:** `cd backend && source .venv/bin/activate && uvicorn app:main --reload`
+- **Tú, 3 semanas después:** *«Espera... ¿el comando para los tests era `npm test`, `pytest`, `cargo test` o `go test ./...`?»*
 
-**El Flujo de Trabajo Tradicional:**
+Esa micro-pausa, esa carga cognitiva al cambiar de proyecto, es una fricción que se acumula. Te roba el `flow`. Te roba la productividad. **Otras herramientas te dan atajos. `axes` te da un lenguaje.**
+
+`axes` no es otro gestor de paquetes ni una alternativa a `Docker` o `make`. Es el **lenguaje de comandos** que los une a todos. `axes` te permite componer, parametrizar y estandarizar flujos de trabajo que involucran CUALQUIER herramienta de tu stack tecnológico. Tu `package.json` sabe cómo ejecutar `npm`, tu `Makefile` sabe cómo ejecutar `make`, y tu `docker-compose.yml` sabe cómo ejecutar `Docker`. Pero, ¿quién sabe cómo ejecutarlos a **todos juntos**? **`axes` es esa inteligencia faltante.**. Es el director de orquesta que les dice qué hacer, usando comandos simples, coherentes y poderosos que **TÚ** defines y que viajan con tu repositorio, permitiendo que nuevos usuarios puedan unirse de forma absolutamente sencilla y estándar.
+
+### ¿Por qué `axes`? ¿Por qué ahora?
+
+El mundo del desarrollo es un caos de herramientas. Cada proyecto tiene su propio dialecto de comandos. `axes` introduce un `esperanto` para tu terminal.
+
+Imagina un `monorepo` con un frontend, un backend y un servicio de documentación:
+
+**EL CAOS (ANTES):**
 
 ```sh
-# Para trabajar en el frontend...
-cd frontend && npm run dev
-
-# Ups, ahora necesito la API... (abrir otra terminal)
-cd ../backend
-source .venv/bin/activate
-export DATABASE_URL="..."
-uvicorn app.main:app --reload
+# Para levantar todo...
+(terminal 1) $ cd frontend && npm run dev
+(terminal 2) $ cd backend && source .venv/bin/activate && flask run
+(terminal 3) $ cd docs && hugo server
 ```
 
-Dos proyectos, dos terminales, cuatro comandos diferentes, y un `cd` propenso a errores. Esto es fricción.
-
-**El Flujo de Trabajo con `axes` (Coherencia Total):**
-
-Con `axes`, defines estos flujos una vez en archivos `axes.toml` que viven junto a tu código.
-
-```toml
-# en ./backend/.axes/axes.toml
-[scripts]
-dev = "source .venv/bin/activate && uvicorn app.main:app --reload"
-
-# en ./frontend/.axes/axes.toml
-[scripts]
-dev = "npm run dev"
-```
-
-Ahora, tu equipo crea un script de orquestación en la raíz:
+**LA ORQUESTA (CON `axes`):**
 
 ```toml
 # en ./.axes/axes.toml
 [scripts]
-# El '>' indica ejecución en paralelo
+# El '>' indica ejecución en paralelo.
 dev = [
-    "> axes backend dev",
-    "> axes frontend dev"
+    "> axes frontend dev", # Llama al script `dev` del hijo `frontend`
+    "> axes backend dev",  # Llama al script `dev` del hijo `backend`
+    "> axes docs dev"      # Llama al script `dev` del hijo `docs`
 ]
 ```
 
-A partir de ahora, cualquier miembro del equipo, desde cualquier lugar del sistema, puede levantar todo el entorno de desarrollo con **un solo comando:**
+A partir de ahora, cualquier miembro del equipo, en cualquier máquina, levanta todo el entorno con **un solo comando universal**:
 
 ```sh
-# `.` se refiere al proyecto del directorio actual o superior.
 axes . dev
 ```
 
-Has convertido el caos en un lenguaje de comandos unificado, auto-documentado y versionado.
+Has convertido el conocimiento tribal en infraestructura versionada. El onboarding de nuevos desarrolladores acaba de pasar de horas a segundos.
 
 ---
 
-## Características Clave de un Vistazo
+### La Filosofía `axes`
 
-`axes` es simple en la superficie, pero increíblemente potente por debajo.
-
-* **Jerarquía y Herencia:** Organiza tus proyectos en un árbol (`mi-app/api`, `mi-app/frontend`). Los hijos heredan variables y scripts de sus padres, eliminando la duplicación.
-* **Scripts como Funciones:** Crea scripts que aceptan argumentos posicionales, flags, y tienen valores por defecto, todo de forma declarativa.
-
-    ```toml
-    [scripts]
-    test = "pytest <axes::params::file> --marker <axes::params::marker='smoke'>"
-    ```
-
-* **Composición y Paralelismo:** Construye flujos de trabajo complejos a partir de piezas simples. Ejecuta tareas en paralelo con el prefijo `>`.
-* **Sesiones de Enfoque:** Sumérgete en un sub-proyecto con `axes mi-app/api start`. Tu terminal se configura automáticamente (variables de entorno, entornos virtuales, bases de datos) y te permite ejecutar comandos en ese contexto sin repetir comandos y de forma totalmente orgánica.
-* **Agnóstico a la Tecnología:** `axes` no se preocupa si usas Rust, Go, Python, Node.js, Docker o Terraform. Si se puede escribir en una terminal, `axes` puede orquestarlo, incluyendo por supuesto archivos de terminal.
+- **Abstracción, no Reemplazo:** `axes` no es un nuevo gestor de paquetes. Usa las herramientas que ya amas.
+- **Convención sobre Configuración (Tu Convención):** Define tus propios comandos estándar (`dev`, `test`, `lint`, `deploy`) y úsalos en todos tus proyectos, sin importar la tecnología subyacente.
+- **Jerarquía y Herencia (DRY al Máximo):** Organiza proyectos en árboles (`mi-app/api`, `mi-app/frontend`). Los hijos heredan y pueden sobrescribir variables y scripts de sus padres. Define una vez, usa en todas partes.
+- **Infraestructura como Código:** Tu `axes.toml` vive en Git. Tus flujos de trabajo evolucionan con tu código.
 
 ---
 
-## Aprende Más: Sumérgete en la Documentación
-
-Este README es solo la punta del iceberg. Para dominar `axes`, explora nuestra documentación detallada:
-
-* **[Guía de Inicio y Tutorial Completo (`GETTING_STARTED.md`)](./GETTING_STARTED.md):** Un tutorial paso a paso que te guiará desde la instalación hasta la creación de un monorepo complejo.
-* **[Referencia Completa de Comandos (`COMMANDS.md`)](./COMMANDS.md):** Una guía exhaustiva de cada comando (`init`, `tree`, `link`, etc.), sus flags y ejemplos de uso.
-* **[Dominando el `axes.toml` (`AXES_TOML_GUIDE.md`)](./AXES_TOML_GUIDE.md):** La guía definitiva sobre la sintaxis del `axes.toml`, incluyendo el sistema de scripting, la herencia, y el potente parseo de argumentos.
-* **[Guía Técnica y de Contribución (`TECNICAL.md`)](./TECNICAL.md):** Para aquellos que deseen contribuir al código de `axes` o entender su arquitectura interna.
-
----
-
-## Instalación
+### Instalación (30 segundos para empezar)
 
 `axes` es un único binario sin dependencias.
 
 1. Ve a la página de [**Releases de `axes` en GitHub**](https://github.com/RetypeOS/axes/releases).
 2. Descarga el archivo para tu sistema operativo.
 3. Descomprímelo y mueve el ejecutable `axes` a un directorio en tu `PATH`.
-4. Abre una **nueva terminal** y verifica la instalación con `axes --version`.
+4. Abre una **nueva terminal** y verifica con `axes --version`.
 
 ---
 
-## Estado Actual: Beta temprana
+### `axes` en Acción: Un Vistazo al Poder
 
-`axes` se encuentra en **fase Beta**. Aún faltan mejoras importantes que implementar, pero la base de uso para el 90% de los usuarios es robusta y funcional. El núcleo de la herramienta es robusto y está listo para ser probado en proyectos reales. Sin embargo, aún pueden existir bugs y la API podría tener cambios antes de la versión 1.0.
+No te quedes atrás. Mientras tú buscas en el `README` de un proyecto antiguo, otros ya están orquestando.
 
-**¡Necesitamos tu ayuda!** La mejor forma de contribuir es usando `axes` en tus flujos de trabajo y reportando cualquier problema o sugerencia.
+#### 1. Scripts como Funciones de CLI
 
-* **Encuentra un Bug o tienes una Idea:** [**Abre un Issue**](https://github.com/RetypeOS/axes/issues)
-* **Quieres Contribuir con Código:** ¡Los Pull Requests son bienvenidos! Revisa nuestra hoja de ruta y guías de contribución.
+Define parámetros, valores por defecto y validación directamente en tu `.toml`.
 
-## Licencia
+```toml
+[scripts]
+deploy = "terraform apply -var 'env=<axes::params::0(default='staging')>'"
+```
 
-Este proyecto está licenciado bajo la [Licencia MIT](./LICENSE).
+```sh
+axes . deploy                # -> terraform apply -var 'env=staging'
+axes . deploy production     # -> terraform apply -var 'env=production'
+```
+
+#### 2. Composición y Reutilización
+
+Construye flujos de trabajo complejos a partir de piezas simples.
+
+```toml
+[scripts]
+build = "npm run build"
+test = "npm run test"
+quality = ["<axes::scripts::test>", "<axes::scripts::build>"]
+```
+
+```sh
+axes . quality  # Ejecuta los tests y LUEGO el build.
+```
+
+#### 3. Sesiones de Enfoque Inmersivo
+
+Sumérgete en un sub-proyecto. `axes` configura tu entorno por ti.
+
+```toml
+# en mi-app/api/.axes/axes.toml
+[options]
+at_start = "source .venv/bin/activate" # Se ejecuta al entrar
+at_exit = "docker-compose down"       # Se ejecuta al salir
+```
+
+```sh
+$ axes mi-app/api # Inicia la sesión. `at_start` se ejecuta automáticamente.
+
+(axes: mi-app/api) $ axes test  # No necesitas repetir el contexto.
+(axes: mi-app/api) $ exit       # `at_exit` se ejecuta automáticamente.
+```
+
+**Tu entorno de desarrollo, bajo demanda.**
+
+#### 4. Rendimiento Obsesivo
+
+`axes` está escrito en Rust y es absurdamente rápido. Con un **caché perezoso y persistente**, la primera ejecución de un script complejo puede tardar 60ms. Las siguientes, **menos de 50ms**. Es más rápido que tu `alias` de shell, pero infinitamente más potente.
+
+---
+
+### ¿Listo para dirigir tu propia orquesta?
+
+La fricción que sientes cada día no es un requisito del desarrollo de software. Es un problema que tiene solución. `axes` es esa solución.
+
+- ➡️ **[Guía de Inicio Rápido (`GETTING_STARTED.md`)](./GETTING_STARTED.md):** Tu tutorial paso a paso para construir tu primer monorepo orquestado en 15 minutos.
+- 📖 **[Dominando el `axes.toml` (`AXES_TOML_GUIDE.md`)](./AXES_TOML_GUIDE.md):** La referencia definitiva de cada característica.
+- ⌨️ **[Referencia de Comandos (`COMMAND.md`)](./COMMAND.md):** Una guía completa de cada comando de la CLI.
+
+### Únete a la Revolución del Flujo de Trabajo
+
+`axes` es más que una herramienta; es un movimiento para devolver el control y la coherencia a los desarrolladores. Pero no podemos hacerlo solos.
+
+Ya seas un programador novato buscando orden en tus proyectos personales, un desarrollador senior optimizando el `CI/CD` de tu empresa, o un equipo independiente que necesita un lenguaje común, tu voz importa.
+
+- **Encuentra un Bug o tienes una Idea Genial:** [**Abre un Issue**](https://github.com/RetypeOS/axes/issues)
+- **Quieres Contribuir con Código:** ¡Los Pull Requests son bienvenidos!
+
+**Instala `axes` hoy. Deja de buscar comandos. Empieza a dirigir.**

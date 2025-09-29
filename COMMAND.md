@@ -12,6 +12,8 @@ axes <acción> <contexto> [argumentos...]
 axes <contexto> <acción> [argumentos...]
 ```
 
+> **Navegación por Sistema de Archivos:** Los contextos especiales `.` y `..` te permiten interactuar con proyectos basados en tu ubicación actual en el terminal, de forma similar a `cd`. `axes . info` muestra la información del proyecto del directorio actual (o su primer ancestro), mientras que `axes .. info` muestra la del directorio padre o superior.
+
 Adicionalmente, `axes` ofrece dos atajos importantes para acelerar tu flujo de trabajo:
 
 * **Atajo para `start`:** Si solo proporcionas un contexto, `axes` asume que quieres iniciar una sesión.
@@ -370,38 +372,37 @@ Inicia una sesión de shell interactiva y persistente dentro del contexto de un 
 #### **Sintaxis**
 
 ```sh
-axes <contexto> start
+axes <contexto> start [parámetros...]
 ```
 
-* **Atajo:** `axes <contexto>`
+* **Atajo:** `axes <contexto> [parámetros...]`
 
-##### **Argumentos y Flags**
+#### **Argumentos y Flags**
 
-| Argumento    | Descripción                                    | Requerido |
-| :----------- | :--------------------------------------------- | :-------- |
-| `<contexto>` | El proyecto en el cual iniciar la sesión.        | Sí        |
+| Argumento         | Descripción                                                                     | Requerido |
+| :---------------- | :------------------------------------------------------------------------------ | :-------- |
+| `<contexto>`      | El proyecto en el cual iniciar la sesión.                                       | Sí        |
+| `[parámetros...]` | Cualquier argumento adicional que se pasará a los hooks `at_start` y `at_exit`. | No        |
 
 #### **Comportamiento de la Sesión**
 
-Al ejecutar `start`, `axes` hace lo siguiente antes de darte el control:
+Al ejecutar `start`, `axes` hace lo siguiente:
 
-1. **Inyecta Variables de Entorno:** Todas las variables definidas en la sección `[env]` del `axes.toml` (y de sus padres) se exportan a la sesión.
-2. **Ejecuta el Hook `at_start`:** Se ejecuta el comando definido en `[options].at_start`. Esto es perfecto para activar entornos virtuales (`source .venv/bin/activate`), conectarse a un VPN, activar una base de datos, etc.
+1. **Resuelve y Valida Parámetros:** `axes` analiza los `[parámetros...]` proporcionados y los valida contra las definiciones `<axes::params::...>` encontradas en los hooks `at_start` y `at_exit`.
+2. **Ejecuta el Hook `at_start`:** Se ejecuta el script `at_start`, inyectando los parámetros resueltos.
+3. **Inicia la Shell:** Se lanza la shell interactiva con todas las variables de `[env]` inyectadas.
 
-Una vez dentro, puedes ejecutar comandos de `axes` sin especificar el contexto. Al salir de la sesión con `exit`, se ejecuta el hook `at_exit` para tareas de limpieza.
+Una vez dentro, puedes ejecutar comandos de `axes` sin especificar el contexto. Al salir de la sesión con `exit`, se ejecuta el hook `at_exit`, que también recibe los mismos `[parámetros...]` resueltos al inicio de la sesión.
 
 #### **Ejemplos de Uso**
 
 ```sh
-# Inicia una sesión en el servicio de API
-axes mi-app/api start
-
-# Usa el atajo para hacer lo mismo
+# Inicia una sesión simple en el servicio de API
 axes mi-app/api
 
-# Una vez dentro de la sesión:
-(axes: mi-app/api) $ axes test  # No es necesario `axes mi-app/api test`
-(axes: mi-app/api) $ exit
+# Suponiendo un `at_start` como: "docker-compose up -d <axes::params::service>"
+# Inicia una sesión y especifica qué servicio levantar
+axes mi-app/api start --service web
 ```
 
 ---
@@ -410,43 +411,48 @@ axes mi-app/api
 
 Abre el directorio raíz de un proyecto usando una aplicación pre-configurada.
 
-##### **Sintaxis**
+#### **Sintaxis**
 
 ```sh
-axes <contexto> open [<app_key>]
-```
-
-#### **Configuración**
-
-Las aplicaciones se definen en la sección `[options.open_with]` de tu `axes.toml`.
-
-```toml
-[options.open_with]
-# Define el atajo 'code' para abrir con VS Code.
-code = "code \"<axes::path>\""
-
-# Define 'explorer' para abrir en el explorador de archivos. Nótese que comienza el script con '-', esto indica que se ignorará el codigo de salida, falle o no continuará la ejecución sin propagar el error.
-explorer = "-explorer \"<axes::path>\""
-
-# Establece la acción por defecto si no se especifica ninguna.
-default = "code"
+axes <contexto> open [<app_key>] [parámetros...]
 ```
 
 #### **Argumentos y Flags**
 
-| Argumento     | Descripción                                                                               | Requerido |
-| :------------ | :---------------------------------------------------------------------------------------- | :-------- |
-| `<contexto>`  | El proyecto que se quiere abrir.                                                          | Sí        |
-| `[<app_key>]` | La clave de la aplicación a usar (ej. `code`, `explorer`). Si se omite, se usa `default`. | No        |
+| Argumento         | Descripción                                                                              | Requerido |
+| :---------------- | :--------------------------------------------------------------------------------------- | :-------- |
+| `<contexto>`      | El proyecto que se quiere abrir.                                                         | Sí        |
+| `[<app_key>]`     | La clave de la aplicación a usar (ej. `code`). Si se omite, se usa la clave `default`.   | No        |
+| `[parámetros...]` | (Nuevo en v0.1.8) Cualquier argumento adicional que se pasará al script de la `app_key`. | No        |
+
+#### **Configuración**
+
+Las aplicaciones se definen en la sección `[options.open_with]` de tu `axes.toml`. Desde la v0.1.8, cada entrada es un **script completo** que puede ser un string, una secuencia o una tabla con descripción.
+
+```toml
+[options.open_with]
+# Atajo simple como string
+edit = "code \"<axes::path>\""
+
+# Atajo con descripción y que acepta parámetros
+terminal = { desc = "Abre una terminal en una subcarpeta.", run = "wt -d \"<axes::path>/<axes::params::0(default='.')>\"" }
+
+# Establece la acción por defecto
+default = "edit"
+```
 
 #### **Ejemplos de Uso**
 
 ```sh
-# Abre el proyecto `mi-app` con la aplicación por defecto ('code' en nuestro ejemplo)
+# Abre el proyecto `mi-app` con la aplicación por defecto ('edit' en nuestro ejemplo)
 axes mi-app open
 
 # Abre explícitamente el proyecto `mi-app/api` en el explorador de archivos
-axes mi-app/api open explorer
+# (Asumiendo que hay una clave 'files' definida)
+axes mi-app/api open files
+
+# Usa el atajo 'terminal' y le pasa un parámetro para abrir en el subdirectorio 'src'
+axes mi-app/frontend open terminal src
 ```
 
 ## Refactorización del Árbol de Proyectos
@@ -501,10 +507,10 @@ axes <contexto> rename <nuevo_nombre>
 
 #### **Argumentos y Flags**
 
-| Argumento         | Descripción                                                              | Requerido |
-| :---------------- | :----------------------------------------------------------------------- | :-------- |
-| `<contexto>`      | El proyecto que quieres renombrar.                                       | Sí        |
-| `<nuevo_nombre>`  | El nuevo nombre para el proyecto.                                        | Sí        |
+| Argumento         | Descripción                           | Requerido |
+| :---------------- | :------------------------------------ | :-------- |
+| `<contexto>`      | El proyecto que quieres renombrar.    | Sí        |
+| `<nuevo_nombre>`  | El nuevo nombre para el proyecto.     | Sí        |
 
 #### **Reglas de Nombramiento**
 

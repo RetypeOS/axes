@@ -139,6 +139,13 @@ fn resolve_first_part(part: &str, index: &GlobalIndex) -> ContextResult<(Uuid, O
             let entry = index.projects.get(&uuid).unwrap();
             return Ok((uuid, entry.parent));
         }
+        ".." => {
+            let current_dir = env::current_dir()?;
+            let parent_dir = current_dir.parent().ok_or(ContextError::AlreadyAtRoot)?;
+            let uuid = find_project_from_path(parent_dir, true, index)?;
+            let entry = index.projects.get(&uuid).unwrap();
+            return Ok((uuid, entry.parent));
+        }
         "." => {
             let uuid = find_project_from_path(&env::current_dir()?, true, index)?;
             let entry = index.projects.get(&uuid).unwrap();

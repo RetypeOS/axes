@@ -508,11 +508,11 @@ Una vez que los `.toml` se han leído y fusionado, `axes` trabaja con un conjunt
 
     ```mermaid
     graph TD
-        A["`ProjectConfig`<br>(Desde .toml, contiene `Command`)"] -->|Fusión y Aplanamiento por SO<br>en `merge_chain_into_config`| B["`ResolvedConfig`<br>(Contiene `CacheableValue::Raw(FlattenedCommand)`)"];
-        B -->|Escritura a Caché de Disco<br>`save_config_cache`| C["`.axes/config.cache.bin`<br>(Contiene `SerializableResolvedConfig`)"];
-        C -->|Lectura de Caché<br>`read_and_validate_...`| B;
-        B -->|Expansión Perezosa<br>en `resolve_task`| D["`Task`<br>(Contiene `CommandExecution` con `TemplateComponent`s)"];
-        D -->|MUTACIÓN| E["`ResolvedConfig`<br>(Ahora con `CacheableValue::Expanded(Task)`)"];
+        A["ProjectConfig<br>(Desde .toml, contiene Command)"] -->|Fusión y Aplanamiento por SO en merge_chain_into_config| B["ResolvedConfig<br>(Contiene CacheableValue::Raw(FlattenedCommand))"];
+        B -->|Escritura a Caché de Disco<br>save_config_cache| C[".axes/config.cache.bin<br>(Contiene SerializableResolvedConfig)"];
+        C -->|Lectura de Caché<br>read_and_validate_...| B;
+        B -->|Expansión Perezosa<br>en resolve_task| D["Task<br>(Contiene CommandExecution con TemplateComponents)"];
+        D -->|MUTACIÓN| E["ResolvedConfig<br>(Ahora con CacheableValue::Expanded(Task))"];
     ```
 
 #### **3. Modelos de Persistencia**
@@ -524,4 +524,97 @@ Estos modelos definen la estructura de los datos que se guardan en el disco de f
 * **`ProjectRef`:** Define la estructura de la referencia local (`.axes/project_ref.bin`), permitiendo a `axes` identificar un proyecto y su padre desde su propio directorio.
 * **`Serializable...` Structs:** Un conjunto de `struct`s "sustitutas" (`SerializableResolvedConfig`, etc.) que se utilizan para garantizar un formato de caché binario estable y multiplataforma con `bincode`, especialmente para manejar tipos como `PathBuf` que se convierten a `String` antes de serializar.
 
-// --- TODO: Continue TECNICAL.md
+## Flujos de Datos Clave
+
+La lógica de `axes` reside en cómo transforma una simple entrada del usuario (como `axes mi-app/api build`) en una configuración completa, heredada, expandida y ejecutable. Este proceso se divide en dos fases principales, gestionadas por dos componentes distintos del `core`.
+
+### **1. Resolución de Contexto (`context_resolver`)**
+
+El `context_resolver` actúa como el "servicio de nombres de dominio" (DNS) de `axes`. Su única responsabilidad es traducir el **contexto** proporcionado por el usuario —un `String` que puede ser ambiguo— en una **identidad** inequívoca: un `UUID`.
+
+* **Entrada:** Un `&str` de contexto (ej. `"."`, `"mi-app/api"`, `"backend!"`, `"../../*"`).
+* **Proceso:**
+    1. **Operación Exclusiva sobre el Índice:** Es crucial entender que este resolvedor **no lee ningún `axes.toml` ni interactúa con el sistema de archivos** (excepto para resolver `.` o `_`). Opera exclusivamente sobre la estructura de datos `GlobalIndex` cargada en memoria desde `~/.config/axes/index.bin`. Esto lo hace extremadamente rápido.
+    2. **Análisis de Atajos (Prioridad Máxima):** Primero comprueba si el contexto es un atajo de navegación especial:
+        * `.`: Busca el `UUID` del proyecto en el directorio actual o el primer ancestro.
+        * `_`: Busca el `UUID` del proyecto cuyo directorio raíz es *exactamente* el directorio actual.
+        * `..`: Navega al `UUID` del padre del contexto actual.
+        * `*`: Resuelve al `UUID` del último hijo utilizado del contexto actual (lee el caché local `last_used.cache.bin`).
+        * `alias!`: Busca el `alias` en el `HashMap` de alias del `GlobalIndex`.
+    3. **Resolución de Ruta Jerárquica:** Si no es un atajo, divide el contexto por `/` (ej. `mi-app/api`).
+        * **Primera Parte:** Resuelve el primer segmento (`mi-app`) como un hijo directo del proyecto raíz (`global`).
+        * **Travesía del Grafo:** Por cada segmento restante (`api`), busca un hijo del `UUID` actual con ese nombre.
+* **Salida:** Un `Result<(Uuid, String)>`, donde el `String` es el nombre cualificado completo del proyecto resuelto (ej. `"global/mi-app/api"`).
+
+Este componente asegura que, antes de hacer cualquier trabajo pesado, sepamos de forma inequívoca *sobre qué proyecto* estamos operando.
+
+#### **2. Resolución de Configuración (`config_resolver`)**
+
+Una vez que un `handler` tiene un `UUID`, el `config_resolver` entra en acción para construir su entorno de ejecución completo. Este es el componente que implementa el principio de "Estandarización y Aplanamiento Temprano".
+
+* **Entrada:** Un `Uuid` de proyecto.
+* **Proceso (`resolve_config_for_uuid`):**
+    1. **Comprobación de Caché de Disco:** El primer paso es siempre buscar un `.axes/config.cache.bin` válido para el proyecto.
+        * **Validación de `timestamp`:** El caché almacena las fechas de modificación de todos los `axes.toml` en la cadena de herencia. Se comprueba si alguno de los archivos reales en el disco es más reciente que el `timestamp` guardado. Si es así, el caché está desactualizado y se ignora.
+        * Si el caché es válido, se decodifica y se devuelve la `ResolvedConfig` (con valores `Raw` y `Expanded` ya persistidos) de forma casi instantánea.
+    2. **Construcción desde Cero (Si no hay Caché Válido):**
+        a.  **Construir Cadena de Herencia:** Se realiza una travesía ascendente desde el `UUID` del proyecto objetivo, siguiendo los `parent_uuid` en el `GlobalIndex` hasta llegar al proyecto raíz.
+        b.  **Leer y Fusionar `ProjectConfig`s:** Se itera sobre la cadena de herencia desde el ancestro más antiguo (raíz) hasta el proyecto objetivo. En cada paso, se lee el `axes.toml` y sus `HashMap`s (`scripts`, `vars`, `env`, etc.) se fusionan, con los valores del hijo **sobrescribiendo** los del padre.
+        c.  **Aplanar a `CacheableValue::Raw`:** Durante la fusión, cada `Command` (leído del TOML) se convierte en un `FlattenedCommand` (seleccionando el `runnable` para el SO actual) y se envuelve en un `CacheableValue::Raw`. Las `vars` también se convierten a `CacheableValue::Raw`.
+        d.  **Crear Nuevo Caché de Disco:** La `ResolvedConfig` final, que ahora contiene solo valores `Raw`, se serializa a `.axes/config.cache.bin` junto con los `timestamps` de sus dependencias.
+* **Salida:** Un `Result<ResolvedConfig>` listo para ser utilizado por los `handlers`.
+
+Este proceso de dos fases asegura que `axes` sea a la vez rápido (gracias al caché) y correcto (gracias a la invalidación del caché y la fusión por herencia), proporcionando una vista completa y autocontenida de la configuración de un proyecto en cualquier momento.
+
+## Componentes Clave del Sistema
+
+Mientras que el ciclo de vida describe el "cómo", esta sección describe el "qué". Estos son los módulos y patrones de diseño que constituyen el núcleo de la funcionalidad y el rendimiento de `axes`.
+
+### **1. El Motor de Expansión (en `config_resolver.rs`)**
+
+El antiguo `Interpolator` ha sido reemplazado por un motor de expansión más sofisticado y de alto rendimiento, cuya lógica reside principalmente en `config_resolver.rs`.
+
+* **Estructura `TaskExpander`:** Este `struct` encapsula el estado de una única operación de expansión de alto nivel (como la llamada desde `run.rs`). Su propósito es gestionar un **caché en memoria** (`ExpansionCache`) que evita recalcular la misma subtarea (`var` o `script`) varias veces dentro de una misma ejecución. Es un ejemplo de memoización.
+
+* **Función `expand_and_get_task_internal`:** Es el corazón recursivo del motor. Su diseño sigue un patrón estricto para garantizar la seguridad y eficiencia:
+    1. **Comprobación de Caché:** Primero consulta el `ExpansionCache` en memoria. Si la tarea ya está resuelta, devuelve un clon y termina.
+    2. **Lectura Inmutable:** Lee el `CacheableValue::Raw` desde la `ResolvedConfig` (que es inmutable).
+    3. **Expansión de Compuestos:** Itera sobre la plantilla de comando, y para cada token `<axes::vars::...>` o `<axes::scripts::...>`, se llama a sí misma recursivamente.
+    4. **Expansión de Simples:** Una vez que los tokens compuestos están resueltos, una pasada final expande los tokens estáticos (`<axes::path>`, etc.) sobre los literales.
+    5. **Inserción en Caché:** La `Task` recién construida se inserta en el `ExpansionCache` en memoria.
+    6. **Mutación de `ResolvedConfig`:** También actualiza la `ResolvedConfig` principal, cambiando el estado de `Raw` a `Expanded`. Este paso es clave para la persistencia del caché en disco.
+
+* **Seguridad y Rendimiento:**
+  * **Anti-ciclos:** Un `HashSet` (`recursion_stack`) se pasa a través de toda la pila de llamadas para detectar dependencias circulares y fallar con un error claro.
+  * **`lazy_static!` para Regex:** Todas las expresiones regulares usadas en el proceso de parseo se compilan una sola vez y se almacenan en `lazy_static!`, eliminando un cuello de botella de rendimiento masivo identificado mediante `flamegraph`.
+
+### **2. El Resolvedor de Parámetros (`parameters.rs`)**
+
+Este módulo implementa el principio de "Validación Declarativa y Temprana".
+
+* **Estructura `ArgResolver`:** Es el orquestador principal. No se crea hasta que una `Task` ha sido completamente expandida.
+* **Flujo de `ArgResolver::new()`:** Su constructor es donde ocurre toda la lógica:
+    1. **Recolección:** Recibe todas las `ParameterDef` de una `Task`.
+    2. **Parseo de CLI:** Parsea los argumentos crudos de la línea de comandos a una estructura interna con estado de "consumo" (`CliInputState`).
+    3. **Resolución y Validación:** Ejecuta un algoritmo de pasada única que itera sobre las `ParameterDef`s, "consume" argumentos del `CliInputState` y aplica la lógica de los modificadores (`required`, `default`, `map`, `alias`) en un orden de precedencia estricto.
+    4. **Manejo de Sobrantes:** Al final, comprueba si han quedado argumentos sin consumir. Si es así, los asigna al token `<axes::params>` o lanza un error si este no fue declarado.
+* **Resultado:** Si el constructor termina con éxito, el `handler` tiene la garantía de que todos los parámetros son válidos y tiene acceso a un `HashMap` con los valores finales listos para ser inyectados.
+
+### **3. El Ejecutor de Tareas (`task_executor.rs`)**
+
+Este módulo es una abstracción de alto nivel que desacopla a los `handlers` de la complejidad de la ejecución.
+
+* **API `execute_task`:** Su función principal toma una `Task` y un `ArgResolver`.
+* **Lógica de Orquestación:**
+    1. **Ensamblaje:** Itera sobre los `CommandExecution` de la `Task`. Para cada uno, llama a `assemble_final_command` para construir la cadena de comando final, usando el `ArgResolver` para sustituir los tokens de parámetros.
+    2. **Manejo de Paralelismo:** Implementa la lógica del prefijo `>`. Agrupa los comandos paralelos consecutivos en un "lote" y los ejecuta usando `rayon::par_iter()`. Un comando secuencial actúa como una barrera que fuerza la ejecución del lote paralelo anterior.
+    3. **Delegación:** Delega la ejecución real de cada comando (con sus metadatos como `ignore_errors`) al `executor` de bajo nivel.
+
+### **4. El Ejecutor de Procesos (`system/executor.rs`)**
+
+Este es el puente de bajo nivel entre `axes` y el sistema operativo, diseñado para el máximo rendimiento y control.
+
+* **Arquitectura Híbrida:** Expone una API síncrona, pero utiliza un `runtime` de `tokio` global (`lazy_static!`) internamente.
+* **Espera Eficiente con `tokio::select!`:** En lugar de un bucle de espera bloqueante o con `sleep`, usa `tokio::select!` para esperar concurrentemente a dos eventos: la finalización del subproceso (`child.wait()`) o una señal de `Ctrl+C` (`tokio::signal::ctrl_c()`).
+* **Cancelación Robusta:** Si se detecta `Ctrl+C`, el `executor` intenta activamente matar (`child.kill()`) el proceso hijo antes de devolver un error `ExecutionError::Interrupted`. Esto previene procesos huérfanos y le da al `handler` principal el control para decidir cómo proceder.
+* **Robustez en Windows:** Mantiene el fallback a `cmd /C` para ejecutar comandos `builtin` que no son ejecutables independientes.

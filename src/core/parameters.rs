@@ -12,11 +12,13 @@ lazy_static! {
 }
 
 lazy_static! {
-    static ref PARAMETER_TOKEN_CONTENT_RE: Regex = Regex::new(r"^\s*([^(\s]+)\s*(?:\((.*)\))?\s*$").unwrap();
+    static ref PARAMETER_TOKEN_CONTENT_RE: Regex =
+        Regex::new(r"^\s*([^(\s]+)\s*(?:\((.*)\))?\s*$").unwrap();
 }
 
 lazy_static! {
-    static ref MODIFIERS_RE: Regex = Regex::new(r#"\s*([^=,\s]+)(?:\s*=\s*(?:'([^']*)'|"([^"]*)"|([^,]*)))?\s*"#).unwrap();
+    static ref MODIFIERS_RE: Regex =
+        Regex::new(r#"\s*([^=,\s]+)(?:\s*=\s*(?:'([^']*)'|"([^"]*)"|([^,]*)))?\s*"#).unwrap();
 }
 
 // --- DATA STRUCTS ---
