@@ -9,8 +9,9 @@ use crate::models::{
     IndexEntry, ProjectConfig, ResolvedConfig, ResolvedOptionsConfig, Runnable,
     SerializableConfigCache, Task, TemplateComponent,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use bincode::error::DecodeError;
+use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -18,6 +19,10 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use thiserror::Error;
 use uuid::Uuid;
+
+lazy_static! {
+    static ref COMPOSITE_TOKEN_RE: Regex = Regex::new(r"<axes::(vars|scripts)::([^>]+)>").unwrap();
+}
 
 #[derive(Error, Debug)]
 pub enum ResolverError {
@@ -41,10 +46,10 @@ pub enum ResolverError {
     MaxRecursionDepth { depth: u32, key: String },
     #[error("Circular dependency detected during expansion: {cycle_path}")]
     CircularDependency { cycle_path: String },
-    #[error("Invalid value type '{value_type}' requested for key '{key}'.")]
-    InvalidValueType { value_type: String, key: String },
-    #[error("Key '{key}' of type '{value_type}' not found in configuration.")]
-    ValueNotFound { key: String, value_type: String },
+    #[error("Invalid value type '{kind:?}' requested for key '{key}'.")]
+    InvalidValueType { kind: ValueKind, key: String },
+    #[error("Key '{key}' of type '{kind:?}' not found in configuration.")]
+    ValueNotFound { kind: ValueKind, key: String },
     #[error("Expansion/Parsing Error: {0}")]
     Expansion(#[from] anyhow::Error),
 }
@@ -118,15 +123,31 @@ fn expand_and_get_task_internal(
     recursion_stack: &mut HashSet<String>,
     depth: u32,
 ) -> Result<Task> {
+    let stack_key = format!("{:?}::{}", kind, key);
     log::debug!(
-        "{:indent$}Resolving task for '{:?}:{}'",
+        "{:indent$}Resolving task for '{}'",
         "",
-        kind,
-        key,
+        &stack_key,
         indent = (depth as usize) * 2
     );
 
-    // 1. Clonar el `FlattenedCommand` para liberarnos del préstamo y poder pasar `&mut config` a la recursión.
+    if depth >= MAX_RECURSION_DEPTH {
+        Err(ResolverError::MaxRecursionDepth {
+            depth,
+            key: stack_key.clone(),
+        })?
+    }
+    if !recursion_stack.insert(stack_key.clone()) {
+        let cycle_path = recursion_stack
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" -> ");
+        Err(ResolverError::CircularDependency {
+            cycle_path: format!("{} -> {}", cycle_path, stack_key),
+        })?
+    }
+
     let flattened_command = {
         let cacheable = get_cacheable_value(config, key, kind)?;
         match cacheable {
@@ -136,32 +157,96 @@ fn expand_and_get_task_internal(
                     "",
                     indent = (depth as usize) * 2
                 );
+                recursion_stack.remove(&stack_key);
                 return Ok(task.clone());
             }
-            CacheableValue::Raw(fc) => fc.clone(), // Clonamos el FlattenedCommand
+            CacheableValue::Raw(fc) => fc.clone(),
         }
     };
-
     log::debug!(
         "{:indent$}Value is RAW. Preparing for expansion.",
         "",
         indent = (depth as usize) * 2
     );
 
-    // 2. Procesar el `FlattenedCommand` clonado.
     let mut new_task = Task {
         commands: Vec::new(),
         desc: flattened_command.desc,
     };
+    let re_composite = &COMPOSITE_TOKEN_RE;
+
     for line in &flattened_command.command_lines {
-        let (ignore_errors, run_in_parallel, template_str) = if kind == ValueKind::Script {
-            parse_execution_prefixes(line)
+        let (ignore_errors, run_in_parallel, mut current_str) = if kind == ValueKind::Script {
+            let (ie, rip, s) = parse_execution_prefixes(line);
+            (ie, rip, s.to_string())
         } else {
-            (false, false, line.as_str())
+            (false, false, line.clone())
         };
-        let expanded_str =
-            expand_composite_tokens_recursively(template_str, config, recursion_stack, depth)?;
-        let mut components = parameters::discover_and_parse(&expanded_str)?;
+
+        // --- UNIFIED EXPANSION LOOP ---
+        loop {
+            let captures: Vec<_> = re_composite.captures_iter(&current_str).collect();
+            if captures.is_empty() {
+                break;
+            }
+
+            let mut next_str = String::new();
+            let mut last_match_end = 0;
+            for caps in captures {
+                let full_match = caps.get(0).unwrap();
+                let namespace = caps.get(1).unwrap().as_str();
+                let sub_key = caps.get(2).unwrap().as_str();
+                let sub_kind = if namespace == "vars" {
+                    ValueKind::Variable
+                } else {
+                    ValueKind::Script
+                };
+
+                next_str.push_str(&current_str[last_match_end..full_match.start()]);
+
+                let sub_task = expand_and_get_task_internal(
+                    sub_key,
+                    sub_kind,
+                    config,
+                    recursion_stack,
+                    depth + 1,
+                )
+                .with_context(|| {
+                    format!(
+                        "While expanding token '{}' in '{}:{}'",
+                        full_match.as_str(),
+                        kind_to_str(kind),
+                        key
+                    )
+                })?;
+
+                let sub_value_str = sub_task
+                    .commands
+                    .iter()
+                    .map(|cmd| {
+                        cmd.template
+                            .iter()
+                            .map(template_component_to_string)
+                            .collect::<String>()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" && ");
+
+                next_str.push_str(&sub_value_str);
+                last_match_end = full_match.end();
+            }
+            next_str.push_str(&current_str[last_match_end..]);
+            current_str = next_str;
+        }
+
+        let mut components = parameters::discover_and_parse(&current_str).with_context(|| {
+            format!(
+                "While parsing parameters in '{}:{}'",
+                kind_to_str(kind),
+                key
+            )
+        })?;
+
         expand_simple_tokens_in_literals(&mut components, config);
 
         new_task.commands.push(CommandExecution {
@@ -171,96 +256,21 @@ fn expand_and_get_task_internal(
         });
     }
 
-    // 3. Mutar el `config` para insertar la nueva tarea `Expanded`.
     let cacheable_mut = get_cacheable_value_mut(config, key, kind)?;
     *cacheable_mut = CacheableValue::Expanded(new_task.clone());
 
-    // 4. Devolver la tarea poseída.
+    recursion_stack.remove(&stack_key);
     Ok(new_task)
 }
 
-/// Helper recursive function to expand composite tokens like `<axes::vars::...>`
-fn expand_composite_tokens_recursively(
-    raw_string: &str,
-    config: &mut ResolvedConfig,
-    recursion_stack: &mut HashSet<String>,
-    depth: u32,
-) -> ResolverResult<String> {
-    if depth >= MAX_RECURSION_DEPTH {
-        return Err(ResolverError::MaxRecursionDepth {
-            depth,
-            key: "expansion".to_string(),
-        });
+/// Helper function to flatten a `TemplateComponent` back into its string representation.
+/// Used for injecting the content of a sub-task into a parent task's string.
+fn template_component_to_string(c: &TemplateComponent) -> String {
+    match c {
+        TemplateComponent::Literal(s) => s.clone(),
+        TemplateComponent::Parameter(p) => p.original_token.clone(),
+        TemplateComponent::GenericParams => "<axes::params>".to_string(),
     }
-
-    let re = Regex::new(r"<axes::(vars|scripts)::([^>]+)>").unwrap();
-    let mut current_str = raw_string.to_string();
-
-    loop {
-        let captures: Vec<_> = re.captures_iter(&current_str).collect();
-        if captures.is_empty() {
-            break;
-        }
-
-        let mut next_str = String::new();
-        let mut last_match_end = 0;
-
-        for caps in captures {
-            let full_match = caps.get(0).unwrap();
-            let namespace = caps.get(1).unwrap().as_str();
-            let sub_key = caps.get(2).unwrap().as_str();
-
-            let sub_kind = if namespace == "vars" {
-                ValueKind::Variable
-            } else {
-                ValueKind::Script
-            };
-            let stack_key = format!("{:?}::{}", sub_kind, sub_key);
-
-            if !recursion_stack.insert(stack_key.clone()) {
-                let cycle_path = recursion_stack
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(" -> ");
-                return Err(ResolverError::CircularDependency {
-                    cycle_path: format!("{} -> {}", cycle_path, stack_key),
-                });
-            }
-
-            next_str.push_str(&current_str[last_match_end..full_match.start()]);
-
-            let sub_task = expand_and_get_task_internal(
-                sub_key,
-                sub_kind,
-                config,
-                recursion_stack,
-                depth + 1,
-            )?;
-            let sub_value_str = sub_task
-                .commands
-                .iter()
-                .map(|cmd_exec| {
-                    cmd_exec
-                        .template
-                        .iter()
-                        .map(|c| match c {
-                            TemplateComponent::Literal(s) => s.clone(),
-                            TemplateComponent::Parameter(p) => p.original_token.clone(),
-                            TemplateComponent::GenericParams => "<axes::params>".to_string(),
-                        })
-                        .collect::<String>()
-                })
-                .collect::<Vec<_>>()
-                .join(" && ");
-            next_str.push_str(&sub_value_str);
-            last_match_end = full_match.end();
-        }
-        next_str.push_str(&current_str[last_match_end..]);
-        current_str = next_str;
-    }
-
-    Ok(current_str)
 }
 
 pub fn save_config_cache(config: &ResolvedConfig, index: &GlobalIndex) -> ResolverResult<()> {
@@ -548,7 +558,7 @@ fn get_cacheable_value<'a>(
 
     cacheable.ok_or_else(|| ResolverError::ValueNotFound {
         key: key.to_string(),
-        value_type: format!("{:?}", kind),
+        kind,
     })
 }
 
@@ -577,8 +587,15 @@ fn get_cacheable_value_mut<'a>(
     };
     cacheable.ok_or_else(|| ResolverError::ValueNotFound {
         key: key.to_string(),
-        value_type: format!("{:?}", kind),
+        kind,
     })
+}
+
+fn kind_to_str(kind: ValueKind) -> &'static str {
+    match kind {
+        ValueKind::Script => "script",
+        ValueKind::Variable => "var",
+    }
 }
 
 /// Expands simple, non-recursive tokens (e.g., `<axes::path>`) on a set of components.

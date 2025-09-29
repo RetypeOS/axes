@@ -3,8 +3,21 @@
 use crate::models::{ParameterDef, ParameterKind, ParameterModifiers, TemplateComponent};
 use anyhow::{Context, Result, anyhow};
 use colored::*;
+use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
+
+lazy_static! {
+    static ref PARAMS_TOKEN_RE: Regex = Regex::new(r"<axes::(params(?:[^>])*)>").unwrap();
+}
+
+lazy_static! {
+    static ref PARAMETER_TOKEN_CONTENT_RE: Regex = Regex::new(r"^\s*([^(\s]+)\s*(?:\((.*)\))?\s*$").unwrap();
+}
+
+lazy_static! {
+    static ref MODIFIERS_RE: Regex = Regex::new(r#"\s*([^=,\s]+)(?:\s*=\s*(?:'([^']*)'|"([^"]*)"|([^,]*)))?\s*"#).unwrap();
+}
 
 // --- DATA STRUCTS ---
 
@@ -38,8 +51,7 @@ pub struct ArgResolver {
 /// Parsea el contenido de un token de parámetro, ej. "0(required)" o "target(alias='-t')".
 fn parse_parameter_token(original_token: &str, content: &str) -> Result<ParameterDef> {
     // Regex para capturar el especificador (nombre/índice) y el bloque de modificadores.
-    let re = Regex::new(r"^\s*([^(\s]+)\s*(?:\((.*)\))?\s*$").unwrap();
-    let caps = re
+    let caps = PARAMETER_TOKEN_CONTENT_RE
         .captures(content)
         .ok_or_else(|| anyhow!("Invalid parameter format in token: {}", original_token))?;
 
@@ -76,8 +88,7 @@ fn parse_modifiers_string(s: &str) -> Result<ParameterModifiers> {
     }
 
     // Usamos una regex más robusta para manejar comillas y espacios
-    let re = Regex::new(r#"\s*([^=,\s]+)(?:\s*=\s*(?:'([^']*)'|"([^"]*)"|([^,]*)))?\s*"#).unwrap();
-    for caps in re.captures_iter(s) {
+    for caps in MODIFIERS_RE.captures_iter(s) {
         let key = caps.get(1).map_or("", |m| m.as_str()).trim();
         if key.is_empty() {
             continue;
@@ -120,11 +131,10 @@ pub fn discover_and_parse(fully_expanded_string: &str) -> Result<Vec<TemplateCom
         "Discovering parameters from string: '{}'",
         fully_expanded_string
     );
-    let re = Regex::new(r"<axes::(params(?:[^>])*)>").unwrap();
     let mut components = Vec::new();
     let mut last_match_end = 0;
 
-    for caps in re.captures_iter(fully_expanded_string) {
+    for caps in PARAMS_TOKEN_RE.captures_iter(fully_expanded_string) {
         let full_match = caps.get(0).unwrap();
         let token_content = caps.get(1).unwrap().as_str();
 

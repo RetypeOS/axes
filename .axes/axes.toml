@@ -8,22 +8,53 @@ description = "The development workflow configuration for the `axes` project its
 # Defines workflows for building, testing, and managing the tool.
 [scripts]
 # Tests
-hello = "echo Hello, World!"
+hello = """
+    echo Hello, World! \ 
+    <axes::scripts::test_q>
+"""
 
 test_q = "-comando info <axes::vars::_param_1> <axes::params::1(map='--info', default='algo')>"
 
 test_w = [
-    "-comando 1",
-    "-comando 2",
-    "-comando 3",
-    "-comando 4"
+    "echo 1",
+    "echo 2",
+    "echo 3",
+    "echo 4",
+    "echo 5",
+    "echo 6",
+    "echo 7",
+    "echo 8",
+    "echo 9",
+    "echo 10",
+    "echo 11",
+    "echo 12",
+    "echo 13",
+    "echo 14",
+    "echo 15",
 ]
+
+test_rayon = "> echo Running 1"
+
+test_run = "echo algo <axes::run::hello>"
 
 test_vel = "powershell ./.axes/command_test.ps1 '<axes::params>'"
 
+# --- Escenario de Error 1: Variable no encontrada en anidamiento profundo ---
+deploy_frontend = "-npm run build -- --config <axes::scripts::frontend_config>"
+frontend_config = "aaa"
+deploy_all = [
+    "echo 'Deploying backend...'",
+    "<axes::scripts::deploy_frontend>" # Este script depende de una var
+]
+
+# --- Escenario de Error 2: Ciclo de dependencias ---
+ciclo_a = "Paso A, luego <axes::scripts::ciclo_b>"
+ciclo_b = "Paso B, luego <axes::scripts::ciclo_c>"
+ciclo_c = "Paso C, y de vuelta a <axes::scripts::ciclo_a>"
+
 # --- Build Workflows ---
 build = { desc = "Builds the project in debug mode with fast compilation.", run = "cargo build <axes::params>" }
-build_release = { desc = "Builds the project in release mode for distribution.", run = "cargo build --release" }
+build_r = { desc = "Builds the project in release mode for distribution.", run = "cargo build <axes::params::release(alias='r')>" }
 
 # --- Run and Test Workflows ---
 run = { desc = "Runs the project, passing all arguments to the binary.", run = "cargo run -- <axes::params>" }
@@ -34,6 +65,7 @@ check = { desc = "Checks the project for errors without building.", run = "cargo
 lint = { desc = "Lints the code for style and correctness issues.", run = "cargo clippy <axes::vars::clippy_args> <axes::params>" }
 fmt = { desc = "Checks if the code is formatted according to project style.", run = "cargo fmt <axes::params>" }
 fmt_fix = { desc = "Formats the code automatically.", run = "cargo fmt --all <axes::params>" }
+flamegraph = {run=["cargo flamegraph --bin axes -- <axes::params>", "start flamegraph.svg"], desc="{{Missing}}"}
 
 # --- Composite and Utility Workflows ---
 quality = { desc = "Runs all quality checks in sequence (fmt, check, lint, test).", run = [
@@ -84,3 +116,4 @@ install_path_nix = "/usr/local/bin/" # Example for Linux/macOS
 [env]
 RUST_LOG = "debug" # Default log level when running with `axes run`.
 RUST_BACKTRACE = "1" # Shows full backtraces in case of panic.
+CARGO_PROFILE_RELEASE_DEBUG="true"

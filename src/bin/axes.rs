@@ -107,18 +107,30 @@ fn main() {
 
     // The entire application logic is wrapped in a Result to enable centralized error handling.
     if let Err(e) = run_cli(Cli::parse()) {
-        // --- Centralized Error Handling ---
-        // Check if the error is a command interruption (e.g., from Ctrl+C).
+        // Primero, comprobamos si el error raíz es una interrupción para salir en silencio.
         if let Some(exec_err) = e.downcast_ref::<executor::ExecutionError>()
             && matches!(exec_err, executor::ExecutionError::Interrupted { .. })
         {
-            // If so, exit silently with the standard exit code for interruption.
-            // This provides a clean, shell-like experience for the user.
+            // Salida silenciosa para Ctrl+C.
+            // Opcional: imprimir una nueva línea para que el prompt de la shell no quede pegado.
+            eprintln!();
             std::process::exit(130);
         }
 
-        // For all other errors, print a formatted message to stderr and exit with a failure code.
+        // Si no es una interrupción, imprimimos la cadena de errores completa y formateada.
         eprintln!("\n{}: {}", "Error".red().bold(), e);
+
+        // Iteramos sobre la cadena de causas subyacentes.
+        let mut causes = e.chain().skip(1); // `skip(1)` para no repetir el error principal.
+        if let Some(cause) = causes.next() {
+            eprintln!("\nCaused by:");
+            eprintln!("   0: {}", cause); // Imprimimos la primera causa.
+            // Imprimimos el resto de las causas.
+            for (i, cause) in causes.enumerate() {
+                eprintln!("   {}: {}", i + 1, cause);
+            }
+        }
+
         std::process::exit(1);
     }
 }
