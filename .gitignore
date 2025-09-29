@@ -25,10 +25,14 @@ Cargo.lock
 target/
 .venv/
 
+# My personal data files
 VISION.md
 TODO_old.md
 my_todo.md
+
+# Axes unnecesary files
 axes.exe
 axes
 axes.sh
 axesrs.txt
+#.axes/config.cache.bin

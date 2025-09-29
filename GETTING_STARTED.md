@@ -1,350 +1,357 @@
-# Guía de Inicio: Tu Primer Monorepo Orquestado con `axes`
+<p align="center">
+  <strong>Read this in other languages:</strong><br>
+  <a href="./GETTING_STARTED.md">English</a> |
+  <a href="./docs/es/GETTING_STARTED.md">Español</a>
+</p>
 
-¡Bienvenido a `axes`! Esta guía te llevará desde cero hasta tener un monorepo completamente funcional y orquestado. En los próximos 15-20 minutos, aprenderás a:
+# Getting Started Guide: Your First Orchestrated Monorepo with `axes`
 
-* ✅ Instalar `axes` en tu sistema.
-* ✅ Crear tu primer proyecto y sub-proyectos.
-* ✅ Definir y ejecutar scripts.
-* ✅ Aprovechar la herencia de variables entre proyectos.
-* ✅ Orquestar un flujo de trabajo complejo que involucra múltiples proyectos.
-* ✅ Usar sesiones de proyecto para un flujo de trabajo enfocado.
+Welcome to `axes`! This guide will take you from zero to a fully functional and orchestrated monorepo. In the next 15-20 minutes, you will learn how to:
 
-Al final de este tutorial, entenderás el poder fundamental de `axes` y estarás listo para aplicarlo a tus propios proyectos.
+* ✅ Install `axes` on your system.
+* ✅ Create your first project and sub-projects.
+* ✅ Define and execute scripts.
+* ✅ Leverage variable inheritance between projects.
+* ✅ Orchestrate a complex workflow involving multiple projects.
+* ✅ Use project sessions for a focused workflow.
+
+By the end of this tutorial, you will understand the fundamental power of `axes` and be ready to apply it to your own projects.
 
 ---
 
-## 1. Instalación
+## 1. Installation
 
-`axes` es un único archivo binario sin dependencias externas, lo que hace que su instalación sea muy sencilla.
+`axes` is a single binary file with no external dependencies, making its installation very simple.
 
-### Opción A: Descargar el Binario Pre-compilado (Recomendado)
+### Option A: Download the Pre-compiled Binary (Recommended)
 
-Esta es la forma más rápida de empezar.
+This is the fastest way to get started.
 
-1. **Ve a la página de Releases:** Abre la [página oficial de Releases de `axes` en GitHub](https://github.com/RetypeOS/axes/releases).
-2. **Descarga el archivo correcto:** Busca la última versión y descarga el archivo `.zip` o `.tar.gz` que corresponda a tu sistema operativo (Windows, macOS, o Linux).
-3. **Descomprime el archivo:** Dentro encontrarás un único ejecutable: `axes.exe` (en Windows) o `axes` (en macOS/Linux).
-4. **Mueve el ejecutable a tu `PATH`:** Este es el paso más importante. Para poder llamar a `axes` desde cualquier lugar en tu terminal, debes mover este archivo a un directorio que esté en la variable de entorno `PATH` de tu sistema.
+1. **Go to the Releases Page:** Open the [official `axes` Releases page on GitHub](https://github.com/RetypeOS/axes/releases).
+2. **Download the correct file:** Find the latest version and download the `.zip` or `.tar.gz` file that corresponds to your operating system (Windows, macOS, or Linux).
+3. **Unzip the file:** Inside, you will find a single executable: `axes.exe` (on Windows) or `axes` (on macOS/Linux).
+4. **Move the executable to your `PATH`:** This is the most important step. To be able to call `axes` from anywhere in your terminal, you must move this file to a directory that is in your system's `PATH` environment variable.
 
     * **Windows:**
-        1. Crea una carpeta, por ejemplo, `C:\Program Files\axes`.
-        2. Mueve `axes.exe` a esa carpeta.
-        3. Busca "Editar las variables de entorno del sistema" en el menú de inicio, abre el editor de `PATH` y añade la ruta `C:\Program Files\axes` a la lista.
+        1. Create a folder, for example, `C:\Program Files\axes`.
+        2. Move `axes.exe` to that folder.
+        3. Search for "Edit the system environment variables" in the start menu, open the `PATH` editor, and add the path `C:\Program Files\axes` to the list.
     * **macOS / Linux:**
-        Un directorio común y recomendado es `/usr/local/bin`. Puedes mover el archivo con este comando en tu terminal (puede que necesites `sudo`):
+        A common and recommended directory is `/usr/local/bin`. You can move the file with this command in your terminal (you might need `sudo`):
 
         ```sh
         sudo mv ./axes /usr/local/bin/axes
         ```
 
-5. **Verifica la instalación:** Abre una **nueva** ventana de terminal (esto es importante para que se carguen los cambios en el `PATH`) y ejecuta:
+5. **Verify the installation:** Open a **new** terminal window (this is important for the `PATH` changes to load) and run:
 
     ```sh
     axes --version
     ```
 
-    Si ves un número de versión, ¡la instalación ha sido un éxito!
+    If you see a version number, the installation was successful!
 
-### Opción B: Compilar desde el Código Fuente
+### Option B: Compile from Source Code
 
-Si tienes el [toolchain de Rust](https://www.rust-lang.org/tools/install) instalado, puedes compilar `axes` tú mismo.
+If you have the [Rust toolchain](https://www.rust-lang.org/tools/install) installed, you can compile `axes` yourself.
 
 ```sh
-# 1. Clona el repositorio
+# 1. Clone the repository
 git clone https://github.com/RetypeOS/axes.git
 
-# 2. Navega al directorio
+# 2. Navigate to the directory
 cd axes
 
-# 3. Compila en modo release (optimizado)
+# 3. Compile in release mode (optimized)
 cargo build --release
 ```
 
-El ejecutable final se encontrará en `./target/release/axes`. Puedes mover este archivo a tu `PATH` como se describe en la Opción A.
+The final executable will be located in `./target/release/axes`. You can move this file to your `PATH` as described in Option A.
 
 ---
 
-Con `axes` instalado, estás listo para crear tu primer proyecto. ¡Vamos allá!
+With `axes` installed, you are ready to create your first project. Let's go!
 
-## 2. Nuestro Escenario y la Navegación de Contextos
+## 2. Our Scenario and Context Navigation
 
-Para este tutorial, construiremos la estructura de un sitio web corporativo ficticio llamado "Innovatech". Este sitio tendrá dos componentes principales: un **blog** y una **tienda online**.
+For this tutorial, we will build the structure of a fictional corporate website called "Innovatech." This site will have two main components: a **blog** and an **online store**.
 
-Antes de empezar, es crucial entender cómo `axes` se refiere a los proyectos. Al igual que navegas por un sistema de archivos con `cd`, `axes` navega por su árbol de proyectos lógicos usando **contextos**. Aquí está la tabla de referencia rápida:
+Before starting, it is crucial to understand how `axes` refers to projects. Just as you navigate a file system with `cd`, `axes` navigates its logical project tree using **contexts**. Here is the quick reference table:
 
-| Contexto | Descripción                                                                | Ejemplo (desde `.../innovatech-website/blog`)               |
-| :------- | :------------------------------------------------------------------------- | :---------------------------------------------------------- |
-| `nombre` | Un hijo directo del proyecto raíz (por defecto llamado `global`).          | `axes innovatech-website info`                              |
-| `/`      | El separador de niveles en la jerarquía.                                   | `axes innovatech-website/blog info`                         |
-| `.`      | El proyecto del directorio actual, o el primer ancestro encontrado.        | `axes . info` (resuelve a `innovatech-website/blog`)        |
-| `_`      | El proyecto cuyo directorio raíz es *exactamente* el directorio actual.    | `axes _ info` (resuelve a `innovatech-website/blog`)        |
-| `..`     | El padre del proyecto de contexto actual o el primer ancestro encontrado.  | `axes .. info` (resuelve a `innovatech-website`)          |
-| `alias!` | Un atajo personalizado que creas.                                          | `axes blog! info` (si `blog!` apunta a nuestro proyecto)    |
+| Context | Description                                                                 | Example (from `.../innovatech-website/blog`)                |
+| :------ | :-------------------------------------------------------------------------- | :---------------------------------------------------------- |
+| `name`  | A direct child of the root project (default name is `global`).              | `axes innovatech-website info`                              |
+| `/`     | The level separator in the hierarchy.                                       | `axes innovatech-website/blog info`                         |
+| `.`     | The project in the current directory, or the first ancestor found.          | `axes . info` (resolves to `innovatech-website/blog`)        |
+| `_`     | The project whose root directory is *exactly* the current directory.        | `axes _ info` (resolves to `innovatech-website/blog`)        |
+| `..`    | The parent of the current context project or the first ancestor found.      | `axes .. info` (resolves to `innovatech-website`)          |
+| `alias!`| A custom shortcut you create.                                               | `axes blog! info` (if `blog!` points to our project)        |
 
-A lo largo de este tutorial, usaremos estos contextos para que veas lo fluidos y potentes que son.
+Throughout this tutorial, we will use these contexts so you can see how fluid and powerful they are.
 
-### Creando el Proyecto Contenedor
+### Creating the Container Project
 
-Primero, crea un directorio para todo el monorepo y, dentro de él, inicializa tu proyecto `axes` raíz.
+First, create a directory for the entire monorepo and, within it, initialize your root `axes` project.
 
 ```sh
 mkdir innovatech-website && cd innovatech-website
 axes init
 ```
 
-Acepta los valores por defecto en el asistente interactivo (nombre: `innovatech-website`, padre: `global`, etc.). Ahora, personaliza el `axes.toml` generado para que sea la base de nuestro monorepo:
+Accept the default values in the interactive wizard (name: `innovatech-website`, parent: `global`, etc.). Now, customize the generated `axes.toml` to be the base of our monorepo:
 
 ```toml
 # ./innovatech-website/.axes/axes.toml
 version = "1.0.0"
-description = "El monorepo para el sitio web de Innovatech."
+description = "The monorepo for the Innovatech website."
 
 [vars]
 company_name = "Innovatech Inc."
 
 [scripts]
-check_copyright = "echo \"© $(date +%Y) <axes::vars::company_name>. Todos los derechos reservados.\""
+check_copyright = "echo \"© $(date +%Y) <axes::vars::company_name>. All rights reserved.\""
 ```
 
-Hemos definido una variable y un script que actuarán como configuración compartida para todo nuestro monorepo.
+We have defined a variable and a script that will act as shared configuration for our entire monorepo.
 
 ---
 
-## 3. El Primer Sub-Proyecto: El Blog
+## 3. The First Sub-Project: The Blog
 
-Ahora, vamos a crear el blog como un **hijo** de `innovatech-website`.
+Now, let's create the blog as a **child** of `innovatech-website`.
 
 ```sh
-# Dentro de innovatech-website/, crea y entra al directorio del blog
+# Inside innovatech-website/, create and enter the blog directory
 mkdir blog && cd blog
 
-# Inicializa `axes`, usando `..` para referirse al padre (`innovatech-website`)
+# Initialize `axes`, using `..` to refer to the parent (`innovatech-website`)
 axes init --parent ..
 ```
 
-En el asistente, `axes` interpretará `..` como el proyecto en el directorio padre o superior y te lo sugerirá. ¡Ya estás usando la navegación por contexto!
+In the wizard, `axes` will interpret `..` as the project in the parent or upper directory and suggest it to you. You are already using context navigation!
 
-Para visualizar la nueva estructura, sube un nivel y usa `.`:
+To visualize the new structure, go up one level and use `.`:
 
 ```sh
-# Desde el directorio innovatech-website/
+# From the innovatech-website/ directory
 cd ..
 axes innovatech-website tree
 
-# O, más inteligentemente, desde dentro de `blog/`:
-# "Muéstrame el árbol de mi padre"
+# Or, more intelligently, from inside `blog/`:
+# "Show me my parent's tree"
 axes .. tree
 ```
 
-Ambos mostrarán:
+Both will show:
 
 ```text
 innovatech-website
 └─ blog
 ```
 
-### Demostrando la Herencia
+### Demonstrating Inheritance
 
-Ahora, abre el `axes.toml` dentro de `blog/` y define un script que use la configuración heredada:
+Now, open the `axes.toml` inside `blog/` and define a script that uses the inherited configuration:
 
 ```toml
 # ./innovatech-website/blog/.axes/axes.toml
 version = "0.1.0"
-description = "El blog de Innovatech."
+description = "The Innovatech blog."
 
 [scripts]
 build = "hugo --minify"
-# Este script COMPONE el script 'check_copyright' heredado del padre.
+# This script COMPOSES the 'check_copyright' script inherited from the parent.
 generate_footer = [
-    "echo '--- Generando Footer del Blog ---'",
+    "echo '--- Generating Blog Footer ---'",
     "<axes::scripts::check_copyright>",
-    "echo 'Construido con <axes::name>'"
+    "echo 'Built with <axes::name>'"
 ]
 ```
 
-Ejecútalo usando el contexto `.`, ya que estamos dentro del directorio `blog`:
+Execute it using the `.` context, since we are inside the `blog` directory:
 
 ```sh
-# Estando en el directorio blog/
+# While in the blog/ directory
 axes . generate_footer
 ```
 
-La salida será:
+The output will be:
 
 ```text
-> --- Generando Footer del Blog ---
-> © 2024 Innovatech Inc.. Todos los derechos reservados.
-> Construido con innovatech-website/blog
+> --- Generating Blog Footer ---
+> © 2024 Innovatech Inc.. All rights reserved.
+> Built with innovatech-website/blog
 ```
 
-Has compartido configuración y lógica de forma limpia y navegado por tu proyecto de forma intuitiva. A continuación, añadiremos más complejidad con nuestra tienda online.
+You have shared configuration and logic cleanly and navigated your project intuitively. Next, we will add more complexity with our online store.
 
-## 4. El Segundo Sub-Proyecto: La Tienda Online
+## 4. The Second Sub-Project: The Online Store
 
-Nuestra tienda online será el tercer proyecto en nuestro árbol. El proceso es idéntico al del blog.
+Our online store will be the third project in our tree. The process is identical to the blog's.
 
 ```sh
-# Desde el directorio raíz (innovatech-website/)
-mkdir tienda && cd tienda
+# From the root directory (innovatech-website/)
+mkdir store && cd store
 
-# Inicializa, especificando de nuevo el padre con `..`
+# Initialize, again specifying the parent with `..`
 axes init --parent ..
 ```
 
-Tras el asistente, tu árbol de proyectos (`axes .. tree`) se verá así:
+After the wizard, your project tree (`axes .. tree`) will look like this:
 
 ```text
 innovatech-website
 ├─ blog
-└─ tienda
+└─ store
 ```
 
-Ahora, vamos a darle a la tienda un script más avanzado. A menudo, queremos ejecutar pruebas solo para una parte específica de nuestra aplicación. `axes` lo hace fácil definiendo scripts que actúan como "funciones" que aceptan parámetros.
+Now, let's give the store a more advanced script. Often, we want to run tests only for a specific part of our application. `axes` makes this easy by defining scripts that act as "functions" that accept parameters.
 
-Edita el nuevo `axes.toml` en `tienda/`:
+Edit the new `axes.toml` in `store/`:
 
 ```toml
-# ./innovatech-website/tienda/.axes/axes.toml
+# ./innovatech-website/store/.axes/axes.toml
 version = "1.0.0"
-description = "La tienda online de Innovatech."
+description = "The Innovatech online store."
 
 [vars]
-# Podemos sobreescribir o definir nuevas variables.
+# We can overwrite or define new variables.
 payment_gateway_api_key = "pk_test_12345"
 
 [scripts]
-# Este script de prueba acepta un parámetro posicional.
-# `<axes::params::0>` será reemplazado por el primer argumento
-# que le pasemos al script desde la línea de comandos.
+# This test script accepts a positional parameter.
+# `<axes::params::0>` will be replaced by the first argument
+# we pass to the script from the command line.
 test_module = "pytest tests/test_<axes::params::0>.py"
 ```
 
-Ahora, desde la raíz del monorepo, puedes ejecutar los tests para un módulo específico de la tienda:
+Now, from the root of the monorepo, you can run tests for a specific store module:
 
 ```sh
-# Desde el directorio innovatech-website/
-axes tienda test_module payments  # --> se ejecutará `pytest tests/test_payments.py`
-axes tienda test_module products  # --> se ejecutará `pytest tests/test_products.py`
+# From the innovatech-website/ directory
+axes store test_module payments  # --> will execute `pytest tests/test_payments.py`
+axes store test_module products  # --> will execute `pytest tests/test_products.py`
 ```
 
-Has creado un atajo reutilizable y parametrizable, eliminando la necesidad de recordar o escribir rutas de prueba largas y complejas.
+You have created a reusable and parameterizable shortcut, eliminating the need to remember or type long, complex test paths.
 
-> **Profundiza:** El sistema de parámetros de `axes` es extremadamente potente, permitiendo flags, valores por defecto y más. Para dominarlo, consulta nuestra guía completa: **[Dominando el `axes.toml` (`AXES_TOML_GUIDE.md`)](./AXES_TOML_GUIDE.md)**.
+> **Go Deeper:** The `axes` parameter system is extremely powerful, allowing flags, default values, and more. To master it, consult our complete guide: **[Mastering `axes.toml` (`AXES_TOML_GUIDE.md`)](./AXES_TOML_GUIDE.md)**.
 
 ---
 
-## 5. La Orquestación Maestra
+## 5. Master Orchestration
 
-Hemos creado proyectos individuales, cada uno con sus propios scripts. Ahora, vamos a unirlos. El verdadero poder de `axes` reside en su capacidad para actuar como el director de orquesta de todo tu ecosistema.
+We have created individual projects, each with its own scripts. Now, let's bring them together. The true power of `axes` lies in its ability to act as the conductor for your entire ecosystem.
 
-Volvamos al `axes.toml` del proyecto padre, `innovatech-website`, para crear flujos de trabajo que controlen a los hijos.
+Let's go back to the `axes.toml` of the parent project, `innovatech-website`, to create workflows that control the children.
 
 ```toml
 # ./innovatech-website/.axes/axes.toml
 
 version = "1.0.0"
-description = "El monorepo para el sitio web de Innovatech."
+description = "The monorepo for the Innovatech website."
 
 [vars]
 company_name = "Innovatech Inc."
 
 [scripts]
-check_copyright = "echo \"© $(date +%Y) <axes::vars::company_name>. Todos los derechos reservados.\""
+check_copyright = "echo \"© $(date +%Y) <axes::vars::company_name>. All rights reserved.\""
 
-# ¡NUEVO! Un script que llama a los scripts de sus hijos.
-# El prefijo `>` indica que el comando debe ejecutarse en PARALELO.
+# NEW! A script that calls the scripts of its children.
+# The `>` prefix indicates that the command must be executed in PARALLEL.
 build_all = [
-    "echo '🚀 Construyendo todo el sitio web...'",
+    "echo '🚀 Building the entire website...'",
     "> axes blog build",
-    "> axes tienda build" # Asumimos que `tienda` también tiene un script `build`.
+    "> axes store build" # Assuming `store` also has a `build` script.
 ]
 
-# Un script de calidad que se ejecuta en secuencia.
+# A quality script that runs in sequence.
 quality_check = [
     "echo ' linting...'",
-    "axes blog lint",  # Asumimos scripts `lint` en los hijos.
-    "axes tienda lint",
-    "echo '✅ Calidad del código verificada!'"
+    "axes blog lint",  # Assuming `lint` scripts in the children.
+    "axes store lint",
+    "echo '✅ Code quality verified!'"
 ]
 ```
 
-Con esta configuración, has creado puntos de entrada únicos para operaciones complejas en todo el monorepo:
+With this configuration, you have created single entry points for complex operations across the entire monorepo:
 
 ```sh
-# Desde cualquier lugar de tu sistema.
-# Construye el blog y la tienda simultáneamente.
+# From anywhere in your system.
+# Builds the blog and the store simultaneously.
 axes innovatech-website build_all
 
-# Ejecuta los linters uno tras otro.
+# Runs the linters one after the other.
 axes innovatech-website quality_check
 ```
 
-Y si solo quieres ejecutar individualmente solo debes llamar a su función:
+And if you only want to execute individually, you just need to call its function:
 
 ```sh
-# Ejecutas el script unicamente del proyecto blog.
+# Execute the script only for the blog project.
 axes innovatech-website/blog build
 
-axes */tienda build # si ya ejecutaste en anterior comando, '*' indica que del proyecto padre devuelve el proyecto usado más reciente.
+axes */store build # if you already executed the previous command, '*' indicates that the most recently used project from the parent is returned.
+```
 
-Has pasado de gestionar comandos individuales a orquestar flujos de trabajo completos. La complejidad de cada sub-proyecto está encapsulada, y el proyecto padre proporciona una API simple y potente para interactuar con el todo.
+You have moved from managing individual commands to orchestrating entire workflows. The complexity of each sub-project is encapsulated, and the parent project provides a simple and powerful API to interact with the whole.
 
-## 6. Flujo de Trabajo Inmersivo: El Modo Sesión (`start`)
+## 6. Immersive Workflow: Session Mode (`start`)
 
-Componer y orquestar scripts es increíblemente poderoso. Pero a veces, solo quieres concentrarte en una única parte de tu sistema, como el blog. Escribir `axes innovatech-website/blog` para cada comando puede ser repetitivo.
+Composing and orchestrating scripts is incredibly powerful. But sometimes, you just want to focus on a single part of your system, like the blog. Typing `axes innovatech-website/blog` for every command can be repetitive.
 
-Para esto, `axes` ofrece **sesiones de proyecto**.
+For this, `axes` offers **project sessions**.
 
-Imagina que vas a pasar la próxima hora trabajando solo en el blog. Desde cualquier lugar, simplemente "entra" en su contexto:
+Imagine you are going to spend the next hour working only on the blog. From anywhere, simply "enter" its context:
 
 ```sh
-# `start` es la acción por defecto si solo proporcionas un contexto.
-# Este comando es un atajo para `axes innovatech-website/blog start`
+# `start` is the default action if you only provide a context.
+# This command is a shortcut for `axes innovatech-website/blog start`
 $ axes innovatech-website/blog
 
 --- `axes` session for 'innovatech-website/blog' started. Type 'exit' to leave. ---
-# Tu prompt de la terminal podría cambiar para reflejar la sesión activa.
+# Your terminal prompt might change to reflect the active session.
 ```
 
-Ahora estás "dentro" del proyecto `blog`. `axes` ha hecho varias cosas por ti en segundo plano:
+You are now "inside" the `blog` project. `axes` has done several things for you in the background:
 
-1. **Activación de Hooks:** Ha ejecutado el script definido en `[options].at_start` de tu `axes.toml`. Esto es perfecto para activar entornos virtuales (`source .venv/bin/activate`), exportar variables de entorno (`export FLASK_ENV=development`), o iniciar servicios necesarios.
-2. **Contexto Implícito:** Ya no necesitas especificar el contexto. `axes` sabe dónde estás.
+1. **Hook Activation:** It has executed the script defined in `[options].at_start` of your `axes.toml`. This is perfect for activating virtual environments (`source .venv/bin/activate`), exporting environment variables (`export FLASK_ENV=development`), or starting necessary services.
+2. **Implicit Context:** You no longer need to specify the context. `axes` knows where you are.
 
-Dentro de la sesión, tu flujo de trabajo se vuelve increíblemente simple:
+Inside the session, your workflow becomes incredibly simple:
 
 ```sh
-# No más `axes innovatech-website/blog ...`
+# No more `axes innovatech-website/blog ...`
 (axes: innovatech-website/blog) $ axes build
-(axes: innovate-website/blog) $ axes generate_footer
+(axes: innovatech-website/blog) $ axes generate_footer
 
-# ... después de un productivo rato de trabajo ...
+# ... after a productive working session ...
 (axes: innovatech-website/blog) $ exit
 ```
 
-Al salir, `axes` ejecuta automáticamente el hook `at_exit`, ideal para detener servicios (`docker-compose down`) y asegurar que no queden procesos huérfanos.
+Upon exiting, `axes` automatically executes the `at_exit` hook, ideal for stopping services (`docker-compose down`) and ensuring no orphaned processes remain.
 
-Las sesiones de `axes` eliminan la última barrera de fricción, permitiéndote concentrarte al 100% en tu código.
+`axes` sessions eliminate the last barrier of friction, allowing you to focus 100% on your code.
 
 ---
 
-## ¡Has Completado el Tour! ¿Qué Sigue?
+## You Have Completed the Tour! What's Next?
 
-¡Felicidades! Has instalado `axes`, construido un monorepo desde cero, compartido configuración mediante herencia, compuesto flujos de trabajo complejos y experimentado la fluidez de las sesiones de proyecto.
+Congratulations! You have installed `axes`, built a monorepo from scratch, shared configuration through inheritance, composed complex workflows, and experienced the fluidity of project sessions.
 
-Ahora tienes una base sólida para empezar a usar `axes` en tus propios proyectos.
+You now have a solid foundation to start using `axes` in your own projects.
 
-El viaje no termina aquí. `axes` es una herramienta profunda con muchas más características diseñadas para hacer tu vida más fácil. Para convertirte en un usuario experto, te recomendamos explorar el resto de nuestra documentación:
+The journey doesn't end here. `axes` is a deep tool with many more features designed to make your life easier. To become an expert user, we recommend exploring the rest of our documentation:
 
-* **[Referencia Completa de Comandos (`COMMANDS.md`)](./COMMANDS.md):** ¿Quieres saber todo lo que `init`, `tree`, `link` o `delete` pueden hacer? Esta es tu guía de referencia.
-* **[Dominando el `axes.toml` (`AXES_TOML_GUIDE.md`)](./AXES_TOML_GUIDE.md):** La guía definitiva sobre la sintaxis del `axes.toml`. Aprende sobre comandos multiplataforma, la sintaxis completa de `<axes::params::...>`, y más.
-* **[Guía Técnica y de Contribución (`TECNICAL.md`)](./TECNICAL.md):** Si sientes curiosidad por cómo funciona `axes` por dentro o quieres contribuir al proyecto, este es tu punto de partida.
+* **[Complete Command Reference (`COMMANDS.md`)](./COMMANDS.md):** Want to know everything `init`, `tree`, `link`, or `delete` can do? This is your reference guide.
+* **[Mastering `axes.toml` (`AXES_TOML_GUIDE.md`)](./AXES_TOML_GUIDE.md):** The definitive guide to the `axes.toml` syntax. Learn about cross-platform commands, the complete `<axes::params::...>` syntax, and more.
+* **[Technical and Contribution Guide (`TECNICAL.md`)](./TECNICAL.md):** If you are curious about how `axes` works internally or want to contribute to the project, this is your starting point.
 
-## Únete a la Comunidad
+## Join the Community
 
-`axes` está en **fase Beta** y prospera gracias al feedback de usuarios como tú.
+`axes` is in **Beta phase** and thrives on feedback from users like you.
 
-* **Encuentra un Bug o tienes una Idea:** [**Abre un Issue**](https://github.com/RetypeOS/axes/issues)
-* **Quieres Contribuir con Código:** ¡Los Pull Requests son bienvenidos!
+* **Found a Bug or Have an Idea:** [**Open an Issue**](https://github.com/RetypeOS/axes/issues)
+* **Want to Contribute Code:** Pull Requests are welcome!
 
-Gracias por tomarte el tiempo de aprender `axes`. ¡Estamos ansiosos por ver los increíbles flujos de trabajo que construirás!
+Thank you for taking the time to learn `axes`. We look forward to seeing the incredible workflows you will build!

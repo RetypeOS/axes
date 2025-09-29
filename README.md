@@ -1,10 +1,11 @@
 <p align="center">
   <img src="logo.png" alt="axes Logo" width="200">
 </p>
-<h1 align="center">axes: El Director de Orquesta para Tu Caos de Desarrollo</h1>
+
+<h1 align="center">axes: The Conductor for Your Development Chaos</h1>
 
 <p align="center">
-  <strong>Cualquier Proyecto. Cualquier Lenguaje. Un Solo Lenguaje de Comandos.</strong>
+  <strong>Any Project. Any Language. One Command Language.</strong>
 </p>
 
 <p align="center">
@@ -14,83 +15,90 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="License"></a>
 </p>
 
+<p align="center">
+  <strong>Read this in other languages:</strong><br>
+  <a href="./README.md">English</a> |
+  <a href="./docs/es/README.md">Español</a>
+</p>
+
 ---
 
-## ¿Tu flujo de trabajo se ve así?
+## Does Your Workflow Look Like This?
 
 - **Terminal 1:** `cd frontend && npm run dev`
 - **Terminal 2:** `cd backend && source .venv/bin/activate && uvicorn app:main --reload`
-- **Tú, 3 semanas después:** *«Espera... ¿el comando para los tests era `npm test`, `pytest`, `cargo test` o `go test ./...`?»*
+- **You, 3 weeks later:** *“Wait... was the command for tests `npm test`, `pytest`, `cargo test`, or `go test ./...`?”*
 
-Esa micro-pausa, esa carga cognitiva al cambiar de proyecto, es una fricción que se acumula. Te roba el `flow`. Te roba la productividad. **Otras herramientas te dan atajos. `axes` te da un lenguaje.**
+That micro-pause, that cognitive load when switching projects, is friction that accumulates. It steals your `flow`. It steals your productivity. **Other tools give you shortcuts. `axes` gives you a language.**
 
-`axes` no es otro gestor de paquetes ni una alternativa a `Docker` o `make`. Es el **lenguaje de comandos** que los une a todos. `axes` te permite componer, parametrizar y estandarizar flujos de trabajo que involucran CUALQUIER herramienta de tu stack tecnológico. Tu `package.json` sabe cómo ejecutar `npm`, tu `Makefile` sabe cómo ejecutar `make`, y tu `docker-compose.yml` sabe cómo ejecutar `Docker`. Pero, ¿quién sabe cómo ejecutarlos a **todos juntos**? **`axes` es esa inteligencia faltante.**. Es el director de orquesta que les dice qué hacer, usando comandos simples, coherentes y poderosos que **TÚ** defines y que viajan con tu repositorio, permitiendo que nuevos usuarios puedan unirse de forma absolutamente sencilla y estándar.
+`axes` is not another package manager, nor an alternative to `Docker` or `make`. It is the **command language** that unites them all. `axes` allows you to compose, parameterize, and standardize workflows involving ANY tool in your technology stack. Your `package.json` knows how to run `npm`, your `Makefile` knows how to run `make`, and your `docker-compose.yml` knows how to run `Docker`. But who knows how to run them **all together**? **`axes` is that missing intelligence.** It is the conductor who tells them what to do, using simple, consistent, and powerful commands that **YOU** define, and which travel with your repository, allowing new users to onboard in an absolutely simple and standard way.
 
-### ¿Por qué `axes`? ¿Por qué ahora?
+### Why `axes`? Why Now?
 
-El mundo del desarrollo es un caos de herramientas. Cada proyecto tiene su propio dialecto de comandos. `axes` introduce un `esperanto` para tu terminal.
+The development world is a chaos of tools. Each project has its own command dialect. `axes` introduces an `esperanto` for your terminal.
 
-Imagina un `monorepo` con un frontend, un backend y un servicio de documentación:
+Imagine a `monorepo` with a frontend, a backend, and a documentation service:
 
-**EL CAOS (ANTES):**
+**THE CHAOS (BEFORE):**
 
 ```sh
-# Para levantar todo...
+# To spin up everything...
 (terminal 1) $ cd frontend && npm run dev
 (terminal 2) $ cd backend && source .venv/bin/activate && flask run
 (terminal 3) $ cd docs && hugo server
 ```
 
-**LA ORQUESTA (CON `axes`):**
+**THE ORCHESTRA (WITH `axes`):**
 
 ```toml
-# en ./.axes/axes.toml
+# in ./.axes/axes.toml
 [scripts]
-# El '>' indica ejecución en paralelo.
+# The '>' indicates parallel execution.
 dev = [
-    "> axes frontend dev", # Llama al script `dev` del hijo `frontend`
-    "> axes backend dev",  # Llama al script `dev` del hijo `backend`
-    "> axes docs dev"      # Llama al script `dev` del hijo `docs`
+    "> axes frontend dev", # Calls the `dev` script of the `frontend` child
+    "> axes backend dev",  # Calls the `dev` script of the `backend` child
+    "> axes docs dev"      # Calls the `dev` script of the `docs` child
 ]
 ```
 
-A partir de ahora, cualquier miembro del equipo, en cualquier máquina, levanta todo el entorno con **un solo comando universal**:
+From now on, any team member, on any machine, spins up the entire environment with **a single universal command**:
 
 ```sh
 axes . dev
 ```
 
-Has convertido el conocimiento tribal en infraestructura versionada. El onboarding de nuevos desarrolladores acaba de pasar de horas a segundos.
+You have converted tribal knowledge into versioned infrastructure. Onboarding new developers has just gone from hours to seconds.
 
 ---
 
-### La Filosofía `axes`
+### The `axes` Philosophy
 
-- **Abstracción, no Reemplazo:** `axes` no es un nuevo gestor de paquetes. Usa las herramientas que ya amas.
-- **Convención sobre Configuración (Tu Convención):** Define tus propios comandos estándar (`dev`, `test`, `lint`, `deploy`) y úsalos en todos tus proyectos, sin importar la tecnología subyacente.
-- **Jerarquía y Herencia (DRY al Máximo):** Organiza proyectos en árboles (`mi-app/api`, `mi-app/frontend`). Los hijos heredan y pueden sobrescribir variables y scripts de sus padres. Define una vez, usa en todas partes.
-- **Infraestructura como Código:** Tu `axes.toml` vive en Git. Tus flujos de trabajo evolucionan con tu código.
-
----
-
-### Instalación (30 segundos para empezar)
-
-`axes` es un único binario sin dependencias.
-
-1. Ve a la página de [**Releases de `axes` en GitHub**](https://github.com/RetypeOS/axes/releases).
-2. Descarga el archivo para tu sistema operativo.
-3. Descomprímelo y mueve el ejecutable `axes` a un directorio en tu `PATH`.
-4. Abre una **nueva terminal** y verifica con `axes --version`.
+- **Abstraction, not Replacement:** `axes` is not a new package manager. Use the tools you already love.
+- **Convention over Configuration (Your Convention):** Define your own standard commands (`dev`, `test`, `lint`, `deploy`) and use them across all your projects, regardless of the underlying technology.
+- **Hierarchy and Inheritance (Maximum DRY):** Organize projects into trees (`my-app/api`, `my-app/frontend`). Children inherit and can override variables and scripts from their parents. Define once, use everywhere.
+- **OS Agnostic (True Portability):** Define workflows that work seamlessly across Windows, macOS, and Linux. `axes` takes care of executing the correct command for each platform.
+- **Infrastructure as Code:** Your `axes.toml` lives in Git. Your workflows evolve with your code.
 
 ---
 
-### `axes` en Acción: Un Vistazo al Poder
+### Installation (30 Seconds to Get Started)
 
-No te quedes atrás. Mientras tú buscas en el `README` de un proyecto antiguo, otros ya están orquestando.
+`axes` is a single dependency-free binary.
 
-#### 1. Scripts como Funciones de CLI
+1. Go to the [**`axes` Releases page on GitHub**](https://github.com/RetypeOS/axes/releases).
+2. Download the file for your operating system.
+3. Unzip it and move the `axes` executable to a directory in your `PATH`.
+4. Open a **new terminal** and verify with `axes --version`.
 
-Define parámetros, valores por defecto y validación directamente en tu `.toml`.
+---
+
+### `axes` in Action: A Glimpse of Power
+
+Don't fall behind. While you're searching the `README` of an old project, others are already orchestrating.
+
+#### 1. Scripts as CLI Functions
+
+Define parameters, default values, and validation directly in your `.toml`.
 
 ```toml
 [scripts]
@@ -102,9 +110,28 @@ axes . deploy                # -> terraform apply -var 'env=staging'
 axes . deploy production     # -> terraform apply -var 'env=production'
 ```
 
-#### 2. Composición y Reutilización
+#### 2. Effortless Cross-Platform Orchestration
 
-Construye flujos de trabajo complejos a partir de piezas simples.
+Define a command once, and it will work across your entire team.
+
+```toml
+[scripts.browse]
+desc = "Opens the local documentation in the browser."
+windows = "start http://localhost:8080"
+macos = "open http://localhost:8080"
+linux = "xdg-open http://localhost:8080"
+```
+
+```sh
+# One command to rule them all.
+$ axes . browse
+```
+
+No more `if (os == "win32")` in your scripts. `axes` gives you an operating system abstraction layer.
+
+#### 3. Composition and Reuse
+
+Build complex workflows from simple pieces.
 
 ```toml
 [scripts]
@@ -114,50 +141,50 @@ quality = ["<axes::scripts::test>", "<axes::scripts::build>"]
 ```
 
 ```sh
-axes . quality  # Ejecuta los tests y LUEGO el build.
+axes . quality  # Executes the tests and THEN the build.
 ```
 
-#### 3. Sesiones de Enfoque Inmersivo
+#### 4. Immersive Focus Sessions
 
-Sumérgete en un sub-proyecto. `axes` configura tu entorno por ti.
+Dive into a sub-project. `axes` sets up your environment for you.
 
 ```toml
-# en mi-app/api/.axes/axes.toml
+# in my-app/api/.axes/axes.toml
 [options]
-at_start = "source .venv/bin/activate" # Se ejecuta al entrar
-at_exit = "docker-compose down"       # Se ejecuta al salir
+at_start = "source .venv/bin/activate" # Executes upon entry
+at_exit = "docker-compose down"       # Executes upon exit
 ```
 
 ```sh
-$ axes mi-app/api # Inicia la sesión. `at_start` se ejecuta automáticamente.
+$ axes my-app/api # Starts the session. `at_start` executes automatically.
 
-(axes: mi-app/api) $ axes test  # No necesitas repetir el contexto.
-(axes: mi-app/api) $ exit       # `at_exit` se ejecuta automáticamente.
+(axes: my-app/api) $ axes test  # You don't need to repeat the context.
+(axes: my-app/api) $ exit       # `at_exit` executes automatically.
 ```
 
-**Tu entorno de desarrollo, bajo demanda.**
+**Your development environment, on demand.**
 
-#### 4. Rendimiento Obsesivo
+#### 4. Performance Oriented
 
-`axes` está escrito en Rust y es absurdamente rápido. Con un **caché perezoso y persistente**, la primera ejecución de un script complejo puede tardar 60ms. Las siguientes, **menos de 50ms**. Es más rápido que tu `alias` de shell, pero infinitamente más potente.
+`axes` is written in Rust and aims to offer all these powerful features with the minimum possible resource expenditure. With a **lazy and persistent cache**, the first execution of a complex script might take longer, but subsequent executions will be infinitely faster and imperceptible, making CI/CD infinitely more powerful.
 
 ---
 
-### ¿Listo para dirigir tu propia orquesta?
+### Ready to Conduct Your Own Orchestra?
 
-La fricción que sientes cada día no es un requisito del desarrollo de software. Es un problema que tiene solución. `axes` es esa solución.
+The friction you feel every day is not a requirement of software development. It is a problem with a solution. `axes` is that solution.
 
-- ➡️ **[Guía de Inicio Rápido (`GETTING_STARTED.md`)](./GETTING_STARTED.md):** Tu tutorial paso a paso para construir tu primer monorepo orquestado en 15 minutos.
-- 📖 **[Dominando el `axes.toml` (`AXES_TOML_GUIDE.md`)](./AXES_TOML_GUIDE.md):** La referencia definitiva de cada característica.
-- ⌨️ **[Referencia de Comandos (`COMMAND.md`)](./COMMAND.md):** Una guía completa de cada comando de la CLI.
+- ➡️ **[Quick Start Guide (`GETTING_STARTED.md`)](./GETTING_STARTED.md):** Your step-by-step tutorial to build your first orchestrated monorepo in 15 minutes.
+- 📖 **[Mastering `axes.toml` (`AXES_TOML_GUIDE.md`)](./AXES_TOML_GUIDE.md):** The definitive reference for every feature.
+- ⌨️ **[Command Reference (`COMMAND.md`)](./COMMAND.md):** A complete guide to every CLI command.
 
-### Únete a la Revolución del Flujo de Trabajo
+### Join the Workflow Revolution
 
-`axes` es más que una herramienta; es un movimiento para devolver el control y la coherencia a los desarrolladores. Pero no podemos hacerlo solos.
+`axes` is more than a tool; it's a movement to restore control and consistency to developers. But we can't do it alone.
 
-Ya seas un programador novato buscando orden en tus proyectos personales, un desarrollador senior optimizando el `CI/CD` de tu empresa, o un equipo independiente que necesita un lenguaje común, tu voz importa.
+Whether you are a novice programmer seeking order in your personal projects, a senior developer optimizing your company's `CI/CD`, or an independent team needing a common language, your voice matters.
 
-- **Encuentra un Bug o tienes una Idea Genial:** [**Abre un Issue**](https://github.com/RetypeOS/axes/issues)
-- **Quieres Contribuir con Código:** ¡Los Pull Requests son bienvenidos!
+- **Found a Bug or Have a Great Idea:** [**Open an Issue**](https://github.com/RetypeOS/axes/issues)
+- **Want to Contribute Code:** Pull Requests are welcome!
 
-**Instala `axes` hoy. Deja de buscar comandos. Empieza a dirigir.**
+**Install `axes` today. Stop searching for commands. Forget the small problems. Focus on what truly matters: **bringing your software to life**, and let `axes` worry about the how.**

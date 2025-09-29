@@ -1,99 +1,105 @@
-# Hoja de Ruta del Proyecto `axes`
+<p align="center">
+  <strong>Read this in other languages:</strong><br>
+  <a href="./ROADMAP.md">English</a> |
+  <a href="./docs/es/ROADMAP.md">Español</a>
+</p>
 
-¡Bienvenido a la hoja de ruta de `axes`! Este documento describe la visión a corto y largo plazo para el proyecto. Es una guía para los desarrolladores principales y un punto de partida para los miembros de la comunidad que deseen contribuir.
+# Project `axes` Roadmap
 
-## Cómo Contribuir
+Welcome to the `axes` roadmap! This document outlines the short-term and long-term vision for the project. It serves as a guide for core developers and a starting point for community members who wish to contribute.
 
-¡Tu ayuda es bienvenida! Si ves una tarea que te interese, especialmente las marcadas con `[contribución bienvenida]`, el proceso ideal es:
+## How to Contribute
 
-1. Asegúrate de que no haya un Pull Request abierto para esa tarea.
-2. Abre un "Issue" en GitHub para discutir tu enfoque y que podamos asignártelo. Esto evita trabajo duplicado.
-3. ¡Empieza a trabajar en tu Pull Request!
+Your help is welcome! If you see a task that interests you, especially those marked with `[contribution welcome]`, the ideal process is:
 
-## Estado Actual: `v0.2.0-beta`
+1. Ensure there is no open Pull Request for that task.
+2. Open an Issue on GitHub to discuss your approach so we can assign it to you. This prevents duplicate work.
+3. Start working on your Pull Request!
 
-`axes` se encuentra en su primera fase **Beta**. Esto significa:
+## Current Status: `v0.2.0-beta`
 
-* **Núcleo Estable:** La arquitectura principal (dispatcher, handlers, interpolador, sistema de caché) es robusta y está bien probada.
-* **API de `axes.toml` Definida:** La sintaxis del `axes.toml`, incluyendo `[scripts]`, herencia y el sistema `<axes::params::...>`, está completa en características para la v1.0.
-* **Listo para Probar:** La herramienta está lista para ser usada en proyectos reales. Se esperan bugs, y el feedback de los usuarios es crucial en esta fase.
+`axes` is in its first **Beta** phase. This means:
+
+* **Stable Core:** The main architecture (dispatcher, handlers, interpolator, cache system) is robust and well-tested.
+* **`axes.toml` API Defined:** The `axes.toml` syntax, including `[scripts]`, inheritance, and the `<axes::params::...>` system, is feature-complete for v1.0.
+* **Ready for Testing:** The tool is ready to be used in real projects. Bugs are expected, and user feedback is crucial during this phase.
 
 ---
 
-## Hoja de Ruta Inmediata (El Camino a la v1.0)
+## Immediate Roadmap (The Path to v1.0)
 
-Estos son los hitos que nos llevarán a una versión 1.0 estable y pulida.
+These are the milestones that will lead us to a stable and polished 1.0 release.
 
-### Hito 1: La Experiencia de Usuario "Premium" (v0.3.0)
+### Milestone 1: The "Premium" User Experience (v0.3.0)
 
-**Objetivo:** Hacer que la interacción diaria con `axes` sea lo más fluida, rápida e intuitiva posible.
+**Goal:** Make daily interaction with `axes` as smooth, fast, and intuitive as possible.
 
-* `[ ]` **Implementar Autocompletado de la Shell:** `[contribución bienvenida]`
-  * **Descripción:** Integrar `clap_complete` para generar scripts de autocompletado para `bash`, `zsh`, `fish`, etc. Debe autocompletar dinámicamente contextos de proyecto, acciones y nombres de scripts.
-  * **Valor:** La mejora de calidad de vida más importante para la usabilidad diaria.
-* `[ ]` **Implementar la TUI de Bienvenida:**
-  * **Descripción:** Al ejecutar `axes` sin argumentos, lanzar una TUI (Interfaz de Usuario de Terminal) de solo lectura que muestre el árbol de proyectos y permita explorar los scripts disponibles.
-  * **Valor:** Transforma la primera impresión y facilita enormemente la "descubribilidad" en ecosistemas complejos.
-* `[ ]` **Estandarizar y Embellecer la Salida:** `[contribución bienvenida]`
-  * **Descripción:** Crear un módulo `ui/printer` y usar una crate como `cli-table` para estandarizar la salida de `info`, `alias list`, etc., en tablas bien formateadas.
-  * **Valor:** Proporciona una identidad visual cohesiva y profesional a la herramienta.
+* `[ ]` **Implement Shell Autocompletion:** `[contribution welcome]`
+  * **Description:** Integrate `clap_complete` to generate autocompletion scripts for `bash`, `zsh`, `fish`, etc. It must dynamically autocomplete project contexts, actions, and script names.
+  * **Value:** The most significant quality-of-life improvement for daily usability.
+* `[ ]` **Implement the Welcome TUI:**
+  * **Description:** When running `axes` without arguments, launch a read-only TUI (Terminal User Interface) that displays the project tree and allows exploring available scripts.
+  * **Value:** Transforms the first impression and greatly facilitates "discoverability" in complex ecosystems.
+* `[ ]` **Standardize and Beautify Output:** `[contribution welcome]`
+  * **Description:** Create a `ui/printer` module and use a crate like `cli-table` to standardize the output of `info`, `alias list`, etc., into well-formatted tables.
+  * **Value:** Provides a cohesive and professional visual identity to the tool.
 
-### Hito 2: Control de Herencia y Lógica de Scripts Avanzada (v0.4.0)
+### Milestone 2: Inheritance Control and Advanced Scripting Logic (v0.4.0)
 
-**Objetivo:** Dar a los usuarios un control granular sobre la configuración heredada y desbloquear patrones de scripting avanzados.
+**Goal:** Give users granular control over inherited configuration and unlock advanced scripting patterns.
 
-* `[ ]` **Implementar Herencia Privada/Pública con `_`:**
-  * **Descripción:** Modificar el `config_resolver` para que las claves en `[vars]`, `[env]`, y `[scripts]` que comiencen con un guion bajo (`_`) no sean heredadas por los proyectos hijos.
-  * **Valor:** Permite la encapsulación y la definición de "helpers" internos en un proyecto padre sin contaminar el espacio de nombres de los hijos.
-* `[ ]` **Implementar Comandos Multiplataforma en Secuencias:**
-  * **Descripción:** Extender el parser del `axes.toml` para que dentro de una secuencia de `[scripts]`, se pueda definir un paso individual como una tabla multiplataforma.
+* `[ ]` **Implement Private/Public Inheritance with `_`:**
+  * **Description:** Modify the `config_resolver` so that keys in `[vars]`, `[env]`, and `[scripts]` that start with an underscore (`_`) are not inherited by child projects.
+  * **Value:** Allows encapsulation and the definition of internal "helpers" in a parent project without polluting the children's namespace.
+* `[ ]` **Implement Multi-platform Commands in Sequences:**
+  * **Description:** Extend the `axes.toml` parser so that within a sequence in `[scripts]`, an individual step can be defined as a multi-platform table.
 
         ```toml
-        # Sintaxis a soportar
+        # Syntax to support
         deploy = [
             "<axes::scripts::build>",
             { windows = "win-deploy.ps1", linux = "./deploy.sh" },
-            "echo 'Desplegado!'"
+            "echo 'Deployed!'"
         ]
         ```
 
-  * **Valor:** Desbloquea la capacidad de crear flujos de trabajo complejos que son, paso a paso, completamente multiplataforma.
+  * **Value:** Unlocks the ability to create complex workflows that are, step-by-step, completely cross-platform.
 
-### Hito 3: Estabilización y Ecosistema (v1.0.0)
+### Milestone 3: Stabilization and Ecosystem (v1.0.0)
 
-**Objetivo:** Preparar `axes` para su lanzamiento oficial, enfocándose en la robustez y en facilitar su adopción.
+**Goal:** Prepare `axes` for its official launch, focusing on robustness and facilitating adoption.
 
-* `[ ]` **Implementar `axes validate`:**
-  * **Descripción:** Un comando que escanee todo el `index.bin` en busca de inconsistencias (rutas que ya no existen, enlaces de padre rotos) y ofrezca reportes o reparaciones interactivas.
-  * **Valor:** Una herramienta de diagnóstico crucial para la confianza del usuario a largo plazo.
-* `[ ]` **Soporte Nativo para Archivos `.env`:** `[contribución bienvenida]`
-  * **Descripción:** Añadir una clave `[env].load = ".env"` al `axes.toml` que cargue automáticamente las variables de un archivo `.env` en el entorno de ejecución de los scripts.
-  * **Valor:** Una integración muy solicitada que simplifica enormemente la gestión de secretos y configuraciones locales.
-* `[ ]` **Congelación de la API y Documentación Final:**
-  * **Descripción:** Realizar una revisión final de todas las APIs (CLI y `axes.toml`) y declararlas estables para la v1.0. Completar y pulir toda la documentación.
-  * **Valor:** La garantía de estabilidad que los usuarios necesitan para adoptar `axes` en producción.
-
----
-
-## Ideas a Largo Plazo (Post-v1.0 / El Futuro)
-
-Estas son características más ambiciosas que se considerarán una vez que el núcleo del sistema sea estable.
-
-* `[ ]` **Motor de Plantillas (`init` 2.0):** Transformar `init` en un motor de andamiaje completo que use plantillas de `~/.config/axes/templates/`.
-* `[ ]` **Cambio de Sesión (`axes switch <contexto>`):** La capacidad de cambiar de una sesión de proyecto a otra sin necesidad de `exit` y volver a entrar.
-* `[ ]` **Centralización de Cachés:** Mover todos los archivos de caché (`.axes/*.bin`) a un directorio centralizado (`~/.config/axes/cache/`) para mantener limpios los directorios de los proyectos.
-* `[ ]` **Integración con Git:** Añadir tokens dinámicos como `<axes::git::branch>` o `<axes::git::commit_hash>`.
+* `[ ]` **Implement `axes validate`:**
+  * **Description:** A command that scans the entire `index.bin` for inconsistencies (paths that no longer exist, broken parent links) and offers reports or interactive repairs.
+  * **Value:** A crucial diagnostic tool for long-term user confidence.
+* `[ ]` **Native Support for `.env` Files:** `[contribution welcome]`
+  * **Description:** Add an `[env].load = ".env"` key to `axes.toml` that automatically loads variables from a `.env` file into the execution environment of scripts.
+  * **Value:** A highly requested integration that greatly simplifies secret and local configuration management.
+* `[ ]` **API Freeze and Final Documentation:**
+  * **Description:** Perform a final review of all APIs (CLI and `axes.toml`) and declare them stable for v1.0. Complete and polish all documentation.
+  * **Value:** The guarantee of stability that users need to adopt `axes` in production.
 
 ---
 
-## ¡Ayúdanos a Probar! (Peticiones de Testing para la Beta)
+## Long-Term Ideas (Post-v1.0 / The Future)
 
-¡La mejor forma de contribuir ahora mismo es probando `axes` en tus flujos de trabajo! Estamos especialmente interesados en feedback sobre las siguientes áreas:
+These are more ambitious features that will be considered once the core system is stable.
 
-1. **El Sistema de Parámetros:** Intenta crear scripts complejos usando `<axes::params::...>` en todas sus variantes. ¿Es intuitivo? ¿Encuentras algún caso borde que no funcione?
-2. **La Composición de Scripts:** Crea scripts que se llamen unos a otros (`<axes::scripts::...>`) y que usen ejecución paralela (`>`). Intenta romper la detección de ciclos.
-3. **Operaciones de Refactorización:** Usa `link`, `rename`, `unregister` y `delete` (con sus flags) en un monorepo de prueba. ¿Es el comportamiento siempre el esperado? ¿Son los mensajes claros?
-4. **Cancelación con `Ctrl+C`:** Lanza un script de larga duración (ej. `[scripts] wait = "sleep 30"`) e intenta cancelarlo. ¿Responde la herramienta como esperas?
+* `[ ]` **Templating Engine (`init` 2.0):** Transform `init` into a complete scaffolding engine that uses templates from `~/.config/axes/templates/`.
+* `[ ]` **Session Switching (`axes switch <context>`):** The ability to switch from one project session to another without needing to `exit` and re-enter.
+* `[ ]` **Cache Centralization:** Move all cache files (`.axes/*.bin`) to a centralized directory (`~/.config/axes/cache/`) to keep project directories clean.
+* `[ ]` **Git Integration:** Add dynamic tokens like `<axes::git::branch>` or `<axes::git::commit_hash>`.
 
-**¿Cómo reportar feedback?**
-Por favor, abre un "Issue" en nuestro [repositorio de GitHub](https://github.com/RetypeOS/axes/issues). ¡Cualquier feedback es increíblemente valioso
+---
+
+## Help Us Test! (Testing Requests for the Beta)
+
+The best way to contribute right now is by testing `axes` in your workflows! We are especially interested in feedback on the following areas:
+
+1. **The Parameter System:** Try creating complex scripts using `<axes::params::...>` in all its variants. Is it intuitive? Do you find any edge cases that don't work?
+2. **Script Composition:** Create scripts that call each other (`<axes::scripts::...>`) and use parallel execution (`>`). Try to break cycle detection.
+3. **Refactoring Operations:** Use `link`, `rename`, `unregister`, and `delete` (with their flags) on a test monorepo. Is the behavior always as expected? Are the messages clear?
+4. **Cancellation with `Ctrl+C`:** Launch a long-running script (e.g., `[scripts] wait = "sleep 30"`) and try to cancel it. Does the tool respond as you expect?
+
+**How to report feedback?**
+Please open an Issue in our [GitHub repository](https://github.com/RetypeOS/axes/issues). Any feedback is incredibly valuable!

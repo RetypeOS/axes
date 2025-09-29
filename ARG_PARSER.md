@@ -1,66 +1,72 @@
-# Guía del Sistema de Argumentos: Scripts como Funciones de CLI
+<p align="center">
+  <strong>Read this in other languages:</strong><br>
+  <a href="./ARG_PARSER.md">English</a> |
+  <a href="./docs/es/ARG_PARSER.md">Español</a>
+</p>
 
-El motor de scripting de `axes` te permite hacer mucho más que ejecutar comandos estáticos. Te permite definir **scripts que actúan como funciones de línea de comandos**, aceptando argumentos de forma estructurada, declarativa y validada.
+# Argument System Guide: Scripts as CLI Functions
 
-Esta guía explica en profundidad cómo funciona el nuevo y robusto sistema de parseo de `axes` y cómo usar la familia de tokens `<axes::params::...>` para crear flujos de trabajo flexibles y potentes.
+The `axes` scripting engine allows you to do much more than execute static commands. It allows you to define **scripts that act as command-line functions**, accepting arguments in a structured, declarative, and validated manner.
 
-## El Paradigma: Definición y Validación Previas
+This guide explains in depth how the new and robust `axes` parsing system works and how to use the `<axes::params::...>` token family to create flexible and powerful workflows.
 
-A diferencia de los scripts de shell tradicionales donde tienes que parsear `$1` y `$2` manualmente (y a menudo de forma frágil), `axes` adopta un paradigma declarativo. Defines los parámetros que tu script espera directamente en el lugar donde los usas.
+## The Paradigm: Pre-Definition and Validation
 
-Antes de ejecutar una sola línea de tu script, `axes` realiza un análisis completo:
+Unlike traditional shell scripts where you have to manually parse `$1` and `$2` (and often fragilely), `axes` adopts a declarative paradigm. You define the parameters your script expects directly where you use them.
 
-1. **Descubre** todas las definiciones de parámetros (`<axes::params::...>`) en tu script.
-2. **Parsea** los argumentos que proporcionaste en la línea de comandos.
-3. **Valida** que los argumentos proporcionados coincidan con las definiciones, comprobando requisitos, alias y conflictos.
+Before executing a single line of your script, `axes` performs a complete analysis:
 
-Solo si esta validación es exitosa, `axes` procede a ensamblar y ejecutar tus comandos. Esto elimina toda una clase de errores y garantiza un comportamiento predecible.
+1. **Discovers** all parameter definitions (`<axes::params::...>`) in your script.
+2. **Parses** the arguments you provided on the command line.
+3. **Validates** that the provided arguments match the definitions, checking requirements, aliases, and conflicts.
 
-> **La Regla de Oro:** Si al final del análisis sobran argumentos de la CLI que no fueron consumidos por ningún token explícito (`<axes::params::0>`, `<axes::params::flag>`, etc.) y el script no incluye el token genérico `<axes::params>`, `axes` lanzará un error para prevenir un comportamiento inesperado.
+Only if this validation is successful does `axes` proceed to assemble and execute your commands. This eliminates an entire class of errors and ensures predictable behavior.
 
----
-
-## 1. El Pre-Parseo de `axes`
-
-Antes de que tus tokens entren en acción, `axes` realiza un pre-parseo simple de los argumentos que le pasas en la terminal. Los clasifica en dos tipos:
-
-* **Argumentos Nombrados (Flags):** Cualquier token que empiece con un guion (`-` o `--`), como `--target` o `-v`. `axes` detecta si un flag va seguido de un valor (ej. `--target linux`) o si es un flag booleano sin valor (ej. `--force`).
-* **Argumentos Posicionales:** Todos los demás tokens. Se identifican por su posición (0, 1, 2, ...).
-
-Con estos argumentos clasificados, las definiciones de tu script pueden empezar a trabajar.
+> **The Golden Rule:** If, at the end of the analysis, there are remaining CLI arguments that were not consumed by any explicit token (`<axes::params::0>`, `<axes::params::flag>`, etc.) and the script does not include the generic `<axes::params>` token, `axes` will throw an error to prevent unexpected behavior.
 
 ---
 
-## 2. Parámetros Posicionales
+## 1. `axes` Pre-Parsing
 
-Se accede a los argumentos posicionales por su índice numérico, empezando en `0`.
+Before your tokens come into play, `axes` performs a simple pre-parsing of the arguments you pass in the terminal. It classifies them into two types:
 
-### Sintaxis y Modificadores `(...)`
+* **Named Arguments (Flags):** Any token that starts with a hyphen (`-` or `--`), such as `--target` or `-v`. `axes` detects whether a flag is followed by a value (e.g., `--target linux`) or if it is a boolean flag without a value (e.g., `--force`).
+* **Positional Arguments:** All other tokens. They are identified by their position (0, 1, 2, ...).
 
-Puedes añadir un bloque de configuración entre paréntesis para refinar el comportamiento de un parámetro.
+With these arguments classified, your script definitions can begin to work.
 
-* **Sintaxis Básica:** `<axes::params::0>`, `<axes::params::1>`, etc.
-* **Modificadores:**
-  * `required`: La ejecución falla si el argumento no se proporciona.
-  * `default='valor'`: Proporciona un valor por defecto si el argumento no se pasa en la CLI.
-  * `map='--nuevo-flag'`: Transforma el argumento posicional en un flag con valor. Si el usuario escribe `comando mi-valor`, y el token es `<axes::params::0(map='--target')>`, el resultado inyectado será `"--target mi-valor"`.
+---
 
-#### **Ejemplos (Posicionales)**
+## 2. Positional Parameters
 
-**Script para saludar (con `default`):**
+Positional arguments are accessed by their numerical index, starting at `0`.
+
+### Syntax and Modifiers `(...)`
+
+You can add a configuration block in parentheses to refine the behavior of a parameter.
+
+* **Basic Syntax:** `<axes::params::0>`, `<axes::params::1>`, etc.
+* **Modifiers:**
+  * `required`: Execution fails if the argument is not provided.
+  * `default='value'`: Provides a default value if the argument is not passed in the CLI.
+  * `map='--new-flag'`: Transforms the positional argument into a flag with a value. If the user types `command my-value`, and the token is `<axes::params::0(map='--target')>`, the injected result will be `"--target my-value"`.
+
+#### **Examples (Positional)**
+
+**Script to greet (with `default`):**
 
 ```toml
 # axes.toml
 [scripts]
-greet = "echo 'Hola, <axes::params::0(default='Mundo')>!'"
+greet = "echo 'Hello, <axes::params::0(default='World')>!'"
 ```
 
 ```sh
-axes . greet          # -> echo 'Hola, Mundo!'
-axes . greet Valeria  # -> echo 'Hola, Valeria!'
+axes . greet          # -> echo 'Hello, World!'
+axes . greet Valeria  # -> echo 'Hello, Valeria!'
 ```
 
-**Script para crear un fichero (con `required`):**
+**Script to create a file (with `required`):**
 
 ```toml
 # axes.toml
@@ -73,51 +79,51 @@ axes . create_file src/index.js  # -> touch src/index.js
 axes . create_file               # -> Error: Positional argument at index 0 is required but was not provided.
 ```
 
-**Script de `lint` (con `map`):**
-Este patrón es extremadamente útil para crear interfaces más legibles.
+**`lint` script (with `map`):**
+This pattern is extremely useful for creating more readable interfaces.
 
 ```toml
 # axes.toml
 [scripts]
-# Hace linting de una ruta, convirtiendo el argumento posicional en un flag --path.
+# Lints a path, converting the positional argument into a --path flag.
 lint = "eslint <axes::params::0(map='--path', default='src/')>"
 ```
 
 ```sh
-# Ejecución 1: Usa el valor por defecto
+# Execution 1: Uses the default value
 axes . lint
-# Comando ejecutado: `eslint --path src/`
+# Command executed: `eslint --path src/`
 
-# Ejecución 2: Especifica una ruta
+# Execution 2: Specifies a path
 axes . lint tests/
-# Comando ejecutado: `eslint --path tests/`
+# Command executed: `eslint --path tests/`
 ```
 
 ---
 
-## 3. Parámetros Nombrados (Flags)
+## 3. Named Parameters (Flags)
 
-Los tokens de parámetros también pueden buscar y consumir flags (`--nombre`) de la línea de comandos.
+Parameter tokens can also search for and consume flags (`--name`) from the command line.
 
-### Sintaxis y Comportamiento por Defecto
+### Syntax and Default Behavior
 
-* **Sintaxis Básica:** `<axes::params::nombre-flag>`
-* **Comportamiento (Pass-through):** Por defecto, un token de flag busca el flag correspondiente en la CLI y lo reinyecta tal cual, junto con su valor si lo tiene.
-  * Si se ejecuta con `--nombre-flag valor`, el token se expande a `"--nombre-flag valor"`.
-  * Si se ejecuta con `--nombre-flag` (sin valor), se expande a `"--nombre-flag"`.
-  * Si el flag no se proporciona, el token se expande a una cadena vacía.
+* **Basic Syntax:** `<axes::params::flag-name>`
+* **Behavior (Pass-through):** By default, a flag token looks for the corresponding flag in the CLI and reinjects it as is, along with its value if it has one.
+  * If run with `--flag-name value`, the token expands to `"--flag-name value"`.
+  * If run with `--flag-name` (no value), it expands to `"--flag-name"`.
+  * If the flag is not provided, the token expands to an empty string.
 
-### Modificadores para Flags `(...)`
+### Modifiers for Flags `(...)`
 
-* `required`: Falla si el flag (o su alias) no está presente.
-* `default='valor'`: Si el flag se proporciona **sin un valor**, se usará este `default`. También se usa si el flag **no se proporciona en absoluto**.
-* `alias='-a'`: Permite que el flag sea reconocido por un alias corto. `axes` lanzará un error si el usuario intenta usar ambos (`--nombre-flag` y `-a`) al mismo tiempo.
-* `map='--nuevo-nombre'`: Reemplaza el nombre del flag en la salida.
-* `map=' '`: Un caso especial muy potente. Indica que solo quieres inyectar el **valor** del flag, no el flag en sí.
+* `required`: Fails if the flag (or its alias) is not present.
+* `default='value'`: If the flag is provided **without a value**, this `default` will be used. It is also used if the flag is **not provided at all**.
+* `alias='-a'`: Allows the flag to be recognized by a short alias. `axes` will throw an error if the user attempts to use both (`--flag-name` and `-a`) at the same time.
+* `map='--new-name'`: Replaces the flag name in the output.
+* `map=' '`: A very powerful special case. Indicates that you only want to inject the **value** of the flag, not the flag itself.
 
-#### **Ejemplos (Nombrados)**
+#### **Examples (Named)**
 
-**Script de `build` con modo `release` (Pass-through simple):**
+**`build` script with `release` mode (Simple Pass-through):**
 
 ```toml
 # axes.toml
@@ -130,7 +136,7 @@ axes . build            # -> cargo build
 axes . build --release  # -> cargo build --release
 ```
 
-**Script de `test` con alias:**
+**`test` script with alias:**
 
 ```toml
 # axes.toml
@@ -144,12 +150,12 @@ axes . test -m smoke        # -> pytest --marker smoke
 axes . test -m smoke --marker slow # -> Error: Conflict: Both flag '--marker' and its alias '-m' were provided.
 ```
 
-**Script de `deploy` con `map` y `required`:**
+**`deploy` script with `map` and `required`:**
 
 ```toml
 # axes.toml
 [scripts]
-# El script interno espera --environment, pero queremos exponer --env al usuario.
+# The internal script expects --environment, but we want to expose --env to the user.
 deploy = "terraform apply <axes::params::env(map='--environment', required)>"
 ```
 
@@ -158,56 +164,56 @@ axes . deploy --env staging      # -> terraform apply --environment staging
 axes . deploy                    # -> Error: Flag '--env' is required but was not provided.
 ```
 
-**Script de `docker` con `map=''` para extracción de valor:**
-Este es un patrón avanzado para inyectar valores en lugares donde un flag no es válido.
+**`docker` script with `map=' '` for value extraction:**
+This is an advanced pattern for injecting values into places where a flag is not valid.
 
 ```toml
 # axes.toml
 [scripts]
-# El tag de la imagen se pasa como un flag, pero se inyecta como un valor posicional.
-docker_tag = "docker tag mi-imagen:latest mi-org/mi-imagen:<axes::params::tag(map='', default='latest')>"
+# The image tag is passed as a flag but is injected as a positional value.
+docker_tag = "docker tag my-image:latest my-org/my-image:<axes::params::tag(map='', default='latest')>"
 ```
 
 ```sh
-# Ejecución 1: Usa el default
+# Execution 1: Uses the default
 axes . docker_tag
-# Comando ejecutado: `docker tag mi-imagen:latest mi-org/mi-imagen:latest`
+# Command executed: `docker tag my-image:latest my-org/my-image:latest`
 
-# Ejecución 2: Especifica el tag
+# Execution 2: Specifies the tag
 axes . docker_tag --tag v1.2.0
-# Comando ejecutado: `docker tag mi-imagen:latest mi-org/mi-imagen:v1.2.0`
+# Command executed: `docker tag my-image:latest my-org/my-image:v1.2.0`
 ```
 
 ---
 
-## 4. El Recolector Genérico: `<axes::params>`
+## 4. The Generic Collector: `<axes::params>`
 
-Este es el token "recolector". Es útil cuando quieres pasar un número variable de argumentos o flags a un comando subyacente sin tener que definirlos todos explícitamente.
+This is the "collector" token. It is useful when you want to pass a variable number of arguments or flags to an underlying command without having to explicitly define them all.
 
-* **Sintaxis:** `<axes::params>`
-* **Comportamiento:** Se reemplaza por **todos los argumentos** (posicionales y nombrados) que **no fueron consumidos** por un token explícito (`::0`, `::flag`, etc.), manteniendo su orden original.
+* **Syntax:** `<axes::params>`
+* **Behavior:** Replaced by **all arguments** (positional and named) that **were not consumed** by an explicit token (`::0`, `::flag`, etc.), maintaining their original order.
 
-### **Ejemplo: Un `wrapper` genérico para `cargo run`**
+### **Example: A generic `wrapper` for `cargo run`**
 
 ```toml
 # axes.toml
 [scripts]
-# Pasa todos los argumentos no definidos directamente al binario.
+# Passes all undefined arguments directly to the binary.
 run = "cargo run -- <axes::params>"
-# Permite un flag --release opcional, y pasa el resto.
+# Allows an optional --release flag, and passes the rest.
 run_release = "cargo run <axes::params::release> -- <axes::params>"
 ```
 
 ```sh
-# Ejecución 1: Pasar argumentos al binario
+# Execution 1: Passing arguments to the binary
 axes . run --input /data/file.txt --verbose
-# Comando ejecutado: `cargo run -- --input /data/file.txt --verbose`
+# Command executed: `cargo run -- --input /data/file.txt --verbose`
 
-# Ejecución 2: Usar el script con release
+# Execution 2: Using the script with release
 axes . run_release --input /data/file.txt --release
-# `release` es consumido por <axes::params::release> y se expande a `--release`.
-# `--input /data/file.txt` es consumido por <axes::params> y se expande a sí mismo.
-# Comando ejecutado: `cargo run --release -- --input /data/file.txt`
+# `release` is consumed by <axes::params::release> and expands to `--release`.
+# `--input /data/file.txt` is consumed by <axes::params> and expands to itself.
+# Command executed: `cargo run --release -- --input /data/file.txt`
 ```
 
-Combinando estos patrones, puedes construir y/o modificar interfaces de línea de comandos para tus scripts que son tan potentes, legibles y seguras como las de cualquier herramienta nativa, todo desde la simplicidad de tu `axes.toml`.
+By combining these patterns, you can build and/or modify command-line interfaces for your scripts that are as powerful, readable, and safe as those of any native tool, all from the simplicity of your `axes.toml`.
