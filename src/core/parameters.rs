@@ -1,6 +1,6 @@
 // src/core/parameters.rs
 
-use crate::models::{ParameterDef, ParameterKind, ParameterModifiers, TemplateComponent};
+use crate::models::{ParameterDef, ParameterKind, ParameterModifiers, RunSpec, TemplateComponent};
 use anyhow::{Context, Result, anyhow};
 use colored::*;
 use lazy_static::lazy_static;
@@ -8,7 +8,7 @@ use regex::Regex;
 use std::collections::{HashMap, HashSet};
 
 lazy_static! {
-    static ref PARAMS_TOKEN_RE: Regex = Regex::new(r"<axes::(params(?:[^>])*)>").unwrap();
+    static ref TOKEN_RE: Regex = Regex::new(r"<axes::([^>]+)>").unwrap();
 }
 
 lazy_static! {
@@ -136,9 +136,9 @@ pub fn discover_and_parse(fully_expanded_string: &str) -> Result<Vec<TemplateCom
     let mut components = Vec::new();
     let mut last_match_end = 0;
 
-    for caps in PARAMS_TOKEN_RE.captures_iter(fully_expanded_string) {
+    for caps in TOKEN_RE.captures_iter(fully_expanded_string) {
         let full_match = caps.get(0).unwrap();
-        let token_content = caps.get(1).unwrap().as_str();
+        let token_content = caps.get(1).unwrap().as_str().trim();
 
         let literal_part = &fully_expanded_string[last_match_end..full_match.start()];
         if !literal_part.is_empty() {
@@ -150,9 +150,18 @@ pub fn discover_and_parse(fully_expanded_string: &str) -> Result<Vec<TemplateCom
         } else if let Some(param_spec) = token_content.strip_prefix("params::") {
             let def = parse_parameter_token(full_match.as_str(), param_spec)?;
             components.push(TemplateComponent::Parameter(def));
+        } else if let Some(run_spec) = token_content.strip_prefix("run") {
+            if let Some(script_name) = run_spec.strip_prefix("::") {
+                components.push(TemplateComponent::Run(RunSpec::Script(script_name.trim().to_string())));
+            } else if run_spec.starts_with("(\'") && run_spec.ends_with("\')") {
+                let command = run_spec.strip_prefix("('").unwrap().strip_suffix("')").unwrap();
+                components.push(TemplateComponent::Run(RunSpec::Literal(command.to_string())));
+            } else {
+                return Err(anyhow!("Invalid run syntax in token: '{}'. Expected <axes::run::script_name> or <axes::run('command')>.", full_match.as_str()));
+            }
         } else {
             return Err(anyhow!(
-                "Found an unexpected, non-parameter token: '{}'",
+                "Found an unexpected or malformed token: '{}'",
                 full_match.as_str()
             ));
         }

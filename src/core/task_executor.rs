@@ -2,7 +2,7 @@
 
 use crate::{
     core::parameters::ArgResolver,
-    models::{ResolvedConfig, Task, TemplateComponent},
+    models::{CacheableValue, ResolvedConfig, RunSpec, Task, TemplateComponent},
     system::executor,
 };
 use anyhow::{Context, Result, anyhow};
@@ -15,6 +15,7 @@ use rayon::prelude::*;
 ///
 pub fn assemble_final_command(
     template: &[TemplateComponent],
+    config: &ResolvedConfig,
     resolver: &ArgResolver,
 ) -> Result<String> {
     let mut final_command = String::new();
@@ -35,6 +36,36 @@ pub fn assemble_final_command(
             TemplateComponent::GenericParams => {
                 final_command.push_str(resolver.get_generic_value());
             }
+                        TemplateComponent::Run(spec) => {
+                let command_to_run = match spec {
+                    RunSpec::Literal(cmd) => cmd.clone(),
+                    RunSpec::Script(script_name) => {
+                        // Find the script in the config and flatten it to a string.
+                        let cacheable = config.scripts.get(script_name).ok_or_else(|| {
+                            anyhow!("Script '{}' referenced in <axes::run::...> not found.", script_name)
+                        })?;
+                        match cacheable {
+                            CacheableValue::Raw(fc) => fc.command_lines.join(" && "),
+                            // This case is unlikely if validation passed, but we handle it.
+                            CacheableValue::Expanded(task) => task
+                                .commands
+                                .iter()
+                                .map(|cmd| cmd.template.iter().map(crate::core::config_resolver::template_component_to_string).collect::<String>())
+                                .collect::<Vec<_>>()
+                                .join(" && "),
+                        }
+                    }
+                };
+ 
+                let output = executor::execute_and_capture_output(
+                    &command_to_run,
+                    &config.project_root,
+                    &config.env,
+                )?;
+ 
+                // Clean the output (remove trailing newlines/spaces) before injection.
+                final_command.push_str(output.trim());
+            }
         }
     }
     Ok(final_command)
@@ -48,7 +79,7 @@ pub fn execute_task(task: &Task, config: &ResolvedConfig, resolver: &ArgResolver
     let mut parallel_batch: Vec<String> = Vec::new();
 
     for command_exec in &task.commands {
-        let final_command_str = assemble_final_command(&command_exec.template, resolver)?;
+        let final_command_str = assemble_final_command(&command_exec.template, config, resolver)?;
         let trimmed_command = final_command_str.trim();
 
         if trimmed_command.is_empty() {

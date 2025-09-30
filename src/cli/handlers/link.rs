@@ -10,17 +10,17 @@ use clap::Parser;
 #[derive(Parser, Debug, Default)]
 #[command(no_binary_name = true)]
 struct LinkArgs {
-    /// The project context to link.
-    context: String,
     /// The new parent project's context.
     new_parent: String,
 }
 
-pub fn handle(args: Vec<String>) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     // 1. Resolve the project to be moved. This requires a context.
     let link_args = LinkArgs::try_parse_from(&args)?;
+    let context_str =
+        context.ok_or_else(|| anyhow!(t!("error.context_required"), command = "delete"))?;
     let mut index = index_manager::load_and_ensure_global_project()?;
-    let config = commons::resolve_config_from_context_or_session(Some(link_args.context), &index)?;
+    let config = commons::resolve_config_from_context_or_session(Some(context_str), &index)?;
 
     // 2. Get the new parent's context from the arguments.
     let new_parent_context = link_args.new_parent.trim();

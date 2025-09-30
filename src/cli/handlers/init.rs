@@ -18,7 +18,7 @@ use colored::Colorize;
 
 /// The main handler for the `init` command.
 /// Allows creating and registering new projects to axes.
-pub fn handle(args: Vec<String>) -> Result<()> {
+pub fn handle(_context: Option<String>, args: Vec<String>) -> Result<()> {
     // 1. Parse arguments
     let init_args = InitArgs::try_parse_from(&args)?;
 

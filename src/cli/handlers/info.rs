@@ -12,19 +12,25 @@ use colored::*;
 #[derive(Parser, Debug, Default)]
 #[command(no_binary_name = true)]
 struct InfoArgs {
-    /// The project context to display information for.
-    context: String,
+    // Example future flag:
+    // #[arg(long)]
+    // raw: bool,
 }
 
 /// The main handler for the `info` command.
 /// Displays detailed information about the resolved project configuration.
-pub fn handle(args: Vec<String>) -> Result<()> {
-    // 1. Parse arguments.
-    let info_args = InfoArgs::try_parse_from(&args)?;
+pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
+    // 1. The handler first validates that it received the context it needs.
+    let context_str = context.unwrap_or(".".to_string());
+    //.ok_or_else(|| anyhow!(t!("error.context_required")))?;
 
-    // 2. Load index and resolve configuration.
+    // 2. It parses its OWN arguments from the `args` vector.
+    let _info_args = InfoArgs::try_parse_from(&args)?;
+
+    // 3. Load index and resolve configuration using the provided context.
     let index = crate::core::index_manager::load_and_ensure_global_project()?;
-    let config = commons::resolve_config_from_context_or_session(Some(info_args.context), &index)?;
+    // The call to resolve_config_from_context_or_session is now cleaner.
+    let config = commons::resolve_config_from_context_or_session(Some(context_str), &index)?;
 
     // 3. Print all sections.
     print_metadata(&config);
@@ -129,6 +135,10 @@ fn print_variables(config: &ResolvedConfig, key: &str, title: &str) {
                                         TemplateComponent::GenericParams => {
                                             "<axes::params>".to_string()
                                         }
+                                        TemplateComponent::Run(spec) => match spec {
+                                            crate::models::RunSpec::Literal(cmd) => format!("<axes::run('{}')>", cmd),
+                                            crate::models::RunSpec::Script(name) => format!("<axes::run::{}>", name),
+                                        },
                                     })
                                     .collect::<String>()
                             })

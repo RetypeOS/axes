@@ -17,8 +17,6 @@ use colored::*;
 #[derive(Parser, Debug, Default)]
 #[command(no_binary_name = true)]
 struct OpenArgs {
-    /// The project context to open.
-    context: String,
     /// The application key from [options.open_with] to use. If omitted, uses 'default'.
     app_key: Option<String>,
     /// Parameters to pass to the open command.
@@ -26,12 +24,12 @@ struct OpenArgs {
     params: Vec<String>,
 }
 
-pub fn handle(args: Vec<String>) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     // 1. Parse args and resolve config.
     let open_args = OpenArgs::try_parse_from(&args)?;
+    let context_str = context.unwrap_or_else(|| ".".to_string());
     let index = index_manager::load_and_ensure_global_project()?;
-    let mut config =
-        commons::resolve_config_from_context_or_session(Some(open_args.context), &index)?;
+    let mut config = commons::resolve_config_from_context_or_session(Some(context_str), &index)?;
 
     // 2. Determine which `open_with` command to use, correctly handling the 'default' key.
     let app_key_from_user = open_args.app_key.as_deref().unwrap_or("default");

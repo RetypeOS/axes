@@ -7,21 +7,19 @@ use axes::{
 };
 use clap::Parser;
 use colored::*;
-use std::env;
 
 // --- Command Definition and Registry ---
 
-/// Defines a system command, its aliases, and its synchronous handler function.
-/// The handler signature is kept consistent across all commands for simplicity in the registry.
+/// Defines a system command, its aliases, and its new universal handler signature.
+/// The handler now accepts an optional context and a vector of its specific arguments.
 struct CommandDefinition {
     name: &'static str,
     aliases: &'static [&'static str],
-    handler: fn(Vec<String>) -> Result<()>,
+    handler: fn(Option<String>, Vec<String>) -> Result<()>,
 }
 
 /// The single source of truth for all system commands.
-/// This declarative approach makes adding, removing, or modifying commands trivial.
-/// To add a new command, simply add a new entry to this static array.
+/// The registry is updated to match the new handler signature.
 static COMMAND_REGISTRY: &[CommandDefinition] = &[
     CommandDefinition {
         name: "alias",
@@ -98,102 +96,102 @@ fn find_command(name: &str) -> Option<&'static CommandDefinition> {
 }
 
 /// The main entry point of the `axes` application.
-/// It sets up logging, parses arguments, dispatches to the correct handler,
-/// and performs centralized error handling.
 fn main() {
-    // The CancellationToken is now a simple flag, primarily for future use in long-running,
-    // non-process tasks. The main Ctrl+C handling is managed by the executor.
-    env_logger::init();
-
-    // The entire application logic is wrapped in a Result to enable centralized error handling.
+    #[cfg(debug_assertions)]
+    {
+        env_logger::init();
+    }
     if let Err(e) = run_cli(Cli::parse()) {
-        // Primero, comprobamos si el error raíz es una interrupción para salir en silencio.
         if let Some(exec_err) = e.downcast_ref::<executor::ExecutionError>()
             && matches!(exec_err, executor::ExecutionError::Interrupted { .. })
         {
-            // Salida silenciosa para Ctrl+C.
-            // Opcional: imprimir una nueva línea para que el prompt de la shell no quede pegado.
             eprintln!();
             std::process::exit(130);
         }
 
-        // Si no es una interrupción, imprimimos la cadena de errores completa y formateada.
         eprintln!("\n{}: {}", "Error".red().bold(), e);
-
-        // Iteramos sobre la cadena de causas subyacentes.
-        let mut causes = e.chain().skip(1); // `skip(1)` para no repetir el error principal.
+        let mut causes = e.chain().skip(1);
         if let Some(cause) = causes.next() {
             eprintln!("\nCaused by:");
-            eprintln!("   0: {}", cause); // Imprimimos la primera causa.
-            // Imprimimos el resto de las causas.
+            eprintln!("   0: {}", cause);
             for (i, cause) in causes.enumerate() {
                 eprintln!("   {}: {}", i + 1, cause);
             }
         }
-
         std::process::exit(1);
     }
 }
 
-/// The main application dispatcher.
-///
-/// This function is the primary router. It determines the user's intent based on
-/// command-line arguments and the environment (e.g., if inside an `axes` session),
-/// then routes to the appropriate handler with the correct arguments.
+/// The main application dispatcher implementing the universal grammar.
 fn run_cli(cli: Cli) -> Result<()> {
     log::debug!("CLI args parsed: {:?}", cli);
 
-    let arg1 = match cli.context_or_action {
-        Some(a) => a,
-        None => {
-            // If no arguments are provided, show a placeholder for the future TUI.
-            println!("Welcome to axes! (TUI placeholder)");
-            return Ok(());
-        }
-    };
-
-    let mut remaining_args = Vec::new();
-    if let Some(arg2) = cli.action_or_context_or_arg {
-        remaining_args.push(arg2);
+    // --- Argument Collection ---
+    let mut all_args = Vec::new();
+    if let Some(arg1) = cli.context_or_action {
+        all_args.push(arg1);
     }
-    remaining_args.extend(cli.args);
+    if let Some(arg2) = cli.action_or_context_or_arg {
+        all_args.push(arg2);
+    }
+    all_args.extend(cli.args);
 
-    let (action_name, action_args) = if env::var("AXES_PROJECT_UUID").is_ok() {
-        // --- Session Mode: Strict Grammar ---
-        // The context is implicit, so `arg1` must be the action or script name.
-        (arg1, remaining_args)
-    } else {
-        // --- Script Mode: Flexible Grammar ---
-        if find_command(&arg1).is_some() {
-            // Case: `axes <action> [args...]` (e.g., `axes tree --all`)
-            (arg1, remaining_args)
-        } else if let Some(arg2) = remaining_args.first() {
-            if find_command(arg2).is_some() {
-                // Case: `axes <context> <action> [args...]` (e.g., `axes my-app info`)
-                let mut args_for_handler = vec![arg1.clone()];
-                args_for_handler.extend(remaining_args.iter().skip(1).cloned());
-                (arg2.clone(), args_for_handler)
+    if all_args.is_empty() {
+        println!("Welcome to axes! (TUI placeholder)");
+        return Ok(());
+    }
+
+    // --- Universal Dispatch Logic Cascade ---
+    let (action_name, context, handler_args) = {
+        // We clone the first two arguments for checks, leaving `all_args` untouched.
+        let arg1 = all_args.first().cloned();
+        let arg2 = all_args.get(1).cloned();
+
+        if let Some(arg2_val) = arg2 {
+            if find_command(&arg2_val).is_some() {
+                // Grammar 1: `axes <context> <action> [args...]`
+                // Action is arg2. Context is arg1. Handler gets args from arg3 onwards.
+                let handler_args = all_args.into_iter().skip(2).collect();
+                (arg2_val, arg1, handler_args)
+            } else if let Some(arg1_val) = arg1.as_ref() {
+                if find_command(arg1_val).is_some() {
+                    // Grammar 2: `axes <action> [args...]`
+                    // Action is arg1. No context. Handler gets args from arg2 onwards.
+                    let handler_args = all_args.into_iter().skip(1).collect();
+                    (arg1_val.clone(), None, handler_args)
+                } else {
+                    // Grammar 3 (Default): `axes <script> [params...]` -> run
+                    // Neither arg1 nor arg2 is an action. Default to `run`. No context.
+                    // Handler for `run` gets all arguments, including the script name.
+                    ("run".to_string(), None, all_args)
+                }
             } else {
-                // Case: `axes <context> <script> [params...]` (Shortcut for `run`)
-                let mut run_args = vec![arg1.clone()];
-                run_args.extend(remaining_args);
-                ("run".to_string(), run_args)
+                // This case should be impossible if all_args is not empty, but for safety:
+                ("run".to_string(), None, all_args)
+            }
+        } else if let Some(arg1_val) = arg1.as_ref() {
+            if find_command(arg1_val).is_some() {
+                // Grammar 2 (with only 1 arg): `axes <action>`
+                // Action is arg1. No context. No args for handler.
+                (arg1_val.clone(), None, vec![])
+            } else {
+                // Grammar 3 (Default with only 1 arg): `axes <script_or_context>`
+                // Following the new logic, we simplify this: a single non-command argument
+                // is always a script execution with an implicit context.
+                // The explicit `start` command must be used: `axes my-app start`.
+                ("run".to_string(), None, all_args)
             }
         } else {
-            // Case: `axes <context>` (Shortcut for `start`)
-            ("start".to_string(), vec![arg1])
+            // This case is impossible because we checked for `all_args.is_empty()` at the start.
+            unreachable!();
         }
     };
 
-    // --- Dispatch Logic ---
+    // --- Dispatch to Handler ---
     if let Some(command) = find_command(&action_name) {
-        // A known system command was found. Execute its handler.
-        (command.handler)(action_args)
+        (command.handler)(context, handler_args)
     } else {
-        // Not a system command, so it's a script name. This is a shortcut for `run`.
-        // This case primarily handles session mode (`axes <script>`).
-        let mut run_args = vec![action_name];
-        run_args.extend(action_args);
-        handlers::run::handle(run_args)
+        // This is now impossible, as the default case always resolves to "run".
+        unreachable!();
     }
 }

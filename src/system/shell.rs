@@ -56,7 +56,7 @@ pub fn launch_session(
         println!("\n{}", "Preparing `at_start` hook...".dimmed());
         task.commands
             .iter()
-            .map(|cmd| task_executor::assemble_final_command(&cmd.template, resolver))
+            .map(|cmd| task_executor::assemble_final_command(&cmd.template, config, resolver))
             .collect::<Result<Vec<String>>>()?
     } else {
         Vec::new()

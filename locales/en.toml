@@ -14,7 +14,8 @@
 "common.error.operation_cancelled" = "Operation cancelled by user."
 
 # Errors
-"error.context_required" = "This action requires a project context."
+"error.context_required" = "The '{command}' command requires an explicit project context."
+"error.dont_use_any_context" = "This action doesn't use a project context."
 "error.saving_global_index" = "Could not save updated global index."
 "error.local_ref_failed" = "Could not get or create the local project reference (`project_ref.bin`)."
 

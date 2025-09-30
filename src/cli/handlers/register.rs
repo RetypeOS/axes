@@ -13,7 +13,7 @@ use crate::{
     },
 };
 
-pub fn handle(args: Vec<String>) -> Result<()> {
+pub fn handle(_context: Option<String>, args: Vec<String>) -> Result<()> {
     if env::var("AXES_PROJECT_UUID").is_ok() {
         return Err(anyhow!(
             "'register' command is not available inside a project session."

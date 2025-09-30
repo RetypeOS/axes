@@ -28,8 +28,8 @@ pub enum ContextError {
     EmptyContext,
     #[error("Context '**' can only be used at the beginning of the path.")]
     GlobalRecentNotAtStart,
-    #[error("Context '.' or '_' can only be used at the beginning of the path.")]
-    LocalPathNotAtStart,
+    #[error("Context '_' can only be used at the beginning of a path when outside a session.")]
+    StrictLocalPathNotAtStart,
     #[error("Cannot go further up the hierarchy. Already at a root project.")]
     AlreadyAtRoot,
     #[error("No projects have been used recently. Cannot resolve '**'.")]
@@ -59,42 +59,121 @@ pub enum ContextError {
 
 type ContextResult<T> = Result<T, ContextError>;
 
-/// Resolves a project path to a UUID and a qualified name.
+/// Resolves a project context string to its canonical UUID and fully qualified name.
+///
+/// The resolution follows a strict priority order:
+/// 1.  **Absolute Contexts:** If the context starts with an alias (e.g., `g!`) or the
+///     name of the root project (e.g., `global`), it is resolved from the absolute
+///     root of the index, completely ignoring any active session.
+/// 2.  **Session-Relative Contexts:** If not an absolute context and a session is active
+///     (via `AXES_PROJECT_UUID`), the context is resolved relative to the session's project.
+/// 3.  **Filesystem/Global-Relative Contexts:** If neither of the above, resolution proceeds
+///     relative to the filesystem (`.`, `..`) or the global project.
 pub fn resolve_context(context: &str, index: &GlobalIndex) -> ContextResult<(Uuid, String)> {
     let parts: Vec<&str> = context.split('/').filter(|s| !s.is_empty()).collect();
     if parts.is_empty() {
         return Err(ContextError::EmptyContext);
     }
 
-    // 1. `resolve_first_part` now handles all initial logic.
-    let (mut current_uuid, mut current_parent_uuid) = resolve_first_part(parts[0], index)?;
+    let first_part = parts[0];
+    let global_project_name = &index.projects.get(&GLOBAL_PROJECT_UUID).unwrap().name;
 
-    // 2. If it's not an alias, proceed with normal path resolution.
-    //let parts: Vec<&str> = context.split('/').filter(|s| !s.is_empty()).collect();
-    //if parts.is_empty() { return Err(ContextError::EmptyContext); }
-    //
-    //let (mut current_uuid, mut current_parent_uuid) = resolve_first_part(parts[0], index)?;
+    // --- 1. Determine the starting point of the traversal ---
+    let (mut current_uuid, mut current_parent_uuid) = if let Some(alias_name) = first_part.strip_suffix('!') {
+        // --- PRIORITY 1A: Absolute resolution via Alias ---
+        let uuid = index
+            .aliases
+            .get(alias_name)
+            .ok_or_else(|| ContextError::AliasNotFound {
+                name: alias_name.to_string(),
+            })?;
+        let entry = index.projects.get(uuid).unwrap();
+        (*uuid, entry.parent)
+    } else if first_part == *global_project_name {
+        // --- PRIORITY 1B: Absolute resolution via Global Project Name ---
+        (GLOBAL_PROJECT_UUID, None)
+    } else {
+        // --- PRIORITY 2 & 3: Relative resolution ---
+        if let Some(session_uuid) = env::var("AXES_PROJECT_UUID")
+            .ok()
+            .and_then(|s| Uuid::parse_str(&s).ok())
+        {
+            // --- PRIORITY 2: Session-Relative Resolution ---
+            let session_entry = index.projects.get(&session_uuid).unwrap();
+            match first_part {
+                "." | "_" => (session_uuid, session_entry.parent),
+                ".." => {
+                    let parent_uuid = session_entry.parent.ok_or(ContextError::AlreadyAtRoot)?;
+                    let parent_entry = index.projects.get(&parent_uuid).unwrap();
+                    (parent_uuid, parent_entry.parent)
+                }
+                "*" => {
+                    let child_uuid = resolve_last_used_child(session_uuid, session_entry, index)?;
+                    (child_uuid, Some(session_uuid))
+                }
+                name => {
+                    let child_uuid = find_child_by_name(session_uuid, session_entry, name, index)?;
+                    (child_uuid, Some(session_uuid))
+                }
+            }
+        } else {
+            // --- PRIORITY 3: Filesystem/Global-Relative Resolution (No Session) ---
+            match first_part {
+                "." => {
+                    let uuid = find_project_from_path(&env::current_dir()?, true, index)?;
+                    let entry = index.projects.get(&uuid).unwrap();
+                    (uuid, entry.parent)
+                }
+                "_" => {
+                    let uuid = find_project_from_path(&env::current_dir()?, false, index)?;
+                    let entry = index.projects.get(&uuid).unwrap();
+                    (uuid, entry.parent)
+                }
+                ".." => {
+                    let cwd_uuid = find_project_from_path(&env::current_dir()?, true, index)?;
+                    let cwd_entry = index.projects.get(&cwd_uuid).unwrap();
+                    let parent_uuid = cwd_entry.parent.ok_or(ContextError::AlreadyAtRoot)?;
+                    let parent_entry = index.projects.get(&parent_uuid).unwrap();
+                    (parent_uuid, parent_entry.parent)
+                }
+                "**" => {
+                    let uuid = index.last_used.ok_or(ContextError::NoLastUsedProject)?;
+                    let entry = index.projects.get(&uuid).unwrap();
+                    (uuid, entry.parent)
+                }
+                "*" => {
+                    let global_entry = index.projects.get(&GLOBAL_PROJECT_UUID).unwrap();
+                    let child_uuid = resolve_last_used_child(GLOBAL_PROJECT_UUID, global_entry, index)?;
+                    (child_uuid, Some(GLOBAL_PROJECT_UUID))
+                }
+                name => {
+                    let global_entry = index.projects.get(&GLOBAL_PROJECT_UUID).unwrap();
+                    let child_uuid = find_child_by_name(GLOBAL_PROJECT_UUID, global_entry, name, index)?;
+                    (child_uuid, Some(GLOBAL_PROJECT_UUID))
+                }
+            }
+        }
+    };
 
-    // Iterate over the remaining parts
+    // --- 2. Iterate over the remaining parts of the context path ---
     for part in &parts[1..] {
         let (next_uuid, next_parent_uuid) = match *part {
-            "**" => return Err(ContextError::GlobalRecentNotAtStart),
-            "." | "_" => return Err(ContextError::LocalPathNotAtStart),
+            "." => (current_uuid, current_parent_uuid),
             ".." => {
                 let parent_uuid = current_parent_uuid.ok_or(ContextError::AlreadyAtRoot)?;
-                let parent_entry = index.projects.get(&parent_uuid).unwrap(); // Safe
+                let parent_entry = index.projects.get(&parent_uuid).unwrap();
                 (parent_uuid, parent_entry.parent)
             }
             "*" => {
-                let parent_entry = index.projects.get(&current_uuid).unwrap(); // Safe
+                let parent_entry = index.projects.get(&current_uuid).unwrap();
                 let child_uuid = resolve_last_used_child(current_uuid, parent_entry, index)?;
-                //let child_entry = index.projects.get(&child_uuid).unwrap(); // Safe
                 (child_uuid, Some(current_uuid))
             }
+            "**" => return Err(ContextError::GlobalRecentNotAtStart),
+            "_" => return Err(ContextError::StrictLocalPathNotAtStart),
             name => {
-                let parent_entry = index.projects.get(&current_uuid).unwrap(); // Safe
+                let parent_entry = index.projects.get(&current_uuid).unwrap();
                 let child_uuid = find_child_by_name(current_uuid, parent_entry, name, index)?;
-                //let child_entry = index.projects.get(&child_uuid).unwrap(); // Safe
                 (child_uuid, Some(current_uuid))
             }
         };
@@ -102,82 +181,12 @@ pub fn resolve_context(context: &str, index: &GlobalIndex) -> ContextResult<(Uui
         current_parent_uuid = next_parent_uuid;
     }
 
-    // At the end of the traversal, update the "last used" caches
+    // --- 3. Finalize and Return ---
     update_last_used_caches(current_uuid, index)?;
-
-    // Reconstruct the full qualified name for the final UUID.
     let final_qualified_name = index_manager::build_qualified_name(current_uuid, index)
-        .ok_or(ContextError::AliasResolutionError)?; // We reuse the error
+        .ok_or(ContextError::AliasResolutionError)?;
 
     Ok((current_uuid, final_qualified_name))
-}
-
-/// Resolves the first part of the path, which has special rules.
-fn resolve_first_part(part: &str, index: &GlobalIndex) -> ContextResult<(Uuid, Option<Uuid>)> {
-    // 1. Alias check remains the highest priority.
-    if let Some(alias_name) = part.strip_suffix('!') {
-        let uuid = index
-            .aliases
-            .get(alias_name)
-            .ok_or_else(|| ContextError::AliasNotFound {
-                name: alias_name.to_string(),
-            })?;
-        let entry = index.projects.get(uuid).unwrap(); // Safe if index is consistent.
-        return Ok((*uuid, entry.parent));
-    }
-
-    // 2. Handle special keywords.
-    match part {
-        "**" => {
-            let uuid = index.last_used.ok_or(ContextError::NoLastUsedProject)?;
-            let entry = index.projects.get(&uuid).unwrap();
-            return Ok((uuid, entry.parent));
-        }
-        "*" => {
-            let global_entry = index.projects.get(&GLOBAL_PROJECT_UUID).unwrap();
-            let uuid = resolve_last_used_child(GLOBAL_PROJECT_UUID, global_entry, index)?;
-            let entry = index.projects.get(&uuid).unwrap();
-            return Ok((uuid, entry.parent));
-        }
-        ".." => {
-            let current_dir = env::current_dir()?;
-            let parent_dir = current_dir.parent().ok_or(ContextError::AlreadyAtRoot)?;
-            let uuid = find_project_from_path(parent_dir, true, index)?;
-            let entry = index.projects.get(&uuid).unwrap();
-            return Ok((uuid, entry.parent));
-        }
-        "." => {
-            let uuid = find_project_from_path(&env::current_dir()?, true, index)?;
-            let entry = index.projects.get(&uuid).unwrap();
-            return Ok((uuid, entry.parent));
-        }
-        "_" => {
-            let uuid = find_project_from_path(&env::current_dir()?, false, index)?;
-            let entry = index.projects.get(&uuid).unwrap();
-            return Ok((uuid, entry.parent));
-        }
-        _ => {
-            // It's a name, not a keyword. Proceed to the main logic.
-        }
-    }
-
-    // --- 3. Main Name Resolution Logic ---
-    let root_entry = index
-        .projects
-        .get(&GLOBAL_PROJECT_UUID)
-        .expect("Fatal: Global project with predefined UUID not found in index.");
-
-    if part == root_entry.name {
-        // Case 1: The user explicitly wrote the root project's current name (e.g., "global" or "main").
-        // The current node is the root itself.
-        Ok((GLOBAL_PROJECT_UUID, None))
-    } else {
-        // Case 2: The user wrote something else (e.g., "my-project").
-        // Assume it's an implicit child of the root project.
-        let child_uuid = find_child_by_name(GLOBAL_PROJECT_UUID, root_entry, part, index)?;
-        let child_entry = index.projects.get(&child_uuid).unwrap();
-        Ok((child_uuid, child_entry.parent))
-    }
 }
 
 /// Resolves '*' for a child, with interactive fallback.

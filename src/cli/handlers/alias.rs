@@ -35,10 +35,11 @@ enum AliasCommand {
     },
 }
 
-pub fn handle(args: Vec<String>) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     if env::var("AXES_PROJECT_UUID").is_ok() {
         return Err(anyhow!(t!("alias.error.not_in_session")));
     }
+    context.ok_or_else(|| anyhow!(t!("error.dont_use_any_context")))?;
 
     let alias_args = AliasArgs::try_parse_from(&args)?;
     let mut index = index_manager::load_and_ensure_global_project()?;

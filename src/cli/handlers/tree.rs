@@ -12,9 +12,6 @@ use crate::core::{
 #[derive(Parser, Debug, Default)]
 #[command(no_binary_name = true)]
 struct TreeArgs {
-    /// The project context to start the tree from. Defaults to the root.
-    context: Option<String>,
-
     /// Show the full absolute paths for each project.
     #[arg(long, short)]
     paths: bool,
@@ -28,20 +25,17 @@ struct TreeArgs {
     all: bool,
 }
 
-pub fn handle(args: Vec<String>) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     let tree_args = TreeArgs::try_parse_from(&args)?;
+    let context_str = context.unwrap_or_else(|| ".".to_string());
 
     // 2. Load the index.
     let index = index_manager::load_and_ensure_global_project()?;
 
     // 3. Determine the starting node.
-    let (start_node_uuid, header) = if let Some(context_str) = tree_args.context {
-        let (uuid, qualified_name) = context_resolver::resolve_context(&context_str, &index)?;
-        let header = format!(t!("tree.header.from_project"), name = qualified_name);
-        (Some(uuid), header)
-    } else {
-        (None, t!("tree.header.all_projects").to_string())
-    };
+    let (uuid, qualified_name) = context_resolver::resolve_context(&context_str, &index)?;
+    let header = format!(t!("tree.header.from_project"), name = qualified_name);
+    let start_node_uuid = Some(uuid);
 
     // 4. Set display options.
     let display_options = DisplayOptions {

@@ -15,8 +15,6 @@ use std::collections::HashSet;
 #[derive(Parser, Debug, Default)]
 #[command(no_binary_name = true)]
 struct StartArgs {
-    /// The project context to start a session in.
-    context: String,
     /// Parameters to pass to the at_start and at_exit scripts.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     params: Vec<String>,
@@ -26,9 +24,10 @@ struct StartArgs {
 /// Main entry point for the `start` command.
 /// Orchestrates session setup, including parameter resolution for `at_start` and `at_exit`.
 ///
-pub fn handle(args: Vec<String>) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     // 1. Parse args and prevent nested sessions.
     let start_args = StartArgs::try_parse_from(&args)?;
+    let context_str = context.unwrap_or_else(|| ".".to_string());
     if std::env::var("AXES_PROJECT_UUID").is_ok() {
         return Err(anyhow!(
             "Cannot start a nested session. Please `exit` the current one first."
@@ -37,8 +36,7 @@ pub fn handle(args: Vec<String>) -> Result<()> {
 
     // 2. Load index and resolve the project configuration.
     let index = index_manager::load_and_ensure_global_project()?;
-    let mut config =
-        commons::resolve_config_from_context_or_session(Some(start_args.context), &index)?;
+    let mut config = commons::resolve_config_from_context_or_session(Some(context_str), &index)?;
 
     // 3. Resolve `at_start` and `at_exit` into `Task` objects.
     let task_start = if config.options.at_start.is_some() {

@@ -17,8 +17,6 @@ use colored::*;
 #[derive(Parser, Debug, Default)]
 #[command(no_binary_name = true)]
 struct RunArgs {
-    /// The project context to run the script in.
-    context: String,
     /// The name of the script to run.
     script: String,
     /// Parameters to pass to the script.
@@ -30,12 +28,12 @@ struct RunArgs {
 /// Main entry point for the 'run' command.
 /// Orchestrates the entire script execution process based on the "Task" model.
 ///
-pub fn handle(args: Vec<String>) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     // 1. Initial argument parsing and configuration resolution.
     let run_args = RunArgs::try_parse_from(&args)?;
+    let context_str = context.unwrap_or_else(|| ".".to_string());
     let index = index_manager::load_and_ensure_global_project()?;
-    let mut config =
-        commons::resolve_config_from_context_or_session(Some(run_args.context.clone()), &index)?;
+    let mut config = commons::resolve_config_from_context_or_session(Some(context_str), &index)?;
 
     println!(
         "\n▶️  Running script '{}' for project '{}'...",

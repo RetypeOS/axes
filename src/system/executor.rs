@@ -143,7 +143,7 @@ pub fn execute_command(
 pub fn execute_and_capture_output(
     command_line: &str,
     cwd: &Path,
-    env_vars: &HashMap<String, String>, // Ignored, kept for API consistency
+    env_vars: &HashMap<String, String>,
 ) -> Result<String, ExecutionError> {
     TOKIO_RT.block_on(async {
         let trimmed_command = command_line.trim();

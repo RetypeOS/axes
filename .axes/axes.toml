@@ -9,8 +9,7 @@ description = "The development workflow configuration for the `axes` project its
 [scripts]
 # Tests
 hello = """
-    echo Hello, World! \ 
-    <axes::scripts::test_q>
+    echo Hello, World!
 """
 
 test_q = "-comando info <axes::vars::_param_1> <axes::params::1(map='--info', default='algo')>"
@@ -48,13 +47,15 @@ deploy_all = [
 ]
 
 # --- Escenario de Error 2: Ciclo de dependencias ---
-ciclo_a = "Paso A, luego <axes::scripts::ciclo_b>"
+ciclo_a = "echo Paso A, luego <axes::scripts::ciclo_b>"
 ciclo_b = "Paso B, luego <axes::scripts::ciclo_c>"
 ciclo_c = "Paso C, y de vuelta a <axes::scripts::ciclo_a>"
 
+test_run_cicles = "<axes::run::hello>"
+
 # --- Build Workflows ---
 build = { desc = "Builds the project in debug mode with fast compilation.", run = "cargo build <axes::params>" }
-build_r = { desc = "Builds the project in release mode for distribution.", run = "cargo build <axes::params::release(alias='r')>" }
+build_release = { desc = "Builds the project in release mode for distribution.", run = "cargo build --release" }
 
 # --- Run and Test Workflows ---
 run = { desc = "Runs the project, passing all arguments to the binary.", run = "cargo run -- <axes::params>" }

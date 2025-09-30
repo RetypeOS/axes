@@ -129,10 +129,19 @@ pub struct ParameterModifiers {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum RunSpec {
+    /// Represents a literal shell command, e.g., `<axes::run("./get_version.sh")>`
+    Literal(String),
+    /// Represents a reference to another axes script, e.g., `<axes::run::get_version_script>`
+    Script(String),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum TemplateComponent {
     Literal(String),
     Parameter(ParameterDef),
     GenericParams,
+    Run(RunSpec),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
