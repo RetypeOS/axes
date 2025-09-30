@@ -79,7 +79,9 @@ pub fn resolve_context(context: &str, index: &GlobalIndex) -> ContextResult<(Uui
     let global_project_name = &index.projects.get(&GLOBAL_PROJECT_UUID).unwrap().name;
 
     // --- 1. Determine the starting point of the traversal ---
-    let (mut current_uuid, mut current_parent_uuid) = if let Some(alias_name) = first_part.strip_suffix('!') {
+    let (mut current_uuid, mut current_parent_uuid) = if let Some(alias_name) =
+        first_part.strip_suffix('!')
+    {
         // --- PRIORITY 1A: Absolute resolution via Alias ---
         let uuid = index
             .aliases
@@ -143,12 +145,14 @@ pub fn resolve_context(context: &str, index: &GlobalIndex) -> ContextResult<(Uui
                 }
                 "*" => {
                     let global_entry = index.projects.get(&GLOBAL_PROJECT_UUID).unwrap();
-                    let child_uuid = resolve_last_used_child(GLOBAL_PROJECT_UUID, global_entry, index)?;
+                    let child_uuid =
+                        resolve_last_used_child(GLOBAL_PROJECT_UUID, global_entry, index)?;
                     (child_uuid, Some(GLOBAL_PROJECT_UUID))
                 }
                 name => {
                     let global_entry = index.projects.get(&GLOBAL_PROJECT_UUID).unwrap();
-                    let child_uuid = find_child_by_name(GLOBAL_PROJECT_UUID, global_entry, name, index)?;
+                    let child_uuid =
+                        find_child_by_name(GLOBAL_PROJECT_UUID, global_entry, name, index)?;
                     (child_uuid, Some(GLOBAL_PROJECT_UUID))
                 }
             }

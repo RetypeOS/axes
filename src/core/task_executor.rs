@@ -36,13 +36,16 @@ pub fn assemble_final_command(
             TemplateComponent::GenericParams => {
                 final_command.push_str(resolver.get_generic_value());
             }
-                        TemplateComponent::Run(spec) => {
+            TemplateComponent::Run(spec) => {
                 let command_to_run = match spec {
                     RunSpec::Literal(cmd) => cmd.clone(),
                     RunSpec::Script(script_name) => {
                         // Find the script in the config and flatten it to a string.
                         let cacheable = config.scripts.get(script_name).ok_or_else(|| {
-                            anyhow!("Script '{}' referenced in <axes::run::...> not found.", script_name)
+                            anyhow!(
+                                "Script '{}' referenced in <axes::run::...> not found.",
+                                script_name
+                            )
                         })?;
                         match cacheable {
                             CacheableValue::Raw(fc) => fc.command_lines.join(" && "),
@@ -56,13 +59,13 @@ pub fn assemble_final_command(
                         }
                     }
                 };
- 
+
                 let output = executor::execute_and_capture_output(
                     &command_to_run,
                     &config.project_root,
                     &config.env,
                 )?;
- 
+
                 // Clean the output (remove trailing newlines/spaces) before injection.
                 final_command.push_str(output.trim());
             }

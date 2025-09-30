@@ -136,8 +136,12 @@ fn print_variables(config: &ResolvedConfig, key: &str, title: &str) {
                                             "<axes::params>".to_string()
                                         }
                                         TemplateComponent::Run(spec) => match spec {
-                                            crate::models::RunSpec::Literal(cmd) => format!("<axes::run('{}')>", cmd),
-                                            crate::models::RunSpec::Script(name) => format!("<axes::run::{}>", name),
+                                            crate::models::RunSpec::Literal(cmd) => {
+                                                format!("<axes::run('{}')>", cmd)
+                                            }
+                                            crate::models::RunSpec::Script(name) => {
+                                                format!("<axes::run::{}>", name)
+                                            }
                                         },
                                     })
                                     .collect::<String>()

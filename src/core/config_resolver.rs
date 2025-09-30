@@ -5,7 +5,9 @@ use crate::constants::{
 };
 use crate::core::parameters;
 use crate::models::{
-    CacheableValue, CanonicalCommand, Command, CommandExecution, FlattenedCommand, GlobalIndex, IndexEntry, ProjectConfig, ResolvedConfig, ResolvedOptionsConfig, RunSpec, Runnable, SerializableConfigCache, Task, TemplateComponent
+    CacheableValue, CanonicalCommand, Command, CommandExecution, FlattenedCommand, GlobalIndex,
+    IndexEntry, ProjectConfig, ResolvedConfig, ResolvedOptionsConfig, RunSpec, Runnable,
+    SerializableConfigCache, Task, TemplateComponent,
 };
 use anyhow::{Context, Result};
 use bincode::error::DecodeError;
@@ -19,7 +21,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 lazy_static! {
-    static ref COMPOSITE_TOKEN_RE: Regex = Regex::new(r"<axes::(vars::|scripts::|run::)([^>(')]+)>").unwrap();
+    static ref COMPOSITE_TOKEN_RE: Regex =
+        Regex::new(r"<axes::(vars::|scripts::|run::)([^>(')]+)>").unwrap();
 }
 
 #[derive(Error, Debug)]
@@ -154,7 +157,8 @@ fn expand_and_get_task_internal(
         return Err(ResolverError::MaxRecursionDepth {
             depth,
             key: stack_key.clone(),
-        }.into());
+        }
+        .into());
     }
     if !recursion_stack.insert(stack_key.clone()) {
         let cycle_path = recursion_stack
@@ -164,7 +168,8 @@ fn expand_and_get_task_internal(
             .join(" -> ");
         return Err(ResolverError::CircularDependency {
             cycle_path: format!("{} -> {}", cycle_path, stack_key),
-        }.into());
+        }
+        .into());
     }
 
     // --- In-Memory Cache Check: Return immediately if already expanded ---
@@ -218,7 +223,7 @@ fn expand_and_get_task_internal(
             for caps in captures {
                 let full_match = caps.get(0).unwrap();
                 let namespace_with_colon = caps.get(1).unwrap().as_str(); // e.g., "scripts::"
-                let sub_key = caps.get(2).unwrap().as_str();               // e.g., "build_release"
+                let sub_key = caps.get(2).unwrap().as_str(); // e.g., "build_release"
 
                 next_str.push_str(&current_str[last_match_end..full_match.start()]);
 
@@ -292,19 +297,21 @@ fn expand_and_get_task_internal(
                 );
             }
             if temp_cow.contains("<axes::name>") {
-                temp_cow =
-                    std::borrow::Cow::Owned(temp_cow.replace("<axes::name>", &config.qualified_name));
+                temp_cow = std::borrow::Cow::Owned(
+                    temp_cow.replace("<axes::name>", &config.qualified_name),
+                );
             }
             if temp_cow.contains("<axes::uuid>") {
                 temp_cow = std::borrow::Cow::Owned(
                     temp_cow.replace("<axes::uuid>", &config.uuid.to_string()),
                 );
             }
-            if let Some(version) = &config.version {
-                if temp_cow.contains("<axes::version>") {
-                    temp_cow = std::borrow::Cow::Owned(temp_cow.replace("<axes::version>", version));
-                }
+            if let Some(version) = &config.version
+                && temp_cow.contains("<axes::version>")
+            {
+                temp_cow = std::borrow::Cow::Owned(temp_cow.replace("<axes::version>", version));
             }
+
             temp_cow
         };
         let statically_expanded_str = cow;

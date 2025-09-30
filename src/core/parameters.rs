@@ -152,12 +152,23 @@ pub fn discover_and_parse(fully_expanded_string: &str) -> Result<Vec<TemplateCom
             components.push(TemplateComponent::Parameter(def));
         } else if let Some(run_spec) = token_content.strip_prefix("run") {
             if let Some(script_name) = run_spec.strip_prefix("::") {
-                components.push(TemplateComponent::Run(RunSpec::Script(script_name.trim().to_string())));
+                components.push(TemplateComponent::Run(RunSpec::Script(
+                    script_name.trim().to_string(),
+                )));
             } else if run_spec.starts_with("(\'") && run_spec.ends_with("\')") {
-                let command = run_spec.strip_prefix("('").unwrap().strip_suffix("')").unwrap();
-                components.push(TemplateComponent::Run(RunSpec::Literal(command.to_string())));
+                let command = run_spec
+                    .strip_prefix("('")
+                    .unwrap()
+                    .strip_suffix("')")
+                    .unwrap();
+                components.push(TemplateComponent::Run(RunSpec::Literal(
+                    command.to_string(),
+                )));
             } else {
-                return Err(anyhow!("Invalid run syntax in token: '{}'. Expected <axes::run::script_name> or <axes::run('command')>.", full_match.as_str()));
+                return Err(anyhow!(
+                    "Invalid run syntax in token: '{}'. Expected <axes::run::script_name> or <axes::run('command')>.",
+                    full_match.as_str()
+                ));
             }
         } else {
             return Err(anyhow!(
