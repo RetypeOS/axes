@@ -2,12 +2,13 @@
 
 use crate::{
     core::parameters::ArgResolver,
-    models::{CacheableValue, ResolvedConfig, RunSpec, Task, TemplateComponent},
+    models::{ResolvedConfig, RunSpec, Task, TemplateComponent},
     system::executor,
 };
 use anyhow::{Context, Result, anyhow};
 use colored::*;
 use rayon::prelude::*;
+use std::fmt::Write;
 
 ///
 /// Assembles the final command string for a single `CommandExecution` by replacing
@@ -39,25 +40,6 @@ pub fn assemble_final_command(
             TemplateComponent::Run(spec) => {
                 let command_to_run = match spec {
                     RunSpec::Literal(cmd) => cmd.clone(),
-                    RunSpec::Script(script_name) => {
-                        // Find the script in the config and flatten it to a string.
-                        let cacheable = config.scripts.get(script_name).ok_or_else(|| {
-                            anyhow!(
-                                "Script '{}' referenced in <axes::run::...> not found.",
-                                script_name
-                            )
-                        })?;
-                        match cacheable {
-                            CacheableValue::Raw(fc) => fc.command_lines.join(" && "),
-                            // This case is unlikely if validation passed, but we handle it.
-                            CacheableValue::Expanded(task) => task
-                                .commands
-                                .iter()
-                                .map(|cmd| cmd.template.iter().map(crate::core::config_resolver::template_component_to_string).collect::<String>())
-                                .collect::<Vec<_>>()
-                                .join(" && "),
-                        }
-                    }
                 };
 
                 let output = executor::execute_and_capture_output(
@@ -118,7 +100,7 @@ fn execute_single_command(
         command_str.to_string()
     };
 
-    println!("\n> {}", command_str.green());
+    println!("\n→ {}", command_str.green());
     Ok(executor::execute_command(
         &command_to_run,
         &config.project_root,
@@ -127,18 +109,36 @@ fn execute_single_command(
 }
 
 fn execute_parallel_batch(batch: &[String], config: &ResolvedConfig) -> Result<()> {
-    println!("\n⚡ Running {} scripts in parallel...", batch.len());
+    // --- STAGE 1: Build the entire header block as a single string ---
+    // This is more efficient and prevents console flickering by using a single print call.
+    let mut header_block = String::new();
+    // `unwrap()` is safe here because writing to a String never fails.
+    writeln!(
+        header_block,
+        "\n{} {}",
+        "┌─".dimmed(),
+        format!("Running {} commands in parallel...", batch.len()).blue()
+    )
+    .unwrap();
 
+    for command_str in batch.iter() {
+        //let prefix = if i == batch.len() - 1 { "└─" } else { "├─" };
+        writeln!(header_block, "{} {}", "├─˃".dimmed(), command_str.green()).unwrap();
+    }
+
+    // Print the complete header in one go.
+    print!("{}", header_block);
+
+    // --- STAGE 2: Execute all commands in parallel ---
     let results: Result<Vec<()>> = batch
         .par_iter()
         .map(|command_str| {
-            println!("  > {}", command_str.cyan());
             executor::execute_command(command_str, &config.project_root, &config.env)
                 .map_err(anyhow::Error::from)
         })
         .collect();
 
     results.with_context(|| "A command in the parallel batch failed.")?;
-    println!("{}", "⚡ Parallel batch completed.".blue());
+    println!("{}{}", "└─".dimmed(), "Parallel batch completed.".blue());
     Ok(())
 }

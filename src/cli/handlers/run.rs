@@ -31,12 +31,14 @@ struct RunArgs {
 pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     // 1. Initial argument parsing and configuration resolution.
     let run_args = RunArgs::try_parse_from(&args)?;
+    //println!("{:?}", context);
     let context_str = context.unwrap_or_else(|| ".".to_string());
+    //println!("{}", context_str);
     let index = index_manager::load_and_ensure_global_project()?;
     let mut config = commons::resolve_config_from_context_or_session(Some(context_str), &index)?;
 
     println!(
-        "\n▶️  Running script '{}' for project '{}'...",
+        "▶️  Running script '{}' for project '{}'...",
         run_args.script.cyan(),
         config.qualified_name.yellow()
     );

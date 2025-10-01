@@ -15,28 +15,33 @@ hello = """
 test_q = "-comando info <axes::vars::_param_1> <axes::params::1(map='--info', default='algo')>"
 
 test_w = [
-    "echo 1",
-    "echo 2",
-    "echo 3",
-    "echo 4",
-    "echo 5",
-    "echo 6",
-    "echo 7",
+    "> echo 1",
+    "> echo 2",
+    "> echo 3",
+    "> echo 4",
+    "> echo 5",
+    "> echo 6",
+    "> echo 7",
     "echo 8",
     "echo 9",
-    "echo 10",
-    "echo 11",
-    "echo 12",
-    "echo 13",
+    "> echo 10",
+    "> echo 11",
+    "> echo 12",
+    "> echo 13",
     "echo 14",
     "echo 15",
 ]
+
+test_complex = ["<axes::scripts::test_w>", "<axes::scripts::test_w>"]
 
 test_rayon = "> echo Running 1"
 
 test_run = "echo algo <axes::run::hello>"
 
 test_vel = "powershell ./.axes/command_test.ps1 '<axes::params>'"
+
+test_run_script = "echo algo: <axes::run('git --version')>"
+test_run_script_s = "echo algo: <axes::run::test_rayon>"
 
 # --- Escenario de Error 1: Variable no encontrada en anidamiento profundo ---
 deploy_frontend = "-npm run build -- --config <axes::scripts::frontend_config>"

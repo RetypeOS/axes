@@ -8,7 +8,7 @@ use regex::Regex;
 use std::collections::{HashMap, HashSet};
 
 lazy_static! {
-    static ref TOKEN_RE: Regex = Regex::new(r"<axes::([^>]+)>").unwrap();
+    static ref TOKEN_RE: Regex = Regex::new(r"<axes::(params|params::[^>]+|run::[^>]+|run\('[^']+'\))>").unwrap();
 }
 
 lazy_static! {
@@ -127,20 +127,20 @@ fn parse_modifiers_string(s: &str) -> Result<ParameterModifiers> {
     Ok(modifiers)
 }
 
-/// Escanea una cadena y la descompone en una secuencia de `TemplateComponent`.
-pub fn discover_and_parse(fully_expanded_string: &str) -> Result<Vec<TemplateComponent>> {
+/// Scans a statically-expanded string and breaks it down into a sequence of TemplateComponents.
+pub fn discover_and_parse(statically_expanded_string: &str) -> Result<Vec<TemplateComponent>> {
     log::debug!(
-        "Discovering parameters from string: '{}'",
-        fully_expanded_string
+        "Discovering dynamic tokens from string: '{}'",
+        statically_expanded_string
     );
     let mut components = Vec::new();
     let mut last_match_end = 0;
 
-    for caps in TOKEN_RE.captures_iter(fully_expanded_string) {
+    for caps in TOKEN_RE.captures_iter(statically_expanded_string) {
         let full_match = caps.get(0).unwrap();
         let token_content = caps.get(1).unwrap().as_str().trim();
 
-        let literal_part = &fully_expanded_string[last_match_end..full_match.start()];
+        let literal_part = &statically_expanded_string[last_match_end..full_match.start()];
         if !literal_part.is_empty() {
             components.push(TemplateComponent::Literal(literal_part.to_string()));
         }
@@ -151,11 +151,7 @@ pub fn discover_and_parse(fully_expanded_string: &str) -> Result<Vec<TemplateCom
             let def = parse_parameter_token(full_match.as_str(), param_spec)?;
             components.push(TemplateComponent::Parameter(def));
         } else if let Some(run_spec) = token_content.strip_prefix("run") {
-            if let Some(script_name) = run_spec.strip_prefix("::") {
-                components.push(TemplateComponent::Run(RunSpec::Script(
-                    script_name.trim().to_string(),
-                )));
-            } else if run_spec.starts_with("(\'") && run_spec.ends_with("\')") {
+            if run_spec.starts_with("('") && run_spec.ends_with("')") {
                 let command = run_spec
                     .strip_prefix("('")
                     .unwrap()
@@ -165,13 +161,14 @@ pub fn discover_and_parse(fully_expanded_string: &str) -> Result<Vec<TemplateCom
                     command.to_string(),
                 )));
             } else {
-                return Err(anyhow!(
+                 return Err(anyhow!(
                     "Invalid run syntax in token: '{}'. Expected <axes::run::script_name> or <axes::run('command')>.",
                     full_match.as_str()
                 ));
             }
         } else {
-            return Err(anyhow!(
+            // This case should be unreachable if the TOKEN_RE is correct.
+             return Err(anyhow!(
                 "Found an unexpected or malformed token: '{}'",
                 full_match.as_str()
             ));
@@ -180,7 +177,7 @@ pub fn discover_and_parse(fully_expanded_string: &str) -> Result<Vec<TemplateCom
         last_match_end = full_match.end();
     }
 
-    let remaining_literal = &fully_expanded_string[last_match_end..];
+    let remaining_literal = &statically_expanded_string[last_match_end..];
     if !remaining_literal.is_empty() {
         components.push(TemplateComponent::Literal(remaining_literal.to_string()));
     }

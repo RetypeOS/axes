@@ -21,6 +21,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 lazy_static! {
+    // This regex is now simplified back to only expanding `vars` and `scripts`.
+    // `run` tokens are handled by the final parameter parser.
     static ref COMPOSITE_TOKEN_RE: Regex =
         Regex::new(r"<axes::(vars::|scripts::|run::)([^>(')]+)>").unwrap();
 }
@@ -172,7 +174,7 @@ fn expand_and_get_task_internal(
         .into());
     }
 
-    // --- In-Memory Cache Check: Return immediately if already expanded ---
+    // --- In-Memory Cache Check ---
     let flattened_command = {
         let cacheable = get_cacheable_value(config, key, kind)?;
         match cacheable {
@@ -201,123 +203,102 @@ fn expand_and_get_task_internal(
     let re_composite = &COMPOSITE_TOKEN_RE;
 
     for line in &flattened_command.command_lines {
-        // --- Parse execution prefixes (-, >) ---
-        let (ignore_errors, run_in_parallel, mut current_str) = if kind == ValueKind::Script {
+        let (ignore_errors, run_in_parallel, original_str) = if kind == ValueKind::Script {
             let (ie, rip, s) = parse_execution_prefixes(line);
             (ie, rip, s.to_string())
         } else {
             (false, false, line.clone())
         };
 
-        // --- STAGE 1: Composite Token Expansion Loop ---
-        // This loop recursively resolves `<axes::vars::...>` and `<axes::scripts::...>` tokens.
-        // It also validates `<axes::run::script_name>` tokens.
-        loop {
-            let captures: Vec<_> = re_composite.captures_iter(&current_str).collect();
-            if captures.is_empty() {
-                break;
-            }
+        // --- STAGE 1: Single-Pass Composite Token Expansion ---
+        let mut expanded_composite_str = String::new();
+        let mut last_match_end = 0;
+        for caps in re_composite.captures_iter(&original_str) {
+            let full_match = caps.get(0).unwrap();
+            let namespace_with_colon = caps.get(1).unwrap().as_str();
+            let sub_key = caps.get(2).unwrap().as_str();
 
-            let mut next_str = String::new();
-            let mut last_match_end = 0;
-            for caps in captures {
-                let full_match = caps.get(0).unwrap();
-                let namespace_with_colon = caps.get(1).unwrap().as_str(); // e.g., "scripts::"
-                let sub_key = caps.get(2).unwrap().as_str(); // e.g., "build_release"
+            expanded_composite_str.push_str(&original_str[last_match_end..full_match.start()]);
 
-                next_str.push_str(&current_str[last_match_end..full_match.start()]);
-
-                let sub_value_str = match namespace_with_colon {
-                    "vars::" | "scripts::" => {
-                        let sub_kind = if namespace_with_colon == "vars::" {
-                            ValueKind::Variable
-                        } else {
-                            ValueKind::Script
-                        };
-
-                        let sub_task = expand_and_get_task_internal(
-                            sub_key,
-                            sub_kind,
-                            config,
-                            recursion_stack,
-                            depth + 1,
+            let sub_value_str = match namespace_with_colon {
+                "vars::" | "scripts::" => {
+                    let sub_kind = if namespace_with_colon == "vars::" {
+                        ValueKind::Variable
+                    } else {
+                        ValueKind::Script
+                    };
+                    let sub_task = expand_and_get_task_internal(
+                        sub_key,
+                        sub_kind,
+                        config,
+                        recursion_stack,
+                        depth + 1,
+                    )
+                    .with_context(|| {
+                        format!(
+                            "While expanding token '{}' in '{}:{}'",
+                            full_match.as_str(),
+                            kind_to_str(kind),
+                            key
                         )
-                        .with_context(|| {
-                            format!(
-                                "While expanding token '{}' in '{}:{}'",
-                                full_match.as_str(),
-                                kind_to_str(kind),
-                                key
-                            )
-                        })?;
+                    })?;
+                    sub_task
+                        .commands
+                        .iter()
+                        .map(|cmd| {
+                            cmd.template
+                                .iter()
+                                .map(template_component_to_string)
+                                .collect::<String>()
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" && ")
+                }
+                "run::" => {
+                    let _ = expand_and_get_task_internal(
+                        sub_key,
+                        ValueKind::Script,
+                        config,
+                        recursion_stack,
+                        depth + 1,
+                    )?;
+                    full_match.as_str().to_string()
+                }
+                _ => unreachable!(),
+            };
 
-                        // Flatten the resolved sub-task back into a string for injection.
-                        sub_task
-                            .commands
-                            .iter()
-                            .map(|cmd| {
-                                cmd.template
-                                    .iter()
-                                    .map(template_component_to_string)
-                                    .collect::<String>()
-                            })
-                            .collect::<Vec<_>>()
-                            .join(" && ")
-                    }
-                    "run::" => {
-                        // VALIDATION phase for <axes::run::script_name>.
-                        // We recursively expand to check for existence and cycles.
-                        let _ = expand_and_get_task_internal(
-                            sub_key,
-                            ValueKind::Script,
-                            config,
-                            recursion_stack,
-                            depth + 1,
-                        )?;
-                        // We return the original token so it can be parsed into a `RunSpec`.
-                        full_match.as_str().to_string()
-                    }
-                    _ => unreachable!(), // Regex ensures no other cases.
-                };
-
-                next_str.push_str(&sub_value_str);
-                last_match_end = full_match.end();
-            }
-            next_str.push_str(&current_str[last_match_end..]);
-            current_str = next_str;
+            expanded_composite_str.push_str(&sub_value_str);
+            last_match_end = full_match.end();
         }
+        expanded_composite_str.push_str(&original_str[last_match_end..]);
 
         // --- STAGE 2: Simple/Static Token Expansion ---
-        // The string is now free of composite tokens. We now expand metadata tokens.
         let cow = {
-            let mut temp_cow = std::borrow::Cow::Borrowed(current_str.as_str());
+            let mut temp_cow = std::borrow::Cow::Borrowed(expanded_composite_str.as_str());
             if temp_cow.contains("<axes::path>") {
                 temp_cow = std::borrow::Cow::Owned(
                     temp_cow.replace("<axes::path>", &config.project_root.to_string_lossy()),
                 );
             }
             if temp_cow.contains("<axes::name>") {
-                temp_cow = std::borrow::Cow::Owned(
-                    temp_cow.replace("<axes::name>", &config.qualified_name),
-                );
+                temp_cow =
+                    std::borrow::Cow::Owned(temp_cow.replace("<axes::name>", &config.qualified_name));
             }
             if temp_cow.contains("<axes::uuid>") {
                 temp_cow = std::borrow::Cow::Owned(
                     temp_cow.replace("<axes::uuid>", &config.uuid.to_string()),
                 );
             }
-            if let Some(version) = &config.version
-                && temp_cow.contains("<axes::version>")
-            {
-                temp_cow = std::borrow::Cow::Owned(temp_cow.replace("<axes::version>", version));
+            if let Some(version) = &config.version {
+                if temp_cow.contains("<axes::version>") {
+                    temp_cow = std::borrow::Cow::Owned(temp_cow.replace("<axes::version>", version));
+                }
             }
-
             temp_cow
         };
         let statically_expanded_str = cow;
 
         // --- STAGE 3: Final Parsing into Template Components ---
-        // This string now only contains literals and dynamic tokens (`params`, `run`).
         let components =
             parameters::discover_and_parse(&statically_expanded_str).with_context(|| {
                 format!(
@@ -334,11 +315,10 @@ fn expand_and_get_task_internal(
         });
     }
 
-    // --- Cache the final expanded task in memory for subsequent calls ---
+    // --- Cache the final expanded task in memory ---
     let cacheable_mut = get_cacheable_value_mut(config, key, kind)?;
     *cacheable_mut = CacheableValue::Expanded(new_task.clone());
 
-    // Backtrack from recursion stack
     recursion_stack.remove(&stack_key);
     Ok(new_task)
 }
@@ -352,7 +332,6 @@ pub(crate) fn template_component_to_string(c: &TemplateComponent) -> String {
         TemplateComponent::GenericParams => "<axes::params>".to_string(),
         TemplateComponent::Run(spec) => match spec {
             RunSpec::Literal(cmd) => format!("<axes::run('{}')>", cmd),
-            RunSpec::Script(name) => format!("<axes::run::{}>", name),
         },
     }
 }

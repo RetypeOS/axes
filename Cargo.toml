@@ -32,4 +32,6 @@ toml = "0.9.5"
 serde = { version = "1.0.219", features = ["derive"] }
 
 [profile.release]
-debug = true
+#debug = true
+#lto = true
+#strip = "symbols" # "debuginfo" # "symbols"
