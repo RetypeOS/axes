@@ -2,15 +2,10 @@
 
 use crate::{
     cli::handlers::commons,
-    core::{
-        config_resolver::{self, ValueKind},
-        index_manager,
-        parameters::ArgResolver,
-        task_executor,
-    },
+    core::{config_resolver, index_manager, parameters::ArgResolver, task_executor},
     models::TemplateComponent,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
 use colored::*;
 
@@ -31,18 +26,20 @@ struct RunArgs {
 pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     // 1. Initial argument parsing and configuration resolution.
     let run_args = RunArgs::try_parse_from(&args)?;
+    //println!("{:?}", context);
     let context_str = context.unwrap_or_else(|| ".".to_string());
+    //println!("{}", context_str);
     let index = index_manager::load_and_ensure_global_project()?;
     let mut config = commons::resolve_config_from_context_or_session(Some(context_str), &index)?;
 
     println!(
-        "\n▶️  Running script '{}' for project '{}'...",
+        "▶️  Running script '{}' for project '{}'...",
         run_args.script.cyan(),
         config.qualified_name.yellow()
     );
 
     // 2. Resolve the script into a `Task` object using the new expander logic.
-    let task = config_resolver::resolve_task(&mut config, &run_args.script, ValueKind::Script)?;
+    let task = config_resolver::resolve_script_task(&mut config, &run_args.script, &index)?;
 
     if task.commands.is_empty() {
         println!("{}", "Script is empty. Nothing to execute.".yellow());
@@ -74,8 +71,6 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
 
     // 6. Persist any changes to the cache (from lazy expansions).
     // This is now a no-op since the cache is in-memory only, but we keep it for potential future use.
-    config_resolver::save_config_cache(&config, &index)
-        .with_context(|| "Failed to save updated configuration cache.")?;
 
     println!(
         "\n✅ {} Script '{}' completed successfully.",

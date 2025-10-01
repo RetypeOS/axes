@@ -1,6 +1,5 @@
 // src/cli/handlers/start.rs
 
-use crate::core::config_resolver::ValueKind;
 use crate::{
     cli::handlers::commons,
     core::{config_resolver, index_manager, parameters::ArgResolver},
@@ -39,24 +38,10 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     let mut config = commons::resolve_config_from_context_or_session(Some(context_str), &index)?;
 
     // 3. Resolve `at_start` and `at_exit` into `Task` objects.
-    let task_start = if config.options.at_start.is_some() {
-        Some(config_resolver::resolve_task(
-            &mut config,
-            "at_start",
-            ValueKind::Script,
-        )?)
-    } else {
-        None
-    };
-    let task_exit = if config.options.at_exit.is_some() {
-        Some(config_resolver::resolve_task(
-            &mut config,
-            "at_exit",
-            ValueKind::Script,
-        )?)
-    } else {
-        None
-    };
+    let task_start =
+        config_resolver::resolve_hook_task(&mut config, config_resolver::Hook::AtStart, &index)?;
+    let task_exit =
+        config_resolver::resolve_hook_task(&mut config, config_resolver::Hook::AtExit, &index)?;
 
     // 4. Collect parameter definitions from BOTH tasks and validate them.
     let mut all_definitions = Vec::new();

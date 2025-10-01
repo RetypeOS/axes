@@ -1,15 +1,11 @@
 // src/core/parameters.rs
 
-use crate::models::{ParameterDef, ParameterKind, ParameterModifiers, RunSpec, TemplateComponent};
+use crate::models::{ParameterDef, ParameterKind, ParameterModifiers};
 use anyhow::{Context, Result, anyhow};
 use colored::*;
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::collections::{HashMap, HashSet};
-
-lazy_static! {
-    static ref TOKEN_RE: Regex = Regex::new(r"<axes::([^>]+)>").unwrap();
-}
+use std::collections::HashMap;
 
 lazy_static! {
     static ref PARAMETER_TOKEN_CONTENT_RE: Regex =
@@ -22,6 +18,19 @@ lazy_static! {
 }
 
 // --- DATA STRUCTS ---
+
+/// A preliminary, intermediate representation of a token found during the initial parsing pass.
+/// This distinguishes between different token types before the recursive expansion begins.
+#[derive(Debug)]
+pub enum PreComponent<'a> {
+    Literal(&'a str),
+    Var(&'a str),
+    Script(&'a str),
+    RunScript(&'a str),
+    RunLiteral(&'a str),
+    Param { full_match: &'a str, spec: &'a str },
+    GenericParams,
+}
 
 /// Representa un único argumento de la CLI con su estado de consumo.
 #[derive(Debug, Clone)]
@@ -50,9 +59,9 @@ pub struct ArgResolver {
 
 // --- PARSER DE DEFINICIONES (DE FASE 1) ---
 
-/// Parsea el contenido de un token de parámetro, ej. "0(required)" o "target(alias='-t')".
-fn parse_parameter_token(original_token: &str, content: &str) -> Result<ParameterDef> {
-    // Regex para capturar el especificador (nombre/índice) y el bloque de modificadores.
+/// Parses the content of a parameter token, e.g., "0(required)" or "target(alias='-t')".
+/// This is called by the main expansion engine in `config_resolver`.
+pub fn parse_parameter_token(original_token: &str, content: &str) -> Result<ParameterDef> {
     let caps = PARAMETER_TOKEN_CONTENT_RE
         .captures(content)
         .ok_or_else(|| anyhow!("Invalid parameter format in token: {}", original_token))?;
@@ -81,7 +90,7 @@ fn parse_parameter_token(original_token: &str, content: &str) -> Result<Paramete
     })
 }
 
-/// Parsea la cadena de modificadores, ej. "required, default='staging'".
+/// Parses a modifier string, e.g., "required, default='staging'".
 fn parse_modifiers_string(s: &str) -> Result<ParameterModifiers> {
     log::debug!("Parsing modifiers string: '{}'", s);
     let mut modifiers = ParameterModifiers::default();
@@ -89,14 +98,12 @@ fn parse_modifiers_string(s: &str) -> Result<ParameterModifiers> {
         return Ok(modifiers);
     }
 
-    // Usamos una regex más robusta para manejar comillas y espacios
     for caps in MODIFIERS_RE.captures_iter(s) {
         let key = caps.get(1).map_or("", |m| m.as_str()).trim();
         if key.is_empty() {
             continue;
         }
 
-        // El valor puede estar en uno de tres grupos: comillas simples, dobles o sin comillas.
         let value = caps
             .get(2)
             .or(caps.get(3))
@@ -125,68 +132,6 @@ fn parse_modifiers_string(s: &str) -> Result<ParameterModifiers> {
 
     log::debug!("Parsed modifiers: {:?}", modifiers);
     Ok(modifiers)
-}
-
-/// Escanea una cadena y la descompone en una secuencia de `TemplateComponent`.
-pub fn discover_and_parse(fully_expanded_string: &str) -> Result<Vec<TemplateComponent>> {
-    log::debug!(
-        "Discovering parameters from string: '{}'",
-        fully_expanded_string
-    );
-    let mut components = Vec::new();
-    let mut last_match_end = 0;
-
-    for caps in TOKEN_RE.captures_iter(fully_expanded_string) {
-        let full_match = caps.get(0).unwrap();
-        let token_content = caps.get(1).unwrap().as_str().trim();
-
-        let literal_part = &fully_expanded_string[last_match_end..full_match.start()];
-        if !literal_part.is_empty() {
-            components.push(TemplateComponent::Literal(literal_part.to_string()));
-        }
-
-        if token_content == "params" {
-            components.push(TemplateComponent::GenericParams);
-        } else if let Some(param_spec) = token_content.strip_prefix("params::") {
-            let def = parse_parameter_token(full_match.as_str(), param_spec)?;
-            components.push(TemplateComponent::Parameter(def));
-        } else if let Some(run_spec) = token_content.strip_prefix("run") {
-            if let Some(script_name) = run_spec.strip_prefix("::") {
-                components.push(TemplateComponent::Run(RunSpec::Script(
-                    script_name.trim().to_string(),
-                )));
-            } else if run_spec.starts_with("(\'") && run_spec.ends_with("\')") {
-                let command = run_spec
-                    .strip_prefix("('")
-                    .unwrap()
-                    .strip_suffix("')")
-                    .unwrap();
-                components.push(TemplateComponent::Run(RunSpec::Literal(
-                    command.to_string(),
-                )));
-            } else {
-                return Err(anyhow!(
-                    "Invalid run syntax in token: '{}'. Expected <axes::run::script_name> or <axes::run('command')>.",
-                    full_match.as_str()
-                ));
-            }
-        } else {
-            return Err(anyhow!(
-                "Found an unexpected or malformed token: '{}'",
-                full_match.as_str()
-            ));
-        }
-
-        last_match_end = full_match.end();
-    }
-
-    let remaining_literal = &fully_expanded_string[last_match_end..];
-    if !remaining_literal.is_empty() {
-        components.push(TemplateComponent::Literal(remaining_literal.to_string()));
-    }
-
-    log::debug!("Discovered components: {:?}", components);
-    Ok(components)
 }
 
 // --- IMPLEMENTACIÓN DEL ESTADO DE LA CLI (FASE 2) ---
@@ -390,17 +335,6 @@ impl ArgResolver {
     ) -> Result<Self> {
         let mut cli_state = CliInputState::new(cli_params)?;
         let mut resolved_values = HashMap::new();
-
-        // Validar que no haya definiciones duplicadas (ej. dos <axes::params::0>).
-        let mut seen_defs = HashSet::new();
-        for def in definitions {
-            if !seen_defs.insert(&def.kind) {
-                return Err(anyhow!(
-                    "Parameter '{:?}' is defined multiple times in the script.",
-                    def.kind
-                ));
-            }
-        }
 
         // Bucle de resolución lineal.
         for def in definitions {

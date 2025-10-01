@@ -139,9 +139,6 @@ fn print_variables(config: &ResolvedConfig, key: &str, title: &str) {
                                             crate::models::RunSpec::Literal(cmd) => {
                                                 format!("<axes::run('{}')>", cmd)
                                             }
-                                            crate::models::RunSpec::Script(name) => {
-                                                format!("<axes::run::{}>", name)
-                                            }
                                         },
                                     })
                                     .collect::<String>()

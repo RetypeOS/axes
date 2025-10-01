@@ -1,35 +1,64 @@
 [package]
 name = "axes"
-version = "0.1.9-Alpha"
+version = "0.2.0-Beta"
 edition = "2024"
 license = "MIT"
 
 [dependencies]
+# Error Handling
 anyhow = "1.0.99"
+thiserror = "2.0.16"
+
+# Serialization & Configuration
 bincode = {version = "2.0.1", features = ["serde"] }
-clap = { version = "4.5.47", features = ["derive"] }
-colored = "3.0.0"
-ctrlc = { version = "3.5.0", features = ["termination"] }
-dialoguer = "0.12.0"
-dirs = "6.0.0"
-dunce = "1.0.5"
-env_logger = "0.11.8"
-lazy_static = "1.5.0"
-log = "0.4.28"
-rayon = "1.11.0"
-regex = "1.11.2"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.145"
-shlex = "1.3.0"
-tempfile = "3.21.0"
-thiserror = "2.0.16"
-tokio = { version = "1.47.1", features = ["full"] }
 toml = "0.9.5"
+
+# Command Line Interface
+clap = { version = "4.5.47", features = ["derive"] }
+dialoguer = "0.12.0"
+colored = "3.0.0"
+
+# System & Filesystem Utilities
+dirs = "6.0.0"
+dunce = "1.0.5"
+tempfile = "3.21.0"
+
+# Logging
+env_logger = "0.11.8"
+log = "0.4.28"
+
+# Concurrency & Parsing
+rayon = "1.11.0"
+regex = "1.11.2"
+lazy_static = "1.5.0"
+shlex = "1.3.0"
+
+# Core Logic
 uuid = { version = "1.18.1", features = ["v4", "serde"] }
+
+# Asynchronous Runtime
+tokio = { version = "1.47.1", features = ["rt-multi-thread", "process", "signal", "macros"] }
+
 
 [build-dependencies]
 toml = "0.9.5"
 serde = { version = "1.0.219", features = ["derive"] }
 
 [profile.release]
-debug = true
+# This profile is optimized for maximum performance and minimum binary size for distribution.
+
+# Link-Time Optimization: Optimizes across crate boundaries. Slower to compile, faster to run.
+lto = true
+
+# No Debug Info: Ensures the compiler can perform all possible optimizations.
+debug = 0
+
+# Strip Symbols: Removes function names and other metadata to drastically reduce binary size.
+# This makes panic stack traces unreadable, but is very useful.
+strip = "symbols"
+
+# Abort on Panic: Immediately terminates the process on panic instead of unwinding the stack.
+# Reduces binary size slightly and is suitable for CLI tools.
+panic = "abort"

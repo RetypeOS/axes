@@ -97,10 +97,10 @@ fn find_command(name: &str) -> Option<&'static CommandDefinition> {
 
 /// The main entry point of the `axes` application.
 fn main() {
-    #[cfg(debug_assertions)]
-    {
-        env_logger::init();
-    }
+    //#[cfg(debug_assertions)]
+    //{
+    env_logger::init();
+    //}
     if let Err(e) = run_cli(Cli::parse()) {
         if let Some(exec_err) = e.downcast_ref::<executor::ExecutionError>()
             && matches!(exec_err, executor::ExecutionError::Interrupted { .. })
