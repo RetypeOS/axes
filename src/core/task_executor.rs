@@ -10,10 +10,6 @@ use colored::*;
 use rayon::prelude::*;
 use std::fmt::Write;
 
-///
-/// Assembles the final command string for a single `CommandExecution` by replacing
-/// parameter tokens with their resolved values from the `ArgResolver`.
-///
 pub fn assemble_final_command(
     template: &[TemplateComponent],
     config: &ResolvedConfig,
@@ -39,18 +35,31 @@ pub fn assemble_final_command(
             }
             TemplateComponent::Run(spec) => {
                 let command_to_run = match spec {
-                    RunSpec::Literal(cmd) => cmd.clone(),
+                    RunSpec::Literal(cmd) => {
+                        // Expand static tokens inside the run literal here.
+                        let temp_template = vec![
+                            TemplateComponent::Path, // Add all possible static tokens
+                            TemplateComponent::Name,
+                            TemplateComponent::Uuid,
+                            TemplateComponent::Version,
+                            TemplateComponent::Literal(cmd.clone()),
+                        ];
+                        // This recursive call is safe because it only renders static values.
+                        let expanded_cmd = assemble_final_command(&temp_template, config, resolver)?;
+                        expanded_cmd
+                    }
                 };
-
                 let output = executor::execute_and_capture_output(
                     &command_to_run,
                     &config.project_root,
                     &config.env,
                 )?;
-
-                // Clean the output (remove trailing newlines/spaces) before injection.
                 final_command.push_str(output.trim());
             }
+            TemplateComponent::Path => final_command.push_str(&config.project_root.to_string_lossy()),
+            TemplateComponent::Name => final_command.push_str(&config.qualified_name),
+            TemplateComponent::Uuid => final_command.push_str(&config.uuid.to_string()),
+            TemplateComponent::Version => final_command.push_str(config.version.as_deref().unwrap_or("")),
         }
     }
     Ok(final_command)

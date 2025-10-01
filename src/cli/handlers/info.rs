@@ -140,6 +140,10 @@ fn print_variables(config: &ResolvedConfig, key: &str, title: &str) {
                                                 format!("<axes::run('{}')>", cmd)
                                             }
                                         },
+                                        TemplateComponent::Path => "<axes::path>".to_string(),
+                                        TemplateComponent::Name => "<axes::name>".to_string(),
+                                        TemplateComponent::Uuid => "<axes::uuid>".to_string(),
+                                        TemplateComponent::Version => "<axes::version>".to_string(),
                                     })
                                     .collect::<String>()
                             })

@@ -251,83 +251,10 @@ impl CliInputState {
     }
 }
 
-// --- IMPLEMENTACIÓN DEL RESOLVEDOR (FASE 2) ---
-
-/// Resuelve el valor final de un único parámetro.
-fn resolve_parameter(def: &ParameterDef, cli_state: &mut CliInputState) -> Result<String> {
-    // --- PASO PRELIMINAR: Determinar si el usuario proporcionó el argumento ---
-    let (is_provided, cli_value) = match &def.kind {
-        ParameterKind::Positional { index } => {
-            let val = cli_state.consume_positional(*index);
-            (val.is_some(), val)
-        }
-        ParameterKind::Named { name } => {
-            let alias = def.modifiers.alias.as_deref();
-            match cli_state.consume_named(name, alias)? {
-                Some(val) => (true, val), // `true` incluso para flags booleanos (Some(None))
-                None => (false, None),
-            }
-        }
-    };
-
-    // --- FASE 1: Comprobar `required` ---
-    if def.modifiers.required && !is_provided {
-        let param_id = match &def.kind {
-            ParameterKind::Positional { index } => {
-                format!("Positional argument at index {}", index)
-            }
-            ParameterKind::Named { name } => format!("Flag '--{}'", name),
-        };
-        return Err(anyhow!(
-            "{} is required but was not provided.",
-            param_id.cyan()
-        ));
-    }
-
-    // --- FASE 2: Si no se proporcionó, el valor es una cadena vacía y terminamos ---
-    if !is_provided && def.modifiers.default_value.is_none() {
-        // No se proporcionó, no es requerido (pasó la fase 1) y no hay default. El resultado es nada.
-        return Ok(String::new());
-    }
-
-    // --- FASE 3 y 4: Determinar el VALOR (CLI > default) ---
-    let final_value: Option<String> = if is_provided {
-        cli_value
-    } else {
-        def.modifiers.default_value.clone()
-    };
-
-    // --- FASE 5 y 6: Formatear la SALIDA usando `map` ---
-    let output_flag_name: Option<String> = match (&def.kind, &def.modifiers.map) {
-        // Un `map` siempre tiene prioridad para el nombre del flag.
-        (_, Some(map_str)) => {
-            if map_str.is_empty() {
-                None
-            } else {
-                Some(map_str.clone())
-            }
-        }
-        // Si no hay `map`, un parámetro nombrado usa su propio nombre.
-        (ParameterKind::Named { name }, None) => Some(name.clone()),
-        // Si no hay `map` y es posicional, no tiene nombre de flag.
-        (ParameterKind::Positional { .. }, None) => None,
-    };
-
-    // Construir la cadena final
-    match (output_flag_name, final_value) {
-        // Caso: Tiene flag y tiene valor (ej. --key value)
-        (Some(flag), Some(val)) => Ok(format!("{} {}", flag, val)),
-        // Caso: Tiene flag pero no valor (ej. --key)
-        (Some(flag), None) => Ok(flag.to_string()),
-        // Caso: No tiene flag pero sí valor (ej. un argumento posicional simple)
-        (None, Some(val)) => Ok(val),
-        // Caso: No tiene flag ni valor (no debería ocurrir si `is_provided` o `default` era Some)
-        (None, None) => Ok(String::new()),
-    }
-}
-
 impl ArgResolver {
-    /// El constructor principal que ejecuta toda la lógica de resolución y validación.
+    /// The constructor validates the entire user input against the script's contract
+    /// and pre-calculates the value for every parameter definition. It does not
+    /// "consume" CLI arguments, allowing multiple parameters to reference the same input.
     pub fn new(
         definitions: &[ParameterDef],
         cli_params: &[String],
@@ -336,13 +263,109 @@ impl ArgResolver {
         let mut cli_state = CliInputState::new(cli_params)?;
         let mut resolved_values = HashMap::new();
 
-        // Bucle de resolución lineal.
+        // --- Upfront Validation ---
+        // 1. Check for alias conflicts (e.g., using --verbose and -v at the same time).
         for def in definitions {
-            let resolved_value = resolve_parameter(def, &mut cli_state)?;
-            resolved_values.insert(def.original_token.clone(), resolved_value);
+            if let ParameterKind::Named { name } = &def.kind {
+                if let Some(alias) = &def.modifiers.alias {
+                    if cli_state.named.contains_key(name) && cli_state.named.contains_key(alias) {
+                        return Err(anyhow!(
+                            "Conflict: Both flag '--{}' and its alias '-{}' were provided.",
+                            name.cyan(),
+                            alias.cyan()
+                        ));
+                    }
+                }
+            }
+        }
+        
+        // --- Resolution Loop ---
+        // This loop now correctly handles multiple identical definitions pointing to the same CLI argument.
+        for def in definitions {
+            // Check if we have already resolved this exact token. If so, skip.
+            // This is a micro-optimization for the case where the exact same token string
+            // appears multiple times, but the core logic works even without it.
+            if resolved_values.contains_key(&def.original_token) {
+                continue;
+            }
+
+            // Determine if the user provided a value for this definition, WITHOUT consuming state.
+            let (is_provided, cli_value) = match &def.kind {
+                ParameterKind::Positional { index } => {
+                    let val = cli_state.positional.get(*index).and_then(|arg| arg.value.clone());
+                    (val.is_some(), val)
+                }
+                ParameterKind::Named { name } => {
+                    let alias = def.modifiers.alias.as_deref();
+                    let name_val = cli_state.named.get(name);
+                    let alias_val = alias.and_then(|a| cli_state.named.get(a));
+
+                    match (name_val, alias_val) {
+                        (Some(arg), _) => (true, arg.value.clone()), // Name takes precedence
+                        (_, Some(arg)) => (true, arg.value.clone()), // Alias is used
+                        (None, None) => (false, None),
+                    }
+                }
+            };
+            
+            // Mark the corresponding CLI arguments as "seen" by at least one definition.
+            // This is for the final "unconsumed arguments" check.
+            if is_provided {
+                match &def.kind {
+                    ParameterKind::Positional { index } => {
+                        if let Some(arg) = cli_state.positional.get_mut(*index) {
+                            arg.consumed = true;
+                        }
+                    },
+                    ParameterKind::Named { name } => {
+                        if let Some(arg) = cli_state.named.get_mut(name) {
+                            arg.consumed = true;
+                        } else if let Some(alias) = &def.modifiers.alias {
+                            if let Some(arg) = cli_state.named.get_mut(alias) {
+                                arg.consumed = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // --- Check `required` constraint ---
+            if def.modifiers.required && !is_provided {
+                let param_id = match &def.kind {
+                    ParameterKind::Positional { index } => format!("Positional argument at index {}", index),
+                    ParameterKind::Named { name } => format!("Flag '--{}'", name),
+                };
+                return Err(anyhow!("{} is required but was not provided.", param_id.cyan()));
+            }
+            
+            // --- Determine Final Value (CLI > Default) ---
+            let final_value = if is_provided {
+                cli_value
+            } else {
+                def.modifiers.default_value.clone()
+            };
+
+            // --- Apply `map` transformation ---
+            let output_flag_name = match (&def.kind, &def.modifiers.map) {
+                (_, Some(map_str)) => {
+                    if map_str.is_empty() { None } else { Some(map_str.clone()) }
+                }
+                (ParameterKind::Named { name }, None) => Some(name.clone()),
+                (ParameterKind::Positional { .. }, None) => None,
+            };
+            
+            // --- Assemble Final String ---
+            let final_string = match (output_flag_name, final_value) {
+                (Some(flag), Some(val)) => format!("{} {}", flag, val),
+                (Some(flag), None) => flag.to_string(),
+                (None, Some(val)) => val,
+                (None, None) => String::new(),
+            };
+            
+            resolved_values.insert(def.original_token.clone(), final_string);
         }
 
-        // Manejo de argumentos sobrantes.
+        // --- Handle Unconsumed/Leftover Arguments ---
         let (unconsumed_str, had_unconsumed) = cli_state.get_unconsumed_as_string();
         if had_unconsumed && !has_generic_params {
             return Err(anyhow!(
@@ -357,13 +380,12 @@ impl ArgResolver {
             generic_params_value: unconsumed_str,
         })
     }
-
-    /// Obtiene el valor resuelto para un token de parámetro específico.
+    
+    // This function is now a simple HashMap lookup.
     pub fn get_specific_value(&self, original_token: &str) -> Option<&str> {
         self.resolved_values.get(original_token).map(|s| s.as_str())
     }
 
-    /// Obtiene el valor resuelto para el token genérico `<axes::params>`.
     pub fn get_generic_value(&self) -> &str {
         &self.generic_params_value
     }

@@ -176,36 +176,9 @@ pub fn resolve_hook_task(
     Ok(Some(task))
 }
 
-/// This is the heart of the `axes` expansion system. It resolves a script or variable
-/// into its final, executable `Task` object using a highly efficient, structural approach.
-/// The process avoids costly string-to-structure-to-string conversions, which were the
-/// source of previous performance issues.
-///
-/// # Algorithm
-///
-/// For each command line in a `Raw` script:
-///
-/// 1.  **Tokenize:** The raw string is first broken down into a sequence of `PreComponent`s
-///     (e.g., `Literal`, `Var`, `Script`, `Param`). This is a fast, single-pass operation.
-///
-/// 2.  **Build & Recurse:** The function iterates through the `PreComponent`s to build the
-///     final list of `TemplateComponent`s for the current line.
-///     - When a `Var` or `Script` `PreComponent` is encountered, it makes a **recursive call**
-///       to itself to resolve that sub-task.
-///     - **Structural Composition:** Instead of flattening the returned sub-task into a string,
-///       it merges the structures directly:
-///       - For a `Var`, its `template` components are injected into the current line's `template`.
-///       - For a `Script`, its `CommandExecution`s are injected directly into the parent's
-///         list of commands.
-///
-/// 3.  **Optimize:** Once the full `Task` is built, a final pass merges adjacent `Literal`
-///     components to optimize the cached structure.
-///
-/// # Caching
-/// This function returns `(Task, bool)`, where the boolean is a "dirty flag" indicating
-/// if a new expansion occurred (`true`) or if the `Task` was read from the in-memory
-/// cache (`false`). This allows the caller (`run` handler) to conditionally save the
-/// updated configuration to the persistent on-disk cache.
+/// The main orchestrator for the expansion engine.
+/// It handles caching, recursion safety, and calls the linear expansion
+/// function `expand_line_to_components` for each line of a command.
 fn expand_and_get_task_internal(
     key: &str,
     kind: ValueKind,
@@ -213,14 +186,10 @@ fn expand_and_get_task_internal(
     depth: u32,
 ) -> Result<(Task, bool)> {
     let stack_key = format!("{:?}::{}", kind, key);
-    log::debug!(
-        "{:indent$}Resolving task for '{}'",
-        "",
-        &stack_key,
-        indent = (depth as usize) * 2
-    );
 
-    // --- Safety Check: Prevent infinite recursion and stack overflow ---
+    println!("Resolving...: {:?}\ndepth: {:?}\n", stack_key, depth);
+
+    // --- Safety Check: Prevent infinite recursion ---
     if depth >= MAX_RECURSION_DEPTH {
         return Err(ResolverError::MaxRecursionDepth {
             depth,
@@ -234,18 +203,18 @@ fn expand_and_get_task_internal(
         return Ok((task.clone(), false));
     }
 
-    let flattened_command =
-        if let Some(CacheableValue::Raw(fc)) = get_cacheable_value(config, key, kind)? {
-            fc.clone()
-        } else if let Some(CacheableValue::Expanded(_)) = get_cacheable_value(config, key, kind)? {
-            unreachable!(); // Should have been caught by the cache check above
-        } else {
+    // --- Get Raw Value to Expand ---
+    let flattened_command = match get_cacheable_value(config, key, kind)? {
+        Some(CacheableValue::Raw(fc)) => fc.clone(),
+        Some(CacheableValue::Expanded(_)) => unreachable!(), // Handled by cache check above
+        None => {
             return Err(ResolverError::ValueNotFound {
                 key: key.to_string(),
                 kind,
             }
             .into());
-        };
+        }
+    };
 
     let mut final_task = Task {
         desc: flattened_command.desc,
@@ -254,22 +223,20 @@ fn expand_and_get_task_internal(
 
     // --- Main Expansion Loop for Each Line ---
     for line in &flattened_command.command_lines {
-        let (ignore_errors, run_in_parallel, clean_line) = if kind == ValueKind::Script {
-            parse_execution_prefixes(line)
-        } else {
-            (false, false, line.as_str())
-        };
+        let (ignore_errors, run_in_parallel, clean_line) = parse_execution_prefixes(line);
 
-        // Expand the current line into a sequence of template components.
-        // This is now the ONLY place where expansion logic happens.
-        let template = expand_line_to_components(
+        // This is the core logic: expand the line.
+        // It will either return a template to be added as a new command,
+        // or it will have already modified `final_task` via structural composition.
+        let template = expand_line(
             clean_line,
-            &mut final_task, // Pass the task to allow structural composition
+            &mut final_task,
             config,
-            depth,
+            depth + 1,
         )?;
 
-        // add it as a new command execution.
+        // If the expansion resulted in components (i.e., it wasn't a pure multi-line script),
+        // package them into a new CommandExecution.
         if !template.is_empty() {
             final_task.commands.push(CommandExecution {
                 template,
@@ -284,21 +251,16 @@ fn expand_and_get_task_internal(
         optimize_literals(&mut cmd.template);
     }
 
-    if let Some(cacheable_mut) = get_cacheable_value_mut(config, key, kind)? {
-        *cacheable_mut = CacheableValue::Expanded(final_task.clone());
-    } else {
-        return Err(ResolverError::ValueNotFound {
-            key: key.to_string(),
-            kind,
-        }
-        .into());
-    }
+    let cacheable_mut = get_cacheable_value_mut(config, key, kind)?.unwrap(); // Safe due to previous checks
+    *cacheable_mut = CacheableValue::Expanded(final_task.clone());
 
+    println!("Task: {:?}\n", final_task);
     Ok((final_task, true))
 }
 
-/// The high-performance, single-pass linear expansion engine for a single line.
-fn expand_line_to_components(
+/// Expands a single line into a vector of `TemplateComponent`s or structurally
+/// composes a multi-line script into the `parent_task`.
+fn expand_line(
     line: &str,
     parent_task: &mut Task,
     config: &mut ResolvedConfig,
@@ -309,13 +271,17 @@ fn expand_line_to_components(
 
     let captures: Vec<_> = TOKEN_RE.captures_iter(line).collect();
 
-    // --- UNIFIED COMPOSITION LOGIC ---
+    // --- Structural Composition Fast Path ---
     // If a line is a single, pure script token, we compose it structurally.
     if captures.len() == 1 && captures[0].get(0).unwrap().as_str() == line {
         let content = captures[0].get(1).unwrap().as_str().trim();
         if let Some(script_key) = content.strip_prefix("scripts::") {
-            let (sub_task, _) =
-                expand_and_get_task_internal(script_key, ValueKind::Script, config, depth + 1)?;
+            let (sub_task, _) = expand_and_get_task_internal(
+                script_key,
+                ValueKind::Script,
+                config,
+                depth, // Note: depth is passed directly, not incremented here
+            )?;
             // Directly extend the parent task with the sub-task's commands.
             parent_task.commands.extend(sub_task.commands);
             // Return an empty template to signify that this line has been fully processed.
@@ -323,7 +289,7 @@ fn expand_line_to_components(
         }
     }
 
-    // --- INLINE EXPANSION LOGIC ---
+    // --- Inline Expansion Slow Path ---
     // If the line is not a pure script composition, expand all tokens inline.
     for caps in captures {
         let full_match = caps.get(0).unwrap();
@@ -335,34 +301,19 @@ fn expand_line_to_components(
         let content = caps.get(1).unwrap().as_str().trim();
 
         if let Some(var_key) = content.strip_prefix("vars::") {
-            let (var_task, _) =
-                expand_and_get_task_internal(var_key, ValueKind::Variable, config, depth + 1)?;
-            if var_task.commands.len() != 1 {
-                return Err(anyhow!("Variable '{}' must be a single value.", var_key));
-            }
+            let (var_task, _) = expand_and_get_task_internal(var_key, ValueKind::Variable, config, depth)?;
+            if var_task.commands.len() != 1 { return Err(anyhow!("Variable '{}' must expand to a single-line value.", var_key)); }
             // Inline compose the variable's components.
-            for component in var_task.commands[0].template.iter() {
-                match component {
-                    TemplateComponent::Literal(s) => add_literal(&mut components, s.clone()),
-                    _ => components.push(component.clone()),
-                }
-            }
+            components.extend(var_task.commands[0].template.clone());
+
         } else if let Some(script_key) = content.strip_prefix("scripts::") {
             // This is an inline script composition.
-            let (script_task, _) =
-                expand_and_get_task_internal(script_key, ValueKind::Script, config, depth + 1)?;
-            if script_task.commands.len() != 1 {
-                return Err(anyhow!(
-                    "Inline script composition '<axes::scripts::{}>' is not supported for multi-line scripts. Use it on its own line.",
-                    script_key
-                ));
+            let (script_task, _) = expand_and_get_task_internal(script_key, ValueKind::Script, config, depth)?;
+            if script_task.commands.len() > 1 {
+                return Err(anyhow!("Inline script composition '<axes::scripts::{}>' is not supported for multi-line scripts. Use it on its own line.", script_key));
             }
-            // Inline compose the script's components.
-            for component in script_task.commands[0].template.iter() {
-                match component {
-                    TemplateComponent::Literal(s) => add_literal(&mut components, s.clone()),
-                    _ => components.push(component.clone()),
-                }
+            if let Some(cmd) = script_task.commands.first() {
+                components.extend(cmd.template.clone());
             }
         } else if let Some(param_spec) = content.strip_prefix("params::") {
             let def = parameters::parse_parameter_token(full_match.as_str(), param_spec)?;
@@ -371,30 +322,19 @@ fn expand_line_to_components(
             components.push(TemplateComponent::GenericParams);
         } else if let Some(run_spec) = content.strip_prefix("run") {
             if run_spec.starts_with("('") && run_spec.ends_with("')") {
-                let cmd = run_spec
-                    .strip_prefix("('")
-                    .unwrap()
-                    .strip_suffix("')")
-                    .unwrap();
+                let cmd = run_spec.strip_prefix("('").unwrap().strip_suffix("')").unwrap();
                 components.push(TemplateComponent::Run(RunSpec::Literal(cmd.to_string())));
-            } else {
-                return Err(anyhow!("Invalid run syntax: {}", full_match.as_str()));
-            }
+            } else { return Err(anyhow!("Invalid run syntax: {}", full_match.as_str())); }
         } else {
-            // Default case: simple static tokens
-            let literal_value = match content {
-                "path" => config.project_root.to_string_lossy().into_owned(),
-                "name" => config.qualified_name.clone(),
-                "uuid" => config.uuid.to_string(),
-                "version" => config.version.clone().unwrap_or_default(),
-                _ => {
-                    return Err(anyhow!(
-                        "Unknown token namespace in: '{}'",
-                        full_match.as_str()
-                    ));
-                }
+            // Default case: simple static tokens become enum variants
+            let component = match content {
+                "path" => TemplateComponent::Path,
+                "name" => TemplateComponent::Name,
+                "uuid" => TemplateComponent::Uuid,
+                "version" => TemplateComponent::Version,
+                _ => return Err(anyhow!("Unknown token namespace in: '{}'", full_match.as_str())),
             };
-            add_literal(&mut components, literal_value);
+            components.push(component);
         }
 
         last_index = full_match.end();

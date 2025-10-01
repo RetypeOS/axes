@@ -142,6 +142,10 @@ pub enum TemplateComponent {
     Parameter(ParameterDef),
     GenericParams,
     Run(RunSpec),
+    Path,
+    Name,
+    Uuid,
+    Version,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

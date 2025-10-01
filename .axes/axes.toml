@@ -11,8 +11,8 @@ description = "The development workflow configuration for the `axes` project its
 # Defines workflows for building, testing, and managing the tool.
 [scripts]
 
-# Rapid Tests for me.
-hello = {desc = "Say Hello, World!", run = "echo Hello, World!"}
+# --- Rapid Tests. ---
+hello = {desc = "Say Hello, World!", run = "echo Hello, <axes::params::0(default='World')>!"}
 
 # --- Core Development Workflows ---
 build = { desc = "Builds the project in debug mode with fast compilation.", run = "cargo build <axes::params>" }
@@ -42,6 +42,7 @@ doc = { desc = "Builds and opens the project documentation in the browser.", run
 [scripts.install]
 desc = "Builds in release and copies the artifact to a local installation path."
 windows = [
+    "echo <axes::vars::install_welcome>",
     "<axes::scripts::build_release>",
     # Use PowerShell for robust path handling and directory creation.
     "powershell -Command \"New-Item -ItemType File -Path '<axes::vars::install_path_win>' -Force | Out-Null; Copy-Item -Path '.\\target\\release\\axes.exe' -Destination '<axes::vars::install_path_win>'\""
@@ -77,6 +78,7 @@ clippy_args = "-- -D warnings"
 # [vars]
 # install_path_win = "C:\\Users\\user\\bin\\axes.exe"
 # install_path_nix = "/home/user/.local/bin/axes"
+install_welcome = "Installing 'axes' on: '<axes::vars::install_path_win>'"
 install_path_win = "<axes::params::0(default='.\\bin\\axes.exe')>" 
 install_path_nix = "<axes::params::0(default='./bin/axes')>"
 # C:\\scripts\\axes.exe
@@ -84,6 +86,6 @@ install_path_nix = "<axes::params::0(default='./bin/axes')>"
 # === Environment Variables ===
 # Injected into every command executed by `axes`.
 [env]
-RUST_LOG = "info"   # Set a sensible default log level for `axes run`.
+RUST_LOG = "debug"   # Set a sensible default log level for `axes run`.
 RUST_BACKTRACE = "1"  # Always show full backtraces in case of panic.
 CARGO_PROFILE_RELEASE_DEBUG = "true" # Enable debug symbols in release builds for better profiling.
