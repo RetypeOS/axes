@@ -2,12 +2,7 @@
 
 use crate::{
     cli::handlers::commons,
-    core::{
-        config_resolver::{self, ValueKind},
-        index_manager,
-        parameters::ArgResolver,
-        task_executor,
-    },
+    core::{config_resolver, index_manager, parameters::ArgResolver, task_executor},
     models::{CacheableValue, ParameterDef, TemplateComponent},
 };
 use anyhow::{Result, anyhow};
@@ -46,10 +41,8 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
         app_key_from_user.to_string()
     };
 
-    let task_key = format!("options::open_with::{}", final_key);
-
     // 3. Resolve the command into a Task.
-    let task = config_resolver::resolve_task(&mut config, &task_key, ValueKind::Script)?;
+    let task = config_resolver::resolve_open_with_task(&mut config, &final_key, &index)?;
 
     // 4. Collect definitions and resolve arguments for the task.
     let definitions: Vec<ParameterDef> = task

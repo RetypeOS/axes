@@ -99,7 +99,7 @@ fn find_command(name: &str) -> Option<&'static CommandDefinition> {
 fn main() {
     //#[cfg(debug_assertions)]
     //{
-        env_logger::init();
+    env_logger::init();
     //}
     if let Err(e) = run_cli(Cli::parse()) {
         if let Some(exec_err) = e.downcast_ref::<executor::ExecutionError>()

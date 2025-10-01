@@ -83,3 +83,30 @@ This version introduces a significant architectural refactoring of the command d
   * The shortcut `axes <context> <script_name>` is **no longer supported**.
   * To run a script on a specific, explicit context, the `run` command is now required: `axes <context> run <script_name>`.
   * The primary way to run a script in the current context (either from the filesystem or a session) is now the simpler, universal `axes <script_name> [args...]`.
+
+## v0.2.0-beta: Performance Overhaul & Architectural Tuning
+
+This version marks a significant leap forward in performance, bringing `axes`'s hot-execution speed nearly on par with minimalist task runners like `just`. This was achieved through a deep refactoring of the core expansion engine, along with key architectural improvements.
+
+### 🔥 Performance & Optimizations
+
+* **Drastic Performance Improvement:**
+  * The core script expansion engine has been completely rewritten to use a **direct structural composition** algorithm, eliminating a major performance bottleneck caused by unnecessary string allocations and re-parsing.
+  * Internal latency has been reduced to **~17-20ms**.
+  * Hot script execution (with a warm cache) is now consistently in the **~35-37ms** range, making the overhead of `axes` virtually imperceptible for most tasks.
+
+### 🏛️ Architecture & Refactorings
+
+* **Unified Command Grammar & Dispatcher:**
+  * The CLI dispatcher has been refactored to use a universal, predictable grammar, removing the distinction between "session" and "non-session" modes for command interpretation.
+  * This simplifies the user experience: `axes <script_name>` now works universally to run a script in the current context.
+* **Session-Aware Context Resolution:**
+  * The `context_resolver` is now fully session-aware. Relative paths (`.`, `..`, `sub-project`) are correctly resolved from the active session project, while absolute contexts (aliases like `g!`, `global`) provide a reliable "escape hatch".
+* **Re-introduction of `<axes::run::...>`:**
+  * The dynamic execution token is back with a robust, unambiguous syntax: `<axes::run('literal command')>`.
+  * The `::script_name` variant has been temporarily disabled to prevent complex re-entrancy issues, ensuring stability.
+
+### ⚠ Breaking Changes
+
+* **CLI Grammar Unification:**
+  * The shortcut `axes <context> <script_name>` is **no longer supported**. To run a script on an explicit, different context, the `run` command is now required: `axes <context> run <script_name>`.

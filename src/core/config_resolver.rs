@@ -3,17 +3,17 @@
 use crate::constants::{
     AXES_DIR, CONFIG_CACHE_FILENAME, MAX_RECURSION_DEPTH, PROJECT_CONFIG_FILENAME,
 };
-use crate::core::parameters;
+use crate::core::parameters::{self};
 use crate::models::{
     CacheableValue, CanonicalCommand, Command, CommandExecution, FlattenedCommand, GlobalIndex,
     IndexEntry, ProjectConfig, ResolvedConfig, ResolvedOptionsConfig, RunSpec, Runnable,
     SerializableConfigCache, Task, TemplateComponent,
 };
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use bincode::error::DecodeError;
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -21,10 +21,9 @@ use thiserror::Error;
 use uuid::Uuid;
 
 lazy_static! {
-    // This regex is now simplified back to only expanding `vars` and `scripts`.
-    // `run` tokens are handled by the final parameter parser.
-    static ref COMPOSITE_TOKEN_RE: Regex =
-        Regex::new(r"<axes::(vars::|scripts::|run::)([^>(')]+)>").unwrap();
+    // A simple, fast regex that finds ANY <axes::...> token.
+    // The logic is now in the expansion engine, not the regex.
+    static ref TOKEN_RE: Regex = Regex::new(r"<axes::([^>]+)>").unwrap();
 }
 
 #[derive(Error, Debug)]
@@ -58,11 +57,19 @@ pub enum ResolverError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hook {
+    AtStart,
+    AtExit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValueKind {
     /// A command or sequence of commands. Interprets execution prefixes ('>', '-').
     Script,
     /// An interpolable string fragment. Does NOT interpret execution prefixes.
     Variable,
+    Hook(Hook),
+    OpenWith,
 }
 
 type ResolverResult<T> = Result<T, ResolverError>;
@@ -113,39 +120,98 @@ pub fn resolve_config_for_uuid(
 
 /// Public entry point to resolve a script/var into a `Task`.
 /// It mutates the passed `ResolvedConfig` by caching the expanded task.
-pub fn resolve_task(config: &mut ResolvedConfig, task_key: &str, kind: ValueKind) -> Result<Task> {
-    expand_and_get_task_internal(task_key, kind, config, &mut HashSet::new(), 0)
+pub fn resolve_script_task(
+    config: &mut ResolvedConfig,
+    task_key: &str,
+    index: &GlobalIndex,
+) -> Result<Task> {
+    let (task, dirty) = expand_and_get_task_internal(task_key, ValueKind::Script, config, 0)?;
+
+    if dirty {
+        save_config_cache(config, index)
+            .with_context(|| "Failed to save updated configuration cache.")?;
+    }
+
+    Ok(task)
 }
 
-/// The internal recursive engine for lazy, just-in-time expansion of scripts and variables.
+/// Public entry point to resolve an `open_with` task into a `Task`.
+pub fn resolve_open_with_task(
+    config: &mut ResolvedConfig,
+    task_key: &str,
+    index: &GlobalIndex,
+) -> Result<Task> {
+    let (task, dirty) = expand_and_get_task_internal(task_key, ValueKind::OpenWith, config, 0)?;
+
+    if dirty {
+        save_config_cache(config, index)
+            .with_context(|| "Failed to save updated configuration cache.")?;
+    }
+
+    Ok(task)
+}
+
+/// Public entry point to resolve a session hook task (`at_start`/`at_exit`) into a `Task`.
+pub fn resolve_hook_task(
+    config: &mut ResolvedConfig,
+    hook: Hook,
+    index: &GlobalIndex,
+) -> Result<Option<Task>> {
+    // Hooks are optional, so we check for existence first.
+    let key = match hook {
+        Hook::AtStart => "at_start",
+        Hook::AtExit => "at_exit",
+    };
+    if get_cacheable_value(config, key, ValueKind::Hook(hook))?.is_none() {
+        return Ok(None);
+    }
+
+    let (task, dirty) = expand_and_get_task_internal(key, ValueKind::Hook(hook), config, 0)?;
+
+    if dirty {
+        save_config_cache(config, index)
+            .with_context(|| "Failed to save updated configuration cache.")?;
+    }
+
+    Ok(Some(task))
+}
+
+/// This is the heart of the `axes` expansion system. It resolves a script or variable
+/// into its final, executable `Task` object using a highly efficient, structural approach.
+/// The process avoids costly string-to-structure-to-string conversions, which were the
+/// source of previous performance issues.
 ///
-/// This is the heart of the `axes` expansion system. It takes a key (like a script name)
-/// and resolves it into a final, executable `Task` object. Its operation is divided into
-/// three main stages for each command line:
+/// # Algorithm
 ///
-/// 1.  **Composite Expansion:** It recursively resolves tokens that refer to other configuration
-///     values (`<axes::vars::...>`, `<axes::scripts::...>`). It also *validates*
-///     `<axes::run::script_name>` tokens to ensure they exist and don't cause cycles.
+/// For each command line in a `Raw` script:
 ///
-/// 2.  **Static/Simple Expansion:** After all composite tokens are resolved, it replaces simple,
-///     static tokens that refer to project metadata (e.g., `<axes::path>`, `<axes::name>`).
+/// 1.  **Tokenize:** The raw string is first broken down into a sequence of `PreComponent`s
+///     (e.g., `Literal`, `Var`, `Script`, `Param`). This is a fast, single-pass operation.
 ///
-/// 3.  **Final Parsing:** The resulting string, now free of all static and composite tokens,
-///     is parsed into a sequence of `TemplateComponent`s, identifying dynamic, runtime tokens
-///     like `<axes::params...>` and `<axes::run(...)>`.
+/// 2.  **Build & Recurse:** The function iterates through the `PreComponent`s to build the
+///     final list of `TemplateComponent`s for the current line.
+///     - When a `Var` or `Script` `PreComponent` is encountered, it makes a **recursive call**
+///       to itself to resolve that sub-task.
+///     - **Structural Composition:** Instead of flattening the returned sub-task into a string,
+///       it merges the structures directly:
+///       - For a `Var`, its `template` components are injected into the current line's `template`.
+///       - For a `Script`, its `CommandExecution`s are injected directly into the parent's
+///         list of commands.
+///
+/// 3.  **Optimize:** Once the full `Task` is built, a final pass merges adjacent `Literal`
+///     components to optimize the cached structure.
 ///
 /// # Caching
-/// This function performs in-memory caching. When it successfully expands a `Raw` value,
-/// it **mutates** the `ResolvedConfig` in memory, replacing the `Raw` variant with the
-/// `Expanded(Task)`. Subsequent calls for the same key within the same `axes` execution
-/// will return a clone of the cached `Task` instantly.
+/// This function returns `(Task, bool)`, where the boolean is a "dirty flag" indicating
+/// if a new expansion occurred (`true`) or if the `Task` was read from the in-memory
+/// cache (`false`). This allows the caller (`run` handler) to conditionally save the
+/// updated configuration to the persistent on-disk cache.
 fn expand_and_get_task_internal(
     key: &str,
     kind: ValueKind,
     config: &mut ResolvedConfig,
-    recursion_stack: &mut HashSet<String>,
     depth: u32,
-) -> Result<Task> {
+) -> Result<(Task, bool)> {
     let stack_key = format!("{:?}::{}", kind, key);
     log::debug!(
         "{:indent$}Resolving task for '{}'",
@@ -158,181 +224,215 @@ fn expand_and_get_task_internal(
     if depth >= MAX_RECURSION_DEPTH {
         return Err(ResolverError::MaxRecursionDepth {
             depth,
-            key: stack_key.clone(),
-        }
-        .into());
-    }
-    if !recursion_stack.insert(stack_key.clone()) {
-        let cycle_path = recursion_stack
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>()
-            .join(" -> ");
-        return Err(ResolverError::CircularDependency {
-            cycle_path: format!("{} -> {}", cycle_path, stack_key),
+            key: stack_key,
         }
         .into());
     }
 
     // --- In-Memory Cache Check ---
-    let flattened_command = {
-        let cacheable = get_cacheable_value(config, key, kind)?;
-        match cacheable {
-            CacheableValue::Expanded(task) => {
-                log::debug!(
-                    "{:indent$}Value is EXPANDED. Returning clone from in-memory cache.",
-                    "",
-                    indent = (depth as usize) * 2
-                );
-                recursion_stack.remove(&stack_key);
-                return Ok(task.clone());
-            }
-            CacheableValue::Raw(fc) => fc.clone(),
-        }
-    };
-    log::debug!(
-        "{:indent$}Value is RAW. Preparing for expansion.",
-        "",
-        indent = (depth as usize) * 2
-    );
-
-    let mut new_task = Task {
-        commands: Vec::new(),
-        desc: flattened_command.desc,
-    };
-    let re_composite = &COMPOSITE_TOKEN_RE;
-
-    for line in &flattened_command.command_lines {
-        let (ignore_errors, run_in_parallel, original_str) = if kind == ValueKind::Script {
-            let (ie, rip, s) = parse_execution_prefixes(line);
-            (ie, rip, s.to_string())
-        } else {
-            (false, false, line.clone())
-        };
-
-        // --- STAGE 1: Single-Pass Composite Token Expansion ---
-        let mut expanded_composite_str = String::new();
-        let mut last_match_end = 0;
-        for caps in re_composite.captures_iter(&original_str) {
-            let full_match = caps.get(0).unwrap();
-            let namespace_with_colon = caps.get(1).unwrap().as_str();
-            let sub_key = caps.get(2).unwrap().as_str();
-
-            expanded_composite_str.push_str(&original_str[last_match_end..full_match.start()]);
-
-            let sub_value_str = match namespace_with_colon {
-                "vars::" | "scripts::" => {
-                    let sub_kind = if namespace_with_colon == "vars::" {
-                        ValueKind::Variable
-                    } else {
-                        ValueKind::Script
-                    };
-                    let sub_task = expand_and_get_task_internal(
-                        sub_key,
-                        sub_kind,
-                        config,
-                        recursion_stack,
-                        depth + 1,
-                    )
-                    .with_context(|| {
-                        format!(
-                            "While expanding token '{}' in '{}:{}'",
-                            full_match.as_str(),
-                            kind_to_str(kind),
-                            key
-                        )
-                    })?;
-                    sub_task
-                        .commands
-                        .iter()
-                        .map(|cmd| {
-                            cmd.template
-                                .iter()
-                                .map(template_component_to_string)
-                                .collect::<String>()
-                        })
-                        .collect::<Vec<_>>()
-                        .join(" && ")
-                }
-                "run::" => {
-                    let _ = expand_and_get_task_internal(
-                        sub_key,
-                        ValueKind::Script,
-                        config,
-                        recursion_stack,
-                        depth + 1,
-                    )?;
-                    full_match.as_str().to_string()
-                }
-                _ => unreachable!(),
-            };
-
-            expanded_composite_str.push_str(&sub_value_str);
-            last_match_end = full_match.end();
-        }
-        expanded_composite_str.push_str(&original_str[last_match_end..]);
-
-        // --- STAGE 2: Simple/Static Token Expansion ---
-        let cow = {
-            let mut temp_cow = std::borrow::Cow::Borrowed(expanded_composite_str.as_str());
-            if temp_cow.contains("<axes::path>") {
-                temp_cow = std::borrow::Cow::Owned(
-                    temp_cow.replace("<axes::path>", &config.project_root.to_string_lossy()),
-                );
-            }
-            if temp_cow.contains("<axes::name>") {
-                temp_cow =
-                    std::borrow::Cow::Owned(temp_cow.replace("<axes::name>", &config.qualified_name));
-            }
-            if temp_cow.contains("<axes::uuid>") {
-                temp_cow = std::borrow::Cow::Owned(
-                    temp_cow.replace("<axes::uuid>", &config.uuid.to_string()),
-                );
-            }
-            if let Some(version) = &config.version {
-                if temp_cow.contains("<axes::version>") {
-                    temp_cow = std::borrow::Cow::Owned(temp_cow.replace("<axes::version>", version));
-                }
-            }
-            temp_cow
-        };
-        let statically_expanded_str = cow;
-
-        // --- STAGE 3: Final Parsing into Template Components ---
-        let components =
-            parameters::discover_and_parse(&statically_expanded_str).with_context(|| {
-                format!(
-                    "While parsing parameters in '{}:{}'",
-                    kind_to_str(kind),
-                    key
-                )
-            })?;
-
-        new_task.commands.push(CommandExecution {
-            template: components,
-            ignore_errors,
-            run_in_parallel,
-        });
+    if let Some(CacheableValue::Expanded(task)) = get_cacheable_value(config, key, kind)? {
+        return Ok((task.clone(), false));
     }
 
-    // --- Cache the final expanded task in memory ---
-    let cacheable_mut = get_cacheable_value_mut(config, key, kind)?;
-    *cacheable_mut = CacheableValue::Expanded(new_task.clone());
+    let flattened_command =
+        if let Some(CacheableValue::Raw(fc)) = get_cacheable_value(config, key, kind)? {
+            fc.clone()
+        } else if let Some(CacheableValue::Expanded(_)) = get_cacheable_value(config, key, kind)? {
+            unreachable!(); // Should have been caught by the cache check above
+        } else {
+            return Err(ResolverError::ValueNotFound {
+                key: key.to_string(),
+                kind,
+            }
+            .into());
+        };
 
-    recursion_stack.remove(&stack_key);
-    Ok(new_task)
+    let mut final_task = Task {
+        desc: flattened_command.desc,
+        ..Default::default()
+    };
+
+    // --- Main Expansion Loop for Each Line ---
+    for line in &flattened_command.command_lines {
+        let (ignore_errors, run_in_parallel, clean_line) = if kind == ValueKind::Script {
+            parse_execution_prefixes(line)
+        } else {
+            (false, false, line.as_str())
+        };
+
+        // Expand the current line into a sequence of template components.
+        // This is now the ONLY place where expansion logic happens.
+        let template = expand_line_to_components(
+            clean_line,
+            &mut final_task, // Pass the task to allow structural composition
+            config,
+            depth,
+        )?;
+
+        // add it as a new command execution.
+        if !template.is_empty() {
+            final_task.commands.push(CommandExecution {
+                template,
+                ignore_errors,
+                run_in_parallel,
+            });
+        }
+    }
+
+    // --- Optimization and Caching ---
+    for cmd in &mut final_task.commands {
+        optimize_literals(&mut cmd.template);
+    }
+
+    if let Some(cacheable_mut) = get_cacheable_value_mut(config, key, kind)? {
+        *cacheable_mut = CacheableValue::Expanded(final_task.clone());
+    } else {
+        return Err(ResolverError::ValueNotFound {
+            key: key.to_string(),
+            kind,
+        }
+        .into());
+    }
+
+    Ok((final_task, true))
 }
 
-/// Helper function to flatten a `TemplateComponent` back into its string representation.
-/// Used for injecting the content of a sub-task into a parent task's string.
-pub(crate) fn template_component_to_string(c: &TemplateComponent) -> String {
-    match c {
-        TemplateComponent::Literal(s) => s.clone(),
-        TemplateComponent::Parameter(p) => p.original_token.clone(),
-        TemplateComponent::GenericParams => "<axes::params>".to_string(),
-        TemplateComponent::Run(spec) => match spec {
-            RunSpec::Literal(cmd) => format!("<axes::run('{}')>", cmd),
-        },
+/// The high-performance, single-pass linear expansion engine for a single line.
+fn expand_line_to_components(
+    line: &str,
+    parent_task: &mut Task,
+    config: &mut ResolvedConfig,
+    depth: u32,
+) -> Result<Vec<TemplateComponent>> {
+    let mut components = Vec::new();
+    let mut last_index = 0;
+
+    let captures: Vec<_> = TOKEN_RE.captures_iter(line).collect();
+
+    // --- UNIFIED COMPOSITION LOGIC ---
+    // If a line is a single, pure script token, we compose it structurally.
+    if captures.len() == 1 && captures[0].get(0).unwrap().as_str() == line {
+        let content = captures[0].get(1).unwrap().as_str().trim();
+        if let Some(script_key) = content.strip_prefix("scripts::") {
+            let (sub_task, _) =
+                expand_and_get_task_internal(script_key, ValueKind::Script, config, depth + 1)?;
+            // Directly extend the parent task with the sub-task's commands.
+            parent_task.commands.extend(sub_task.commands);
+            // Return an empty template to signify that this line has been fully processed.
+            return Ok(Vec::new());
+        }
+    }
+
+    // --- INLINE EXPANSION LOGIC ---
+    // If the line is not a pure script composition, expand all tokens inline.
+    for caps in captures {
+        let full_match = caps.get(0).unwrap();
+        let literal_part = &line[last_index..full_match.start()];
+        if !literal_part.is_empty() {
+            add_literal(&mut components, literal_part.to_string());
+        }
+
+        let content = caps.get(1).unwrap().as_str().trim();
+
+        if let Some(var_key) = content.strip_prefix("vars::") {
+            let (var_task, _) =
+                expand_and_get_task_internal(var_key, ValueKind::Variable, config, depth + 1)?;
+            if var_task.commands.len() != 1 {
+                return Err(anyhow!("Variable '{}' must be a single value.", var_key));
+            }
+            // Inline compose the variable's components.
+            for component in var_task.commands[0].template.iter() {
+                match component {
+                    TemplateComponent::Literal(s) => add_literal(&mut components, s.clone()),
+                    _ => components.push(component.clone()),
+                }
+            }
+        } else if let Some(script_key) = content.strip_prefix("scripts::") {
+            // This is an inline script composition.
+            let (script_task, _) =
+                expand_and_get_task_internal(script_key, ValueKind::Script, config, depth + 1)?;
+            if script_task.commands.len() != 1 {
+                return Err(anyhow!(
+                    "Inline script composition '<axes::scripts::{}>' is not supported for multi-line scripts. Use it on its own line.",
+                    script_key
+                ));
+            }
+            // Inline compose the script's components.
+            for component in script_task.commands[0].template.iter() {
+                match component {
+                    TemplateComponent::Literal(s) => add_literal(&mut components, s.clone()),
+                    _ => components.push(component.clone()),
+                }
+            }
+        } else if let Some(param_spec) = content.strip_prefix("params::") {
+            let def = parameters::parse_parameter_token(full_match.as_str(), param_spec)?;
+            components.push(TemplateComponent::Parameter(def));
+        } else if content == "params" {
+            components.push(TemplateComponent::GenericParams);
+        } else if let Some(run_spec) = content.strip_prefix("run") {
+            if run_spec.starts_with("('") && run_spec.ends_with("')") {
+                let cmd = run_spec
+                    .strip_prefix("('")
+                    .unwrap()
+                    .strip_suffix("')")
+                    .unwrap();
+                components.push(TemplateComponent::Run(RunSpec::Literal(cmd.to_string())));
+            } else {
+                return Err(anyhow!("Invalid run syntax: {}", full_match.as_str()));
+            }
+        } else {
+            // Default case: simple static tokens
+            let literal_value = match content {
+                "path" => config.project_root.to_string_lossy().into_owned(),
+                "name" => config.qualified_name.clone(),
+                "uuid" => config.uuid.to_string(),
+                "version" => config.version.clone().unwrap_or_default(),
+                _ => {
+                    return Err(anyhow!(
+                        "Unknown token namespace in: '{}'",
+                        full_match.as_str()
+                    ));
+                }
+            };
+            add_literal(&mut components, literal_value);
+        }
+
+        last_index = full_match.end();
+    }
+
+    let final_literal = &line[last_index..];
+    if !final_literal.is_empty() {
+        add_literal(&mut components, final_literal.to_string());
+    }
+
+    Ok(components)
+}
+
+/// Utility to add a literal and merge it with the previous one if possible.
+fn add_literal(components: &mut Vec<TemplateComponent>, s: String) {
+    if let Some(TemplateComponent::Literal(last)) = components.last_mut() {
+        last.push_str(&s);
+    } else {
+        components.push(TemplateComponent::Literal(s));
+    }
+}
+
+/// Merges adjacent `Literal` components in a template for optimization.
+fn optimize_literals(template: &mut Vec<TemplateComponent>) {
+    if template.is_empty() {
+        return;
+    }
+    let mut i = 0;
+    while i < template.len() - 1 {
+        if let (Some(TemplateComponent::Literal(s1)), Some(TemplateComponent::Literal(s2))) =
+            (template.get(i), template.get(i + 1))
+        {
+            let merged = format!("{}{}", s1, s2);
+            template[i] = TemplateComponent::Literal(merged);
+            template.remove(i + 1);
+        } else {
+            i += 1;
+        }
     }
 }
 
@@ -602,27 +702,16 @@ fn get_cacheable_value<'a>(
     config: &'a ResolvedConfig,
     key: &str,
     kind: ValueKind,
-) -> ResolverResult<&'a CacheableValue> {
+) -> Result<Option<&'a CacheableValue>> {
     let cacheable = match kind {
         ValueKind::Variable => config.vars.get(key),
-        ValueKind::Script => config
-            .scripts
-            .get(key)
-            .or_else(|| {
-                config
-                    .options
-                    .at_start
-                    .as_ref()
-                    .filter(|_| key == "at_start")
-            })
-            .or_else(|| config.options.at_exit.as_ref().filter(|_| key == "at_exit"))
-            .or_else(|| config.options.open_with.get(key)),
+        ValueKind::Script => config.scripts.get(key),
+        ValueKind::OpenWith => config.options.open_with.get(key),
+        ValueKind::Hook(Hook::AtStart) => config.options.at_start.as_ref(),
+        ValueKind::Hook(Hook::AtExit) => config.options.at_exit.as_ref(),
     };
 
-    cacheable.ok_or_else(|| ResolverError::ValueNotFound {
-        key: key.to_string(),
-        kind,
-    })
+    Ok(cacheable)
 }
 
 /// Retrieves a mutable reference to a `CacheableValue` from the correct map in `ResolvedConfig`.
@@ -630,33 +719,13 @@ fn get_cacheable_value_mut<'a>(
     config: &'a mut ResolvedConfig,
     key: &str,
     kind: ValueKind,
-) -> ResolverResult<&'a mut CacheableValue> {
+) -> Result<Option<&'a mut CacheableValue>> {
     let cacheable = match kind {
         ValueKind::Variable => config.vars.get_mut(key),
-        ValueKind::Script => {
-            // Lógica unificada
-            if config.scripts.contains_key(key) {
-                config.scripts.get_mut(key)
-            } else if key == "at_start" {
-                config.options.at_start.as_mut()
-            } else if key == "at_exit" {
-                config.options.at_exit.as_mut()
-            } else if config.options.open_with.contains_key(key) {
-                config.options.open_with.get_mut(key)
-            } else {
-                None
-            }
-        }
+        ValueKind::Script => config.scripts.get_mut(key),
+        ValueKind::OpenWith => config.options.open_with.get_mut(key),
+        ValueKind::Hook(Hook::AtStart) => config.options.at_start.as_mut(),
+        ValueKind::Hook(Hook::AtExit) => config.options.at_exit.as_mut(),
     };
-    cacheable.ok_or_else(|| ResolverError::ValueNotFound {
-        key: key.to_string(),
-        kind,
-    })
-}
-
-fn kind_to_str(kind: ValueKind) -> &'static str {
-    match kind {
-        ValueKind::Script => "script",
-        ValueKind::Variable => "var",
-    }
+    Ok(cacheable)
 }

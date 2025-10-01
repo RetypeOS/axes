@@ -2,15 +2,10 @@
 
 use crate::{
     cli::handlers::commons,
-    core::{
-        config_resolver::{self, ValueKind},
-        index_manager,
-        parameters::ArgResolver,
-        task_executor,
-    },
+    core::{config_resolver, index_manager, parameters::ArgResolver, task_executor},
     models::TemplateComponent,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
 use colored::*;
 
@@ -44,7 +39,7 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     );
 
     // 2. Resolve the script into a `Task` object using the new expander logic.
-    let task = config_resolver::resolve_task(&mut config, &run_args.script, ValueKind::Script)?;
+    let task = config_resolver::resolve_script_task(&mut config, &run_args.script, &index)?;
 
     if task.commands.is_empty() {
         println!("{}", "Script is empty. Nothing to execute.".yellow());
@@ -76,8 +71,6 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
 
     // 6. Persist any changes to the cache (from lazy expansions).
     // This is now a no-op since the cache is in-memory only, but we keep it for potential future use.
-    config_resolver::save_config_cache(&config, &index)
-        .with_context(|| "Failed to save updated configuration cache.")?;
 
     println!(
         "\n✅ {} Script '{}' completed successfully.",
