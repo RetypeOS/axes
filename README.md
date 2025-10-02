@@ -45,7 +45,7 @@ For years, the choice has been between:
 | Tool | Hot Script Execution | Orchestration Features |
 | :---------  | :-----------------------------: | :-----------------------------: |
 | `just`      | **~38 ms**                      |            Basic                |
-| `task`      | ***~40 ms**                     |          **Advanced**           |
+| `task`      | **~40 ms**                     |          **Advanced**           |
 | **`axes`**  | **~35 ms**                      |          **Advanced**           |
 
 *Benchmarks executed on a standard development machine running a simple "hello world" script, observing only the startup, resolution, execution, and shutdown time, obtaining the minimum average time from sets of 200 executions.*
