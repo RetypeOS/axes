@@ -10,7 +10,7 @@ Welcome to `axes`! This guide will take you from zero to a fully functional and 
 
 * ✅ Install `axes` on your system.
 * ✅ Create your first project and sub-projects.
-* ✅ Define and execute scripts.
+* ✅ Define and execute scripts using the new universal grammar.
 * ✅ Leverage variable inheritance between projects.
 * ✅ Orchestrate a complex workflow involving multiple projects.
 * ✅ Use project sessions for a focused workflow.
@@ -76,7 +76,7 @@ With `axes` installed, you are ready to create your first project. Let's go!
 
 For this tutorial, we will build the structure of a fictional corporate website called "Innovatech." This site will have two main components: a **blog** and an **online store**.
 
-Before starting, it is crucial to understand how `axes` refers to projects. Just as you navigate a file system with `cd`, `axes` navigates its logical project tree using **contexts**. Here is the quick reference table:
+Before starting, it is crucial to understand how `axes` refers to projects. Just as you navigate a file system with `cd`, `axes` navigates its logical project tree using **contexts**. These are used to tell commands like `info`, `tree`, or `start` which project to operate on.
 
 | Context | Description                                                                 | Example (from `.../innovatech-website/blog`)                |
 | :------ | :-------------------------------------------------------------------------- | :---------------------------------------------------------- |
@@ -130,7 +130,7 @@ axes init --parent ..
 
 In the wizard, `axes` will interpret `..` as the project in the parent or upper directory and suggest it to you. You are already using context navigation!
 
-To visualize the new structure, go up one level and use `.`:
+To visualize the new structure, go back to the parent directory and run `tree`:
 
 ```sh
 # From the innovatech-website/ directory
@@ -168,11 +168,11 @@ generate_footer = [
 ]
 ```
 
-Execute it using the `.` context, since we are inside the `blog` directory:
+To execute a script in your current project, simply use its name.
 
 ```sh
 # While in the blog/ directory
-axes . generate_footer
+axes generate_footer
 ```
 
 The output will be:
@@ -197,7 +197,7 @@ mkdir store && cd store
 axes init --parent ..
 ```
 
-After the wizard, your project tree (`axes .. tree`) will look like this:
+After the wizard, your project tree (`axes innovatech-website tree`) will look like this:
 
 ```text
 innovatech-website
@@ -205,18 +205,12 @@ innovatech-website
 └─ store
 ```
 
-Now, let's give the store a more advanced script. Often, we want to run tests only for a specific part of our application. `axes` makes this easy by defining scripts that act as "functions" that accept parameters.
-
-Edit the new `axes.toml` in `store/`:
+Now, let's give the store a more advanced script. Edit the new `axes.toml` in `store/`:
 
 ```toml
 # ./innovatech-website/store/.axes/axes.toml
 version = "1.0.0"
 description = "The Innovatech online store."
-
-[vars]
-# We can overwrite or define new variables.
-payment_gateway_api_key = "pk_test_12345"
 
 [scripts]
 # This test script accepts a positional parameter.
@@ -225,12 +219,12 @@ payment_gateway_api_key = "pk_test_12345"
 test_module = "pytest tests/test_<axes::params::0>.py"
 ```
 
-Now, from the root of the monorepo, you can run tests for a specific store module:
+To run a script on a **different** project, you must now use the `run` command explicitly. This removes ambiguity and makes your intent clear.
 
 ```sh
 # From the innovatech-website/ directory
-axes store test_module payments  # --> will execute `pytest tests/test_payments.py`
-axes store test_module products  # --> will execute `pytest tests/test_products.py`
+axes store run test_module payments  # --> will execute `pytest tests/test_payments.py`
+axes store run test_module products  # --> will execute `pytest tests/test_products.py`
 ```
 
 You have created a reusable and parameterizable shortcut, eliminating the need to remember or type long, complex test paths.
@@ -258,18 +252,19 @@ company_name = "Innovatech Inc."
 check_copyright = "echo \"© $(date +%Y) <axes::vars::company_name>. All rights reserved.\""
 
 # NEW! A script that calls the scripts of its children.
-# The `>` prefix indicates that the command must be executed in PARALLEL.
 build_all = [
     "echo '🚀 Building the entire website...'",
-    "> axes blog build",
-    "> axes store build" # Assuming `store` also has a `build` script.
+    # The `>` prefix indicates that the command must be executed in PARALLEL.
+    # We use the explicit `run` command for clarity and robustness.
+    "> axes blog run build",
+    "> axes store run build" # Assuming `store` also has a `build` script.
 ]
 
 # A quality script that runs in sequence.
 quality_check = [
     "echo ' linting...'",
-    "axes blog lint",  # Assuming `lint` scripts in the children.
-    "axes store lint",
+    "axes blog run lint",  # Assuming `lint` scripts in the children.
+    "axes store run lint",
     "echo '✅ Code quality verified!'"
 ]
 ```
@@ -279,30 +274,30 @@ With this configuration, you have created single entry points for complex operat
 ```sh
 # From anywhere in your system.
 # Builds the blog and the store simultaneously.
-axes innovatech-website build_all
+axes innovatech-website run build_all
 
 # Runs the linters one after the other.
-axes innovatech-website quality_check
+axes innovatech-website run quality_check
 ```
 
 And if you only want to execute individually, you just need to call its function:
 
 ```sh
 # Execute the script only for the blog project.
-axes innovatech-website/blog build
+axes innovatech-website/blog run build
 
-axes */store build # if you already executed the previous command, '*' indicates that the most recently used project from the parent is returned.
+axes */store run build # if you already executed the previous command, '*' indicates that the most recently used project from the parent is returned.
 ```
 
 You have moved from managing individual commands to orchestrating entire workflows. The complexity of each sub-project is encapsulated, and the parent project provides a simple and powerful API to interact with the whole.
 
 ## 6. Immersive Workflow: Session Mode (`start`)
 
-Composing and orchestrating scripts is incredibly powerful. But sometimes, you just want to focus on a single part of your system, like the blog. Typing `axes innovatech-website/blog` for every command can be repetitive.
+Composing and orchestrating scripts is incredibly powerful. But sometimes, you just want to focus on a single part of your system, like the blog.
 
 For this, `axes` offers **project sessions**.
 
-Imagine you are going to spend the next hour working only on the blog. From anywhere, simply "enter" its context:
+To enter the `blog` project's context:
 
 ```sh
 # `start` is the default action if you only provide a context.
@@ -313,15 +308,15 @@ $ axes innovatech-website/blog
 # Your terminal prompt might change to reflect the active session.
 ```
 
-You are now "inside" the `blog` project. `axes` has done several things for you in the background:
+You are now "inside" the `blog` project. `axes` has done two things for you:
 
-1. **Hook Activation:** It has executed the script defined in `[options].at_start` of your `axes.toml`. This is perfect for activating virtual environments (`source .venv/bin/activate`), exporting environment variables (`export FLASK_ENV=development`), or starting necessary services.
+1. **Hook Activation:** It has executed the script defined in `[options].at_start` of your `axes.toml`. This is perfect for activating virtual environments or starting necessary services.
 2. **Implicit Context:** You no longer need to specify the context. `axes` knows where you are.
 
-Inside the session, your workflow becomes incredibly simple:
+Inside the session, your workflow becomes incredibly simple and uses the same universal grammar:
 
 ```sh
-# No more `axes innovatech-website/blog ...`
+# The context is now implicit.
 (axes: innovatech-website/blog) $ axes build
 (axes: innovatech-website/blog) $ axes generate_footer
 

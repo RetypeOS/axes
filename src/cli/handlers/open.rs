@@ -3,7 +3,7 @@
 use crate::{
     cli::handlers::commons,
     core::{config_resolver, index_manager, parameters::ArgResolver, task_executor},
-    models::{CacheableValue, ParameterDef, TemplateComponent},
+    models::{CacheableValue, CommandAction, ParameterDef, TemplateComponent},
 };
 use anyhow::{Result, anyhow};
 use clap::Parser;
@@ -48,7 +48,9 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     let definitions: Vec<ParameterDef> = task
         .commands
         .iter()
-        .flat_map(|cmd| &cmd.template)
+        .flat_map(|cmd| match &cmd.action {
+            CommandAction::Execute(t) | CommandAction::Print(t) => t.iter().collect::<Vec<_>>(),
+        })
         .filter_map(|component| match component {
             TemplateComponent::Parameter(def) => Some(def.clone()),
             _ => None,
@@ -58,7 +60,9 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     let has_generic_params = task
         .commands
         .iter()
-        .flat_map(|cmd| &cmd.template)
+        .flat_map(|cmd| match &cmd.action {
+            CommandAction::Execute(t) | CommandAction::Print(t) => t.iter().collect::<Vec<_>>(),
+        })
         .any(|c| matches!(c, TemplateComponent::GenericParams));
 
     let resolver = ArgResolver::new(&definitions, &open_args.params, has_generic_params)?;

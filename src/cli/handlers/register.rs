@@ -4,14 +4,21 @@ use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use std::{env, path::PathBuf};
 
-use crate::{
-    cli::args::RegisterArgs,
-    core::{
-        graph_display::{self, DisplayOptions},
-        index_manager,
-        onboarding_manager::{self, OnboardingOptions},
-    },
+use crate::core::{
+    graph_display::{self, DisplayOptions},
+    index_manager,
+    onboarding_manager::{self, OnboardingOptions},
 };
+
+#[derive(Parser, Debug, Default)]
+#[command(no_binary_name = true)]
+pub struct RegisterArgs {
+    /// The path to the project to register. Defaults to the current directory.
+    pub path: Option<String>,
+    /// Do not ask for user input, fail on any conflict.
+    #[arg(long)]
+    pub autosolve: bool,
+}
 
 pub fn handle(_context: Option<String>, args: Vec<String>) -> Result<()> {
     if env::var("AXES_PROJECT_UUID").is_ok() {

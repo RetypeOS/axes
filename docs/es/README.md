@@ -1,81 +1,75 @@
+
 <p align="center">
-  <img src="logo.png" alt="axes Logo" width="200">
+  <img src="../../logo.png" alt="axes Logo" width="200">
 </p>
 
 <h1 align="center">axes: El Director de Orquesta para Tu Caos de Desarrollo</h1>
 
 <p align="center">
-  <strong>Orquestación a Escala. Ergonomía por Diseño. Rendimiento por Obsesión.</strong>
+  <strong>El poder de un orquestador complejo. La velocidad de un simple ejecutor.</strong>
 </p>
 
 <p align="center">
   <a href="#"><img src="https://img.shields.io/badge/build-passing-brightgreen" alt="CI/CD Status"></a>
-  <a href="https://github.com/retypeos/axes/releases"><img src="https://imgshields.io/badge/version-v0.2.0--beta-blue" alt="Version"></a>
+  <a href="https://github.com/retypeos/axes/releases"><img src="https://img.shields.io/badge/version-v0.2.1--beta-blue" alt="Version"></a>
   <a href="https://deepwiki.com/RetypeOS/axes"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="License"></a>
+  <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="License"></a>
 </p>
 
 <p align="center">
   <strong>Read this in other languages:</strong><br>
-  <a href="./README.md">English</a> •
-  <a href="./docs/es/README.md">Español</a>
+  <a href="../../README.md">English</a> •
+  <a href="./README.md">Español</a>
 </p>
+
+> **Nota:** Esta traducción es mantenida principalmente por la comunidad y podría no estar completamente sincronizada con la [versión en inglés](../../README.md), que es la fuente canónica de la documentación.
 
 ---
 
-## Tu Flujo de Trabajo Está Roto
+## Tu Flujo de Trabajo es un Desorden. Lo Hemos Arreglado
 
 - **Terminal 1:** `cd frontend && npm run dev`
 - **Terminal 2:** `cd backend && source .venv/bin/activate && uvicorn app:main --reload`
 - **Tú, 3 semanas después:** *«Espera... ¿el comando para los tests era `npm test`, `pytest`, `cargo test` o `go test ./...`?»*
 
-Esa micro-pausa, esa carga cognitiva, es fricción. Mata tu `flow`. Herramientas como `make` o `just` te dan atajos. **`axes` te da un lenguaje universal.**
+Esa duda, esa carga cognitiva, es fricción. Mata tu flujo. Los ejecutores de tareas simples como `make` o `just` te dan atajos. **`axes` te da un lenguaje universal.**
 
-`axes` no es solo otro gestor de tareas. Es el **lenguaje de comandos** que une toda tu pila tecnológica. Te permite componer, parametrizar y estandarizar flujos de trabajo para CUALQUIER herramienta, en CUALQUIER lenguaje, a través de CUALQUIER estructura de proyecto. Tu `package.json` conoce `npm`, tu `Makefile` conoce `make`. **`axes` los conoce a todos.** Es el director de orquesta que convierte tu caótica colección de herramientas en una sinfonía.
+`axes` no es solo otro ejecutor de tareas. Es el **lenguaje de comandos** que une a todo tu stack. Te permite componer, parametrizar y estandarizar flujos de trabajo para CUALQUIER herramienta, en CUALQUIER lenguaje. Tu `package.json` conoce `npm`, tu `Makefile` conoce `make`. **`axes` es el director de orquesta que los conoce a todos**, convirtiendo tu caótica colección de herramientas en una sinfonía.
 
-### ¿Por Qué `axes`? Porque la Velocidad No es Suficiente
+### ¿Quién Dijo que Tenías que Elegir Entre Potencia y Velocidad?
 
-Los gestores de tareas simples son rápidos. Pero el desarrollo moderno no se trata solo de ejecutar un comando rápidamente. Se trata de gestionar la complejidad a través de docenas de ellos.
+Durante años, la elección ha sido entre:
 
-Imagina un monorepo:
+- **Ejecutores Simples (`just`, `make`):** Muy rápidos, pero limitados. Son gestores de alias glorificados.
+- **Orquestadores Complejos (`Bazel`, `Gradle`):** Increíblemente potentes, pero notoriamente lentos, complejos y rígidos.
 
-**EL CAOS (ANTES de `axes`):**
+**`axes` rompe este compromiso.** Ofrecemos las capacidades avanzadas de orquestación de sistemas complejos a una velocidad que rivaliza (y a menudo supera) a los ejecutores más simples.
 
-```sh
-# Para levantar todo...
-(terminal 1) $ cd frontend && npm run dev
-(terminal 2) $ cd backend && source .venv/bin/activate && flask run
-(terminal 3) $ cd docs && hugo server
-```
+| Herramienta | Ejecución de Script en Caliente | Características de Orquestación |
+| :---------  | :-----------------------------: | :-----------------------------: |
+| `just`      | **~38 ms**                      |            Básicas              |
+| `task`      | ***~40 ms**                     |          **Advanced**           |
+| **`axes`**  | **~35 ms**                      |          **Avanzadas**          |
 
-**LA ORQUESTA (CON `axes`):**
+*Benchmarks ejecutados en una máquina de desarrollo estándar ejecutando un script simple de "hola mundo", Observando únicamente el tiempo de inicio, resolución, ejecución y cierre, obteniendo el tiempo mínimo promedio de conjuntos de 200 ejecuciones.*
 
-```toml
-# en ./.axes/axes.toml
-[scripts]
-# El '>' indica ejecución en paralelo.
-dev = [
-    "> axes frontend dev", # Llama al script dev del proyecto frontend
-    "> axes backend dev",  # Llama al script dev del proyecto backend
-    "> axes docs dev"      # Y al script dev del proyecto docs
-]
-```
+Esto lo conseguimos través de una arquitectura obsesionada con el rendimiento.
 
-A partir de ahora, cualquier miembro de tu equipo, en cualquier máquina, ejecuta todo el entorno con **un solo comando universal**:
+- **Compilación JIT a AST:** La primera vez que ejecutas un script, `axes` actúa como un compilador Just-in-Time. Parsea tu `axes.toml`, resuelve toda la herencia y composición, y lo compila en un **Árbol de Sintaxis Abstracta (AST)** altamente optimizado.
+- **Caché Binario Persistente:** Este AST se guarda en un caché binario (`.axes/config.cache.bin`).
+- **Ejecuciones en Caliente Instantáneas:** Cada ejecución posterior omite por completo el trabajo costoso. `axes` deserializa el AST pre-compilado del caché binario—una operación órdenes de magnitud más rápida que el parseo de texto—y lo ejecuta.
 
-```sh
-axes dev
-```
+**El resultado: pagas el coste de la orquestación una sola vez. Obtienes la velocidad de un ejecutor simple cada vez después.**
 
-Acabas de convertir el conocimiento tribal en infraestructura versionada. El onboarding de un nuevo desarrollador pasó de horas a segundos.
+- ⚙️ **[Referencia de Arquitectura completa (`TECNICAL.md`)](./TECNICAL.md):** Si te interesa investigar más a fondo la arquitectura de `axes`, el mejor lugar es viendo el código, pero este es el segundo mejor lugar.
 
 ---
 
-### La Filosofía `axes`: Más que un Gestor de Tareas
+### La Filosofía `axes`: Más que un Ejecutor de Tareas
 
-`axes` está construido sobre una base que los gestores de tareas simples ignoran.
+`axes` se construye sobre una base que las herramientas simples ignoran.
 
-- **Orquestación, no solo Ejecución:** `axes` entiende que los proyectos tienen relaciones. Organízalos en árboles (`app/api`, `app/web`). Los hijos heredan y sobrescriben variables y scripts. Define una vez, usa en todas partes. Esto es DRY (No te Repitas) a un nivel completamente nuevo.
+- **Orquestación, no solo Ejecución:** `axes` entiende que los proyectos tienen relaciones. Organízalos en árboles (`app/api`, `app/web`). Los hijos heredan y sobrescriben configuraciones. Define una vez, usa en todas partes.
 - **Ergonomía, no solo Atajos:** Tus scripts se convierten en aplicaciones de línea de comandos de primera clase.
 
     ```toml
@@ -85,7 +79,7 @@ Acabas de convertir el conocimiento tribal en infraestructura versionada. El onb
     ```
 
     No más scripts `bash` frágiles para parsear argumentos.
-- **Rendimiento, sin Compromiso:** Escrito en Rust, `axes` está diseñado para la velocidad. Un motor de caché de estilo JIT (Just-In-Time) compila tus flujos de trabajo a un formato binario. La primera ejecución paga el precio de la orquestación; **cada ejecución subsecuente es casi instantánea.** Obtienes la potencia de un sistema complejo a la velocidad de uno simple.
+- **Robustez por Diseño:** `axes` identifica los proyectos por un `UUID` inmutable, no por una ruta de archivo frágil. Renombra o mueve tus directorios libremente—`axes` nunca perderá el rastro de tus proyectos.
 
 ---
 
@@ -95,14 +89,12 @@ Acabas de convertir el conocimiento tribal en infraestructura versionada. El onb
 
 1. Ve a la [**página de Releases de `axes` en GitHub**](https://github.com/RetypeOS/axes/releases).
 2. Descarga el archivo para tu sistema operativo.
-3. Descomprímelo y mueve el ejecutable `axes` a un directorio en el `PATH` de tu sistema.
+3. Descomprímelo y mueve el ejecutable `axes` a un directorio en tu `PATH`.
 4. Abre una **nueva terminal** y verifica con `axes --version`.
 
 ---
 
 ### `axes` en Acción: Un Vistazo al Poder
-
-Mientras tú buscas en un `README` antiguo, otros ya están orquestando.
 
 #### 1. Comandos Universales y Conscientes del Contexto
 
@@ -125,22 +117,22 @@ macos   = "open http://localhost:8080"
 linux   = "xdg-open http://localhost:8080"
 ```
 
-#### 3. Composición Dinámica y en Tiempo Real
+#### 3. Composición Dinámica en Tiempo Real
 
-Ejecuta comandos y usa su salida sobre la marcha.
+Ejecuta comandos y usa su salida al instante.
 
 ```toml
 [scripts]
-# Etiqueta una imagen Docker con el hash git corto actual
+# Etiqueta una imagen Docker con el hash corto de git actual
 tag_release = "docker tag my-app:latest my-app:<axes::run('git rev-parse --short HEAD')>"
 ```
 
 #### 4. Sesiones de Enfoque Inmersivo
 
-Sumérgete en un sub-proyecto. `axes` configura y desmonta tu entorno por ti.
+Sumérgete en un sub-proyecto. `axes` configura y desmantela tu entorno por ti.
 
 ```toml
-# en mi-app/api/.axes/axes.toml
+# en my-app/api/.axes/axes.toml
 [options]
 at_start = "source .venv/bin/activate" # Se ejecuta al entrar
 at_exit  = "docker-compose down"       # Se ejecuta al salir
@@ -157,7 +149,7 @@ $ axes my-app/api # Inicia una sesión. `at_start` se ejecuta automáticamente.
 
 ---
 
-### ¿Listo para Dirigir Tu Propia Orquesta?
+### ¿Listo para Dirigir tu Propia Orquesta?
 
 La fricción que sientes cada día no es un requisito. Es un problema con una solución. `axes` es esa solución.
 
@@ -167,9 +159,9 @@ La fricción que sientes cada día no es un requisito. Es un problema con una so
 
 ### Únete a la Revolución del Flujo de Trabajo
 
-`axes` es más que una herramienta; es un movimiento para restaurar el control y la coherencia en el desarrollo. Tu voz es crucial.
+`axes` es más que una herramienta; es un movimiento para devolver el control y la coherencia al desarrollo. Tu voz es crucial.
 
 - **Encuentra un Bug o tienes una Idea Genial:** [**Abre un Issue**](https://github.com/RetypeOS/axes/issues)
 - **Quieres Contribuir con Código:** ¡Los Pull Requests son siempre bienvenidos!
 
-**Instala `axes` hoy. Deja de buscar comandos. Olvídate de los pequeños problemas. Céntrate en lo que realmente importa: **darle vida a tu software**, y deja que `axes` se preocupe del cómo.**
+**Instala `axes` hoy. Deja de buscar comandos. Céntrate en lo que realmente importa: **darle vida a tu software**, y deja que `axes` se preocupe del cómo.**

@@ -41,28 +41,24 @@ pub enum ExecutionError {
 /// Executes a system command with high performance and graceful cancellation handling.
 /// This function is synchronous from the caller's perspective, but uses an async runtime internally.
 pub fn execute_command(
-    command_line: &str,
+    command: &str,
+    ignore_errors: bool,
     cwd: &Path,
     env_vars: &HashMap<String, String>, // Currently unused, but kept for API consistency.
 ) -> Result<(), ExecutionError> {
     TOKIO_RT.block_on(async {
-        let trimmed_command = command_line.trim();
+        let trimmed_command = command.trim();
         if trimmed_command.is_empty() {
             return Ok(());
         }
 
-        let (final_command_line, ignore_errors) = if trimmed_command.starts_with('-') {
-            (trimmed_command.strip_prefix('-').unwrap().trim(), true)
-        } else {
-            (trimmed_command, false)
-        };
-
-        if final_command_line.is_empty() {
+        if trimmed_command.is_empty() {
             return Ok(());
         }
 
-        let parts = shlex::split(final_command_line)
-            .ok_or_else(|| ExecutionError::CommandParse(final_command_line.to_string()))?;
+        let parts = shlex::split(trimmed_command)
+            .ok_or_else(|| ExecutionError::CommandParse(trimmed_command.to_string()))?;
+
         if parts.is_empty() {
             return Ok(());
         }
@@ -86,18 +82,18 @@ pub fn execute_command(
             Err(e) if e.kind() == ErrorKind::NotFound && cfg!(target_os = "windows") => {
                 TokioCommand::new("cmd")
                     .arg("/C")
-                    .arg(final_command_line)
+                    .arg(trimmed_command)
                     .current_dir(clean_cwd)
                     .envs(env_vars)
                     .stdin(Stdio::inherit())
                     .stdout(Stdio::inherit())
                     .stderr(Stdio::inherit())
                     .spawn()
-                    .map_err(|e| ExecutionError::CommandFailed(final_command_line.to_string(), e))?
+                    .map_err(|e| ExecutionError::CommandFailed(trimmed_command.to_string(), e))?
             }
             Err(e) => {
                 return Err(ExecutionError::CommandFailed(
-                    final_command_line.to_string(),
+                    trimmed_command.to_string(),
                     e,
                 ));
             }
@@ -116,19 +112,19 @@ pub fn execute_command(
                 // Attempt to gracefully kill the process.
                 child.kill().await.map_err(|e| {
                     log::warn!("Failed to kill child process: {}", e);
-                    ExecutionError::CommandFailed(final_command_line.to_string(), e)
+                    ExecutionError::CommandFailed(trimmed_command.to_string(), e)
                 })?;
                 log::debug!("Child process killed.");
-                Err(ExecutionError::Interrupted { command: final_command_line.to_string() })
+                Err(ExecutionError::Interrupted { command: trimmed_command.to_string() })
             }
 
             status_result = child.wait() => {
                 match status_result {
                     Ok(status) if !status.success() && !ignore_errors => {
-                        Err(ExecutionError::NonZeroExitStatus(final_command_line.to_string()))
+                        Err(ExecutionError::NonZeroExitStatus(trimmed_command.to_string()))
                     }
                     Ok(_) => Ok(()), // Success
-                    Err(e) => Err(ExecutionError::CommandFailed(final_command_line.to_string(), e)),
+                    Err(e) => Err(ExecutionError::CommandFailed(trimmed_command.to_string(), e)),   
                 }
             }
         }

@@ -3,7 +3,7 @@
 use crate::{
     cli::handlers::commons,
     core::{config_resolver, index_manager, parameters::ArgResolver, task_executor},
-    models::TemplateComponent,
+    models::{CommandAction, TemplateComponent},
 };
 use anyhow::Result;
 use clap::Parser;
@@ -50,7 +50,9 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     let all_definitions: Vec<_> = task
         .commands
         .iter()
-        .flat_map(|cmd| &cmd.template)
+        .flat_map(|cmd| match &cmd.action {
+            CommandAction::Execute(t) | CommandAction::Print(t) => t.iter().collect::<Vec<_>>(),
+        })
         .filter_map(|component| match component {
             TemplateComponent::Parameter(def) => Some(def.clone()),
             _ => None,
@@ -60,7 +62,9 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     let has_generic_params = task
         .commands
         .iter()
-        .flat_map(|cmd| &cmd.template)
+        .flat_map(|cmd| match &cmd.action {
+            CommandAction::Execute(t) | CommandAction::Print(t) => t.iter().collect::<Vec<_>>(),
+        })
         .any(|c| matches!(c, TemplateComponent::GenericParams));
 
     // 4. Create a single `ArgResolver` for the entire task.

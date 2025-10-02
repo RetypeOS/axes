@@ -126,15 +126,7 @@ fn main() {
 fn run_cli(cli: Cli) -> Result<()> {
     log::debug!("CLI args parsed: {:?}", cli);
 
-    // --- Argument Collection ---
-    let mut all_args = Vec::new();
-    if let Some(arg1) = cli.context_or_action {
-        all_args.push(arg1);
-    }
-    if let Some(arg2) = cli.action_or_context_or_arg {
-        all_args.push(arg2);
-    }
-    all_args.extend(cli.args);
+    let all_args = cli.args;
 
     if all_args.is_empty() {
         println!("Welcome to axes! (TUI placeholder)");

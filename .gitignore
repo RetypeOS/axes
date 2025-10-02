@@ -38,3 +38,4 @@ axesrs.txt
 #.axes/config.cache.bin
 flamegraph_old.html
 justfile
+Taskfile.yml

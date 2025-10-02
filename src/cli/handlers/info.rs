@@ -3,7 +3,7 @@
 use crate::{
     cli::handlers::commons,
     constants::{AXES_DIR, PROJECT_CONFIG_FILENAME},
-    models::{CacheableValue, ResolvedConfig, TemplateComponent},
+    models::{CacheableValue, CommandAction, ResolvedConfig, TemplateComponent},
 };
 use anyhow::Result;
 use clap::Parser;
@@ -127,7 +127,10 @@ fn print_variables(config: &ResolvedConfig, key: &str, title: &str) {
                         task.commands
                             .iter()
                             .map(|cmd| {
-                                cmd.template
+                                let template = match &cmd.action {
+                                    CommandAction::Execute(t) | CommandAction::Print(t) => t,
+                                };
+                                template
                                     .iter()
                                     .map(|c| match c {
                                         TemplateComponent::Literal(s) => s.clone(),

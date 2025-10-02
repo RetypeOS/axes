@@ -2,7 +2,7 @@
 
 use crate::{
     core::{parameters::ArgResolver, task_executor},
-    models::{ResolvedConfig, ShellConfig, ShellsConfig, Task},
+    models::{CommandAction, ResolvedConfig, ShellConfig, ShellsConfig, Task},
 };
 use anyhow::Result;
 use colored::Colorize;
@@ -56,7 +56,14 @@ pub fn launch_session(
         println!("\n{}", "Preparing `at_start` hook...".dimmed());
         task.commands
             .iter()
-            .map(|cmd| task_executor::assemble_final_command(&cmd.template, config, resolver))
+            .map(|cmd| match &cmd.action {
+                // Hooks should only contain executable commands.
+                CommandAction::Execute(template) => {
+                    task_executor::assemble_final_command(template, config, resolver)
+                }
+                // Print actions are ignored in `at_start` as they have no effect in an init script.
+                CommandAction::Print(_) => Ok(String::new()),
+            })
             .collect::<Result<Vec<String>>>()?
     } else {
         Vec::new()

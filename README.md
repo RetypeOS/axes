@@ -5,7 +5,7 @@
 <h1 align="center">axes: The Conductor for Your Development Chaos</h1>
 
 <p align="center">
-  <strong>Any Project. Any Language. One Command Language.</strong>
+  <strong>The power of a complex orchestrator. The speed of a simple executor.</strong>
 </p>
 
 <p align="center">
@@ -23,93 +23,82 @@
 
 ---
 
-## Your Workflow is Broken
+## Your Workflow Is a Mess. We Fixed It
 
 - **Terminal 1:** `cd frontend && npm run dev`
 - **Terminal 2:** `cd backend && source .venv/bin/activate && uvicorn app:main --reload`
-- **You, 3 weeks later:** *“Wait... was the test command `npm test`, `pytest`, `cargo test`, or `go test ./...`?”*
+- **You, 3 weeks later:** *“Wait... was the command for tests `npm test`, `pytest`, `cargo test`, or `go test ./...`?”*
 
-That micro-pause, that cognitive load, is friction. It kills your flow. Tools like `make` or `just` give you shortcuts. **`axes` gives you a universal language.**
+That doubt, that cognitive load, is friction. It kills your flow. Simple task runners like `make` or `just` give you shortcuts. **`axes` gives you a universal language.**
 
-`axes` is not just another task runner. It's the **command language** that unites your entire stack. It allows you to compose, parameterize, and standardize workflows for ANY tool, in ANY language, across ANY project structure. Your `package.json` knows `npm`, your `Makefile` knows `make`. **`axes` knows them all.** It's the conductor that turns your chaotic collection of tools into a symphony. `axes` It is the conductor who tells them what to do, using simple, consistent, and powerful commands that **YOU** define, and which travel with your repository, allowing new users to onboard in an absolutely simple and standard way.
+`axes` is not just another task runner. It is the **command language** that ties your entire stack together. It allows you to compose, parameterize, and standardize workflows for ANY tool, in ANY language. Your `package.json` knows `npm`, your `Makefile` knows `make`. **`axes` is the conductor who knows them all**, turning your chaotic collection of tools into a symphony.
 
-### Why `axes`? Because Speed is Not Enough
+### Who Said You Had to Choose Between Power and Speed?
 
-Simple task runners are fast. But modern development is not just about running one command quickly. It's about managing complexity across dozens of them.
+For years, the choice has been between:
 
-Imagine a monorepo:
+- **Simple Runners (`just`, `make`):** Very fast, but limited. They are glorified alias managers.
+- **Complex Orchestrators (`Bazel`, `Gradle`):** Incredibly powerful, but notoriously slow, complex, and rigid.
 
-**THE CHAOS (BEFORE `axes`):**
+**`axes` breaks this compromise.** We offer the advanced orchestration capabilities of complex systems at a speed that rivals (and often exceeds) the simplest runners.
 
-```sh
-# To spin up everything...
-(terminal 1) $ cd frontend && npm run dev
-(terminal 2) $ cd backend && source .venv/bin/activate && flask run
-(terminal 3) $ cd docs && hugo server
-```
+| Tool | Hot Script Execution | Orchestration Features |
+| :---------  | :-----------------------------: | :-----------------------------: |
+| `just`      | **~38 ms**                      |            Basic                |
+| `task`      | ***~40 ms**                     |          **Advanced**           |
+| **`axes`**  | **~35 ms**                      |          **Advanced**           |
 
-**THE ORCHESTRA (WITH `axes`):**
+*Benchmarks executed on a standard development machine running a simple "hello world" script, observing only the startup, resolution, execution, and shutdown time, obtaining the minimum average time from sets of 200 executions.*
 
-```toml
-# in ./.axes/axes.toml
-[scripts]
-# The '>' indicates parallel execution.
-dev = [
-    "> axes frontend dev", # Calls the `dev` script of the `frontend` project
-    "> axes backend dev",  # Calls the `dev` script of the `backend` project
-    "> axes docs dev"      # And the `dev` script of the `docs` project
-]
-```
+We achieve this through an architecture obsessed with performance.
 
-From now on, anyone on your team, on any machine, runs the entire environment with **one universal command**:
+- **JIT Compilation to AST:** The first time you run a script, `axes` acts as a Just-in-Time compiler. It parses your `axes.toml`, resolves all inheritance and composition, and compiles it into a highly optimized **Abstract Syntax Tree (AST)**.
+- **Persistent Binary Cache:** This AST is saved to a binary cache (`.axes/config.cache.bin`).
+- **Instant Hot Executions:** Every subsequent run completely skips the costly work. `axes` deserializes the pre-compiled AST from the binary cache—an operation orders of magnitude faster than text parsing—and executes it.
 
-```sh
-axes dev
-```
+**The result: you pay the orchestration cost only once. You get the speed of a simple runner every time after.**
 
-You've just converted tribal knowledge into versioned infrastructure. Onboarding a new developer went from hours to seconds.
+- ⚙️ **[Complete Architecture Reference (`TECNICAL.md`)](./TECNICAL.md):** If you are interested in delving deeper into the `axes` architecture, the best place is by viewing the code, but this is the second-best place.
 
 ---
 
 ### The `axes` Philosophy: More Than a Task Runner
 
-`axes` is built on a foundation that simple task runners ignore.
+`axes` is built on a foundation that simple tools ignore.
 
-- **Orchestration, not just Execution:** `axes` understands that projects have relationships. Organize them in trees (`app/api`, `app/web`). Children inherit and override variables and scripts. Define once, use everywhere. This is DRY on a whole new level.
-- **Ergonomics, not just Shortcuts:** Your scripts become first-class command-line applications.
+- **Orchestration, Not Just Execution:** `axes` understands that projects have relationships. Organize them into trees (`app/api`, `app/web`). Children inherit and override configurations. Define once, use everywhere.
+- **Ergonomics, Not Just Shortcuts:** Your scripts become first-class command-line applications.
 
     ```toml
-    # Scripts as Functions: Parameterize, validate, and set defaults.
+    # Scripts as Functions: Parameterize, validate, and set default values.
     [scripts]
     deploy = "terraform apply -var 'env=<axes::params::0(default='staging')>'"
     ```
 
-    No more fragile `bash` scripts to parse arguments.
-- **Performance, without Compromise:** Written in Rust, `axes` is architected for speed. A JIT-style caching engine compiles your workflows into a binary format. The first run pays the price of orchestration; **every subsequent run is nearly instantaneous.** You get the power of a complex system at the speed of a simple one.
+    No more fragile `bash` scripts for parsing arguments.
+- **Robustness by Design:** `axes` identifies projects by an immutable `UUID`, not a fragile file path. Rename or move your directories freely—`axes` will never lose track of your projects.
 
 ---
 
 ### Installation (30 Seconds to a Better Workflow)
 
-`axes` is a single, dependency-free binary.
+`axes` is a single dependency-free binary.
 
 1. Go to the [**`axes` Releases page on GitHub**](https://github.com/RetypeOS/axes/releases).
-2. Download the archive for your operating system.
-3. Unzip it and move the `axes` executable to a directory in your system's `PATH`.
+2. Download the file for your operating system.
+3. Unzip it and move the `axes` executable to a directory in your `PATH`.
 4. Open a **new terminal** and verify with `axes --version`.
 
 ---
 
-### `axes` in Action: A Glimpse of the Power
+### `axes` in Action: A Glimpse of Power
 
-While you're searching an old `README`, others are already orchestrating.
-
-#### 1. Universal, Context-Aware Commands
+#### 1. Universal and Context-Aware Commands
 
 Run a script in the current directory. The syntax is simple and predictable.
 
 ```sh
-# Runs the 'build' script defined in the nearest axes.toml
+# Executes the 'build' script defined in the nearest axes.toml
 axes build --release
 ```
 
@@ -119,25 +108,25 @@ Define a command once. It works for your entire team, on any OS.
 
 ```toml
 [scripts.browse]
-desc = "Opens local documentation in the browser."
+desc = "Opens the local documentation in the browser."
 windows = "start http://localhost:8080"
 macos   = "open http://localhost:8080"
 linux   = "xdg-open http://localhost:8080"
 ```
 
-#### 3. Dynamic, Real-time Composition
+#### 3. Real-Time Dynamic Composition
 
-Execute commands and use their output on the fly.
+Run commands and use their output instantly.
 
 ```toml
 [scripts]
-# Tag a Docker image with the current short git hash
+# Tags a Docker image with the current short git hash
 tag_release = "docker tag my-app:latest my-app:<axes::run('git rev-parse --short HEAD')>"
 ```
 
 #### 4. Immersive Focus Sessions
 
-Dive into a sub-project. `axes` sets up and tears down your environment for you.
+Dive into a sub-project. `axes` sets up and dismantles your environment for you.
 
 ```toml
 # in my-app/api/.axes/axes.toml
@@ -147,10 +136,10 @@ at_exit  = "docker-compose down"       # Executes upon exit
 ```
 
 ```sh
-$ axes my-app/api # Starts a session. `at_start` runs automatically.
+$ axes my-app/api # Starts a session. `at_start` executes automatically.
 
-(axes: my-app/api) $ axes test  # No need to repeat the context.
-(axes: my-app/api) $ exit       # `at_exit` runs automatically.
+(axes: my-app/api) $ axes test  # You don't need to repeat the context.
+(axes: my-app/api) $ exit       # `at_exit` executes automatically.
 ```
 
 **Your development environment, on demand.**
@@ -159,7 +148,7 @@ $ axes my-app/api # Starts a session. `at_start` runs automatically.
 
 ### Ready to Conduct Your Own Orchestra?
 
-The friction you feel every day is not a requirement. It's a problem with a solution. `axes` is that solution.
+The friction you feel every day is not a requirement. It is a problem with a solution. `axes` is that solution.
 
 - ➡️ **[Quick Start Guide (`GETTING_STARTED.md`)](./GETTING_STARTED.md):** Build your first orchestrated monorepo in 15 minutes.
 - 📖 **[Mastering `axes.toml` (`AXES_TOML_GUIDE.md`)](./AXES_TOML_GUIDE.md):** The definitive reference for every feature.
@@ -167,9 +156,9 @@ The friction you feel every day is not a requirement. It's a problem with a solu
 
 ### Join the Workflow Revolution
 
-`axes` is more than a tool; it's a movement to restore control and consistency to development. Your voice is crucial.
+`axes` is more than a tool; it is a movement to restore control and consistency to development. Your voice is crucial.
 
 - **Found a Bug or Have a Great Idea:** [**Open an Issue**](https://github.com/RetypeOS/axes/issues)
 - **Want to Contribute Code:** Pull Requests are always welcome!
 
-**Install `axes` today. Stop searching for commands. Forget the small problems. Focus on what truly matters: **bringing your software to life**, and let `axes` worry about the how.**
+**Install `axes` today. Stop searching for commands. Focus on what truly matters: **bringing your software to life**, and let `axes` worry about the how.**

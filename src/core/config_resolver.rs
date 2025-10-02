@@ -5,9 +5,9 @@ use crate::constants::{
 };
 use crate::core::parameters::{self};
 use crate::models::{
-    CacheableValue, CanonicalCommand, Command, CommandExecution, FlattenedCommand, GlobalIndex,
-    IndexEntry, ProjectConfig, ResolvedConfig, ResolvedOptionsConfig, RunSpec, Runnable,
-    SerializableConfigCache, Task, TemplateComponent,
+    CacheableValue, CanonicalCommand, Command, CommandAction, CommandExecution, FlattenedCommand,
+    GlobalIndex, IndexEntry, ProjectConfig, ResolvedConfig, ResolvedOptionsConfig, RunSpec,
+    Runnable, SerializableConfigCache, Task, TemplateComponent,
 };
 use anyhow::{Context, Result, anyhow};
 use bincode::error::DecodeError;
@@ -177,8 +177,9 @@ pub fn resolve_hook_task(
 }
 
 /// The main orchestrator for the expansion engine.
-/// It handles caching, recursion safety, and calls the linear expansion
-/// function `expand_line_to_components` for each line of a command.
+/// It handles caching, recursion safety, and calls the appropriate expansion logic
+/// for each line of a command, distinguishing between pure structural composition
+/// and inline token expansion.
 fn expand_and_get_task_internal(
     key: &str,
     kind: ValueKind,
@@ -186,8 +187,6 @@ fn expand_and_get_task_internal(
     depth: u32,
 ) -> Result<(Task, bool)> {
     let stack_key = format!("{:?}::{}", kind, key);
-
-    println!("Resolving...: {:?}\ndepth: {:?}\n", stack_key, depth);
 
     // --- Safety Check: Prevent infinite recursion ---
     if depth >= MAX_RECURSION_DEPTH {
@@ -223,76 +222,79 @@ fn expand_and_get_task_internal(
 
     // --- Main Expansion Loop for Each Line ---
     for line in &flattened_command.command_lines {
-        let (ignore_errors, run_in_parallel, clean_line) = parse_execution_prefixes(line);
+        let metadata = if kind == ValueKind::Script {
+            parse_execution_prefixes(line)
+        } else {
+            ExecutionMetadata {
+                command_text: line,
+                ..Default::default()
+            }
+        };
 
-        // This is the core logic: expand the line.
-        // It will either return a template to be added as a new command,
-        // or it will have already modified `final_task` via structural composition.
-        let template = expand_line(
-            clean_line,
-            &mut final_task,
-            config,
-            depth + 1,
-        )?;
-
-        // If the expansion resulted in components (i.e., it wasn't a pure multi-line script),
-        // package them into a new CommandExecution.
-        if !template.is_empty() {
-            final_task.commands.push(CommandExecution {
-                template,
-                ignore_errors,
-                run_in_parallel,
-            });
+        if let Some(script_key) = is_pure_script_composition(metadata.command_text) {
+            let (mut sub_task, _) =
+                expand_and_get_task_internal(script_key, ValueKind::Script, config, depth + 1)?;
+            for cmd in &mut sub_task.commands {
+                cmd.ignore_errors |= metadata.ignore_errors;
+                cmd.run_in_parallel |= metadata.run_in_parallel;
+                cmd.silent_mode |= metadata.silent_mode;
+            }
+            final_task.commands.extend(sub_task.commands);
+        } else {
+            let template = expand_line(metadata.command_text, &mut final_task, config, depth + 1)?;
+            if !template.is_empty() {
+                final_task.commands.push(CommandExecution {
+                    action: if metadata.is_echo {
+                        CommandAction::Print(template)
+                    } else {
+                        CommandAction::Execute(template)
+                    },
+                    ignore_errors: metadata.ignore_errors,
+                    run_in_parallel: metadata.run_in_parallel,
+                    silent_mode: metadata.silent_mode,
+                });
+            }
         }
     }
 
-    // --- Optimization and Caching ---
     for cmd in &mut final_task.commands {
-        optimize_literals(&mut cmd.template);
+        let template = match &mut cmd.action {
+            CommandAction::Execute(t) | CommandAction::Print(t) => t,
+        };
+        optimize_literals(template);
     }
 
-    let cacheable_mut = get_cacheable_value_mut(config, key, kind)?.unwrap(); // Safe due to previous checks
+    let cacheable_mut = get_cacheable_value_mut(config, key, kind)?.unwrap();
     *cacheable_mut = CacheableValue::Expanded(final_task.clone());
 
-    println!("Task: {:?}\n", final_task);
     Ok((final_task, true))
 }
 
-/// Expands a single line into a vector of `TemplateComponent`s or structurally
-/// composes a multi-line script into the `parent_task`.
+/// Checks if a line is a single, pure script composition token.
+fn is_pure_script_composition(line: &str) -> Option<&str> {
+    if let Some(caps) = TOKEN_RE.captures(line)
+        && caps.get(0).unwrap().as_str() == line
+    {
+        let content = caps.get(1).unwrap().as_str().trim();
+        return content.strip_prefix("scripts::");
+    }
+    None
+}
+
+/// The high-performance, single-pass linear expansion engine for a single line.
+/// This function handles "inline" composition, where tokens are mixed with other text.
 fn expand_line(
     line: &str,
-    parent_task: &mut Task,
+    _parent_task: &mut Task, // Kept for API consistency, but not used for direct modification
     config: &mut ResolvedConfig,
     depth: u32,
 ) -> Result<Vec<TemplateComponent>> {
     let mut components = Vec::new();
     let mut last_index = 0;
 
-    let captures: Vec<_> = TOKEN_RE.captures_iter(line).collect();
-
-    // --- Structural Composition Fast Path ---
-    // If a line is a single, pure script token, we compose it structurally.
-    if captures.len() == 1 && captures[0].get(0).unwrap().as_str() == line {
-        let content = captures[0].get(1).unwrap().as_str().trim();
-        if let Some(script_key) = content.strip_prefix("scripts::") {
-            let (sub_task, _) = expand_and_get_task_internal(
-                script_key,
-                ValueKind::Script,
-                config,
-                depth, // Note: depth is passed directly, not incremented here
-            )?;
-            // Directly extend the parent task with the sub-task's commands.
-            parent_task.commands.extend(sub_task.commands);
-            // Return an empty template to signify that this line has been fully processed.
-            return Ok(Vec::new());
-        }
-    }
-
-    // --- Inline Expansion Slow Path ---
-    // If the line is not a pure script composition, expand all tokens inline.
-    for caps in captures {
+    for caps in TOKEN_RE.captures_iter(line) {
         let full_match = caps.get(0).unwrap();
+        // Append the literal text that comes before the token
         let literal_part = &line[last_index..full_match.start()];
         if !literal_part.is_empty() {
             add_literal(&mut components, literal_part.to_string());
@@ -301,19 +303,36 @@ fn expand_line(
         let content = caps.get(1).unwrap().as_str().trim();
 
         if let Some(var_key) = content.strip_prefix("vars::") {
-            let (var_task, _) = expand_and_get_task_internal(var_key, ValueKind::Variable, config, depth)?;
-            if var_task.commands.len() != 1 { return Err(anyhow!("Variable '{}' must expand to a single-line value.", var_key)); }
+            let (var_task, _) =
+                expand_and_get_task_internal(var_key, ValueKind::Variable, config, depth)?;
+            // Variables must expand to a single, simple command line to be used inline.
+            if var_task.commands.len() != 1 {
+                return Err(anyhow!(
+                    "Variable '{}' must expand to a single-line value to be used inline.",
+                    var_key
+                ));
+            }
             // Inline compose the variable's components.
-            components.extend(var_task.commands[0].template.clone());
-
+            let template_to_extend = match &var_task.commands[0].action {
+                CommandAction::Execute(t) | CommandAction::Print(t) => t,
+            };
+            components.extend(template_to_extend.clone());
         } else if let Some(script_key) = content.strip_prefix("scripts::") {
             // This is an inline script composition.
-            let (script_task, _) = expand_and_get_task_internal(script_key, ValueKind::Script, config, depth)?;
+            let (script_task, _) =
+                expand_and_get_task_internal(script_key, ValueKind::Script, config, depth)?;
+            // Scripts used inline must also resolve to a single command line.
             if script_task.commands.len() > 1 {
-                return Err(anyhow!("Inline script composition '<axes::scripts::{}>' is not supported for multi-line scripts. Use it on its own line.", script_key));
+                return Err(anyhow!(
+                    "Inline script composition for '<axes::scripts::{}>' is not supported because it is a multi-line script. Use it on its own line.",
+                    script_key
+                ));
             }
             if let Some(cmd) = script_task.commands.first() {
-                components.extend(cmd.template.clone());
+                let template_to_extend = match &cmd.action {
+                    CommandAction::Execute(t) | CommandAction::Print(t) => t,
+                };
+                components.extend(template_to_extend.clone());
             }
         } else if let Some(param_spec) = content.strip_prefix("params::") {
             let def = parameters::parse_parameter_token(full_match.as_str(), param_spec)?;
@@ -322,9 +341,15 @@ fn expand_line(
             components.push(TemplateComponent::GenericParams);
         } else if let Some(run_spec) = content.strip_prefix("run") {
             if run_spec.starts_with("('") && run_spec.ends_with("')") {
-                let cmd = run_spec.strip_prefix("('").unwrap().strip_suffix("')").unwrap();
+                let cmd = run_spec
+                    .strip_prefix("('")
+                    .unwrap()
+                    .strip_suffix("')")
+                    .unwrap();
                 components.push(TemplateComponent::Run(RunSpec::Literal(cmd.to_string())));
-            } else { return Err(anyhow!("Invalid run syntax: {}", full_match.as_str())); }
+            } else {
+                return Err(anyhow!("Invalid run syntax: {}", full_match.as_str()));
+            }
         } else {
             // Default case: simple static tokens become enum variants
             let component = match content {
@@ -332,7 +357,12 @@ fn expand_line(
                 "name" => TemplateComponent::Name,
                 "uuid" => TemplateComponent::Uuid,
                 "version" => TemplateComponent::Version,
-                _ => return Err(anyhow!("Unknown token namespace in: '{}'", full_match.as_str())),
+                _ => {
+                    return Err(anyhow!(
+                        "Unknown token namespace in: '{}'",
+                        full_match.as_str()
+                    ));
+                }
             };
             components.push(component);
         }
@@ -340,6 +370,7 @@ fn expand_line(
         last_index = full_match.end();
     }
 
+    // Append the final literal part of the string (after the last token).
     let final_literal = &line[last_index..];
     if !final_literal.is_empty() {
         add_literal(&mut components, final_literal.to_string());
@@ -495,23 +526,72 @@ fn flatten_command(cmd: CanonicalCommand, os: &str) -> CacheableValue {
     })
 }
 
-fn parse_execution_prefixes(line: &str) -> (bool, bool, &str) {
-    let mut trimmed_line = line.trim_start();
-    let mut ignore_errors = false;
-    let mut run_in_parallel = false;
+/// Holds the metadata parsed from the execution prefixes of a command line.
+#[derive(Debug, Default)]
+struct ExecutionMetadata<'a> {
+    ignore_errors: bool,
+    run_in_parallel: bool,
+    silent_mode: bool, // For `@` prefix
+    is_echo: bool,     // For `#` prefix
+    command_text: &'a str,
+}
 
+/// Parses execution prefixes (`-`, `>`, `@`, `#`) from the start of a line,
+/// respecting user-defined termination rules.
+fn parse_execution_prefixes(line: &str) -> ExecutionMetadata<'_> {
+    let mut metadata = ExecutionMetadata::default();
+    let mut remainder = line.trim_start();
+
+    // --- Rule 1 (Highest Precedence): Check for the '#' echo prefix. ---
+    // If the very first non-whitespace character is '#', it's an echo command,
+    // and no other prefixes are parsed.
+    if let Some(command_text) = remainder.strip_prefix('#') {
+        metadata.is_echo = true;
+        // The rest of the line is the text to be printed.
+        // We trim at most one leading space for convenience (e.g., `# message`).
+        metadata.command_text = command_text.strip_prefix(' ').unwrap_or(command_text);
+        return metadata;
+    }
+
+    // --- Rule 2: If not an echo, parse for other prefixes (`-`, `>`, `@`). ---
     loop {
-        if let Some(rest) = trimmed_line.strip_prefix('-') {
-            ignore_errors = true;
-            trimmed_line = rest.trim_start();
-        } else if let Some(rest) = trimmed_line.strip_prefix('>') {
-            run_in_parallel = true;
-            trimmed_line = rest.trim_start();
+        // Find the first character of the current remainder.
+        let next_char = match remainder.chars().next() {
+            Some(c) => c,
+            None => {
+                // End of string, all prefixes consumed.
+                remainder = "";
+                break;
+            }
+        };
+
+        let mut prefix_consumed = true;
+        match next_char {
+            '-' => metadata.ignore_errors = true,
+            '>' => metadata.run_in_parallel = true,
+            '@' => metadata.silent_mode = true,
+            '|' => {
+                // Explicit terminator. Consume it and stop.
+                remainder = remainder.get(1..).unwrap_or("").trim_start();
+                break;
+            }
+            _ => {
+                // Not a recognized prefix, so this is the start of the command.
+                prefix_consumed = false;
+            }
+        };
+
+        if prefix_consumed {
+            // Advance past the consumed prefix and any subsequent whitespace.
+            remainder = remainder.get(1..).unwrap_or("").trim_start();
         } else {
+            // Stop the loop if no prefix was consumed.
             break;
         }
     }
-    (ignore_errors, run_in_parallel, trimmed_line)
+
+    metadata.command_text = remainder;
+    metadata
 }
 
 // --- CACHE READ/WRITE LOGIC ---

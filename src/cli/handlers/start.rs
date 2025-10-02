@@ -3,7 +3,7 @@
 use crate::{
     cli::handlers::commons,
     core::{config_resolver, index_manager, parameters::ArgResolver},
-    models::{ParameterDef, Task, TemplateComponent},
+    models::{CommandAction, ParameterDef, Task, TemplateComponent},
     system::shell,
 };
 use anyhow::{Result, anyhow};
@@ -66,7 +66,9 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
         .iter()
         .chain(task_exit.iter())
         .flat_map(|task| &task.commands)
-        .flat_map(|cmd| &cmd.template)
+        .flat_map(|cmd| match &cmd.action {
+            CommandAction::Execute(t) | CommandAction::Print(t) => t.iter().collect::<Vec<_>>(),
+        })
         .any(|component| matches!(component, TemplateComponent::GenericParams));
 
     // 5. Create a single ArgResolver for the entire session.
@@ -82,7 +84,9 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
 fn get_definitions_from_task(task: &Task) -> Vec<ParameterDef> {
     task.commands
         .iter()
-        .flat_map(|cmd| &cmd.template)
+        .flat_map(|cmd| match &cmd.action {
+            CommandAction::Execute(t) | CommandAction::Print(t) => t.clone(),
+        })
         .filter_map(|component| match component {
             TemplateComponent::Parameter(def) => Some(def.clone()),
             _ => None,

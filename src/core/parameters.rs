@@ -266,19 +266,19 @@ impl ArgResolver {
         // --- Upfront Validation ---
         // 1. Check for alias conflicts (e.g., using --verbose and -v at the same time).
         for def in definitions {
-            if let ParameterKind::Named { name } = &def.kind {
-                if let Some(alias) = &def.modifiers.alias {
-                    if cli_state.named.contains_key(name) && cli_state.named.contains_key(alias) {
-                        return Err(anyhow!(
-                            "Conflict: Both flag '--{}' and its alias '-{}' were provided.",
-                            name.cyan(),
-                            alias.cyan()
-                        ));
-                    }
-                }
+            if let ParameterKind::Named { name } = &def.kind
+                && let Some(alias) = &def.modifiers.alias
+                && cli_state.named.contains_key(name)
+                && cli_state.named.contains_key(alias)
+            {
+                return Err(anyhow!(
+                    "Conflict: Both flag '--{}' and its alias '-{}' were provided.",
+                    name.cyan(),
+                    alias.cyan()
+                ));
             }
         }
-        
+
         // --- Resolution Loop ---
         // This loop now correctly handles multiple identical definitions pointing to the same CLI argument.
         for def in definitions {
@@ -292,7 +292,10 @@ impl ArgResolver {
             // Determine if the user provided a value for this definition, WITHOUT consuming state.
             let (is_provided, cli_value) = match &def.kind {
                 ParameterKind::Positional { index } => {
-                    let val = cli_state.positional.get(*index).and_then(|arg| arg.value.clone());
+                    let val = cli_state
+                        .positional
+                        .get(*index)
+                        .and_then(|arg| arg.value.clone());
                     (val.is_some(), val)
                 }
                 ParameterKind::Named { name } => {
@@ -307,7 +310,7 @@ impl ArgResolver {
                     }
                 }
             };
-            
+
             // Mark the corresponding CLI arguments as "seen" by at least one definition.
             // This is for the final "unconsumed arguments" check.
             if is_provided {
@@ -316,14 +319,14 @@ impl ArgResolver {
                         if let Some(arg) = cli_state.positional.get_mut(*index) {
                             arg.consumed = true;
                         }
-                    },
+                    }
                     ParameterKind::Named { name } => {
                         if let Some(arg) = cli_state.named.get_mut(name) {
                             arg.consumed = true;
-                        } else if let Some(alias) = &def.modifiers.alias {
-                            if let Some(arg) = cli_state.named.get_mut(alias) {
-                                arg.consumed = true;
-                            }
+                        } else if let Some(alias) = &def.modifiers.alias
+                            && let Some(arg) = cli_state.named.get_mut(alias)
+                        {
+                            arg.consumed = true;
                         }
                     }
                 }
@@ -332,12 +335,17 @@ impl ArgResolver {
             // --- Check `required` constraint ---
             if def.modifiers.required && !is_provided {
                 let param_id = match &def.kind {
-                    ParameterKind::Positional { index } => format!("Positional argument at index {}", index),
+                    ParameterKind::Positional { index } => {
+                        format!("Positional argument at index {}", index)
+                    }
                     ParameterKind::Named { name } => format!("Flag '--{}'", name),
                 };
-                return Err(anyhow!("{} is required but was not provided.", param_id.cyan()));
+                return Err(anyhow!(
+                    "{} is required but was not provided.",
+                    param_id.cyan()
+                ));
             }
-            
+
             // --- Determine Final Value (CLI > Default) ---
             let final_value = if is_provided {
                 cli_value
@@ -348,12 +356,16 @@ impl ArgResolver {
             // --- Apply `map` transformation ---
             let output_flag_name = match (&def.kind, &def.modifiers.map) {
                 (_, Some(map_str)) => {
-                    if map_str.is_empty() { None } else { Some(map_str.clone()) }
+                    if map_str.is_empty() {
+                        None
+                    } else {
+                        Some(map_str.clone())
+                    }
                 }
-                (ParameterKind::Named { name }, None) => Some(name.clone()),
+                (ParameterKind::Named { name }, None) => Some(format!("--{}", name)),
                 (ParameterKind::Positional { .. }, None) => None,
             };
-            
+
             // --- Assemble Final String ---
             let final_string = match (output_flag_name, final_value) {
                 (Some(flag), Some(val)) => format!("{} {}", flag, val),
@@ -361,7 +373,7 @@ impl ArgResolver {
                 (None, Some(val)) => val,
                 (None, None) => String::new(),
             };
-            
+
             resolved_values.insert(def.original_token.clone(), final_string);
         }
 
@@ -380,7 +392,7 @@ impl ArgResolver {
             generic_params_value: unconsumed_str,
         })
     }
-    
+
     // This function is now a simple HashMap lookup.
     pub fn get_specific_value(&self, original_token: &str) -> Option<&str> {
         self.resolved_values.get(original_token).map(|s| s.as_str())

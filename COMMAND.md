@@ -8,50 +8,47 @@
 
 This document is the definitive reference guide for every command available in the `axes` CLI. For a guided tutorial, refer to the [**Getting Started Guide (`GETTING_STARTED.md`)**](./GETTING_STARTED.md).
 
-## General Syntax and Shortcuts
+## Universal Grammar and Shortcuts
 
-`axes` uses a flexible syntax for most of its commands, allowing you to prioritize the action or the context based on your preference.
+`axes` uses a simple and predictable universal grammar to interpret your commands. It follows a clear set of rules to determine the action you want to perform.
 
-```sh
-# Both forms are generally valid:
-axes <action> <context> [arguments...]
-axes <context> <action> [arguments...]
-```
+### **The Grammar Rules (in order of priority):**
 
-> **File System Navigation:** The special contexts `.` and `..` allow you to interact with projects based on your current terminal location, similar to `cd`. `axes . info` shows the information of the project in the current directory (or its first ancestor), while `axes .. info` shows that of the parent or upper directory.
+1. **`axes <context> <action> [args...]`**
+    * If the **second** argument is a known system action (`info`, `delete`, `start`, etc.), the first argument is treated as the project context.
+    * *Example:* `axes my-app info`
 
-Additionally, `axes` offers two important shortcuts to speed up your workflow:
+2. **`axes <action> [args...]`**
+    * If the **first** argument is a known system action, `axes` executes it. This is used for global commands (`init`, `tree`, `alias`) or when using an implicit context.
+    * *Example (Global):* `axes tree --all`
+    * *Example (Implicit Context):* `axes info` (equivalent to `axes . info`)
 
-* **Shortcut for `start`:** If you only provide a context, `axes` assumes you want to start a session.
+3. **`axes <script_name> [params...]` (Default)**
+    * If neither of the above rules match, `axes` assumes you are trying to **run a script**. This is a shortcut for `axes . run <script_name>`.
+    * *Example:* `axes build --release`
 
-    ```sh
-    # This is equivalent to `axes my-app/api start`
-    axes my-app/api
-    ```
+### **Context System:**
 
-* **Shortcut for `run`:** If the second argument is not a system action, `axes` assumes it is the name of a script you want to execute.
-
-    ```sh
-    # This is equivalent to `axes my-app/api run build`
-    axes my-app/api build
-    ```
+* **Explicit Context:** `axes my-app/api ...`
+* **Implicit Context (`.`):** For commands that require a context (`info`, `run`, `start`, etc.), if you don't provide one, `axes` automatically uses `.` (the project in the current directory or its first ancestor).
+* **Navigation:** You can use `..` to refer to a parent project, `*` for the last-used child, and aliases like `g!` for the global project.
 
 ---
 
 ## Project Lifecycle Management
 
-These commands are used to create, register, and delete projects from the `axes` index.
+These commands are used to create, register, and delete projects from the `axes` index. They are **destructive** or **global** and follow the `axes <action> [args...]` or `axes <context> <action> [args...]` syntax.
 
 ### `init`
 
-(Alias: None)
+(Alias: `new`)
 
-Initializes `axes` in the current directory, creating an `.axes/` structure with a default `axes.toml` and registering the project.
+Initializes `axes` in the current directory, creating an `.axes/` structure and registering the project.
 
 #### **Syntax**
 
 ```sh
-axes init [--parent <parent_context>] [--name <name>] [--version <ver>] [--description <desc>]
+axes init [options...]
 ```
 
 #### **Arguments and Flags**
@@ -85,7 +82,7 @@ axes init --name my-api --parent .. --version "1.0-beta" --description "The main
 
 (Alias: `reg`)
 
-Registers a directory that **already contains** an `.axes/` configuration in the global `axes` index. It is useful for incorporating existing projects or repairing a broken registration.
+Registers a directory that **already contains** an `.axes/` configuration in the global `axes` index. It is useful for incorporating projects existing or repairing a broken registration.
 
 #### **Syntax**
 
@@ -103,7 +100,7 @@ axes register [<path>] [--autosolve]
 #### **Usage Examples**
 
 ```sh
-# Registers the project in the current directory interactively
+# Registers the project in the current directory interactivel
 axes register
 
 # Registers a project located at another path
@@ -132,7 +129,7 @@ By default, `unregister` is **not recursive**. It only unregisters the project s
 
 | Flag                     | Description                                                                                               | Required |
 | :----------------------- | :-------------------------------------------------------------------------------------------------------- | :-------- |
-| `--recursive`            | Recursive mode. Unregisters the specified project AND **all its descendants**. No re-parenting occurs.      | No        |
+| `--recursive`            | Recursive mode. Unregisters the project specified AND **all its descendants**. No re-parenting occurs.      | No        |
 | `--reparent-to <parent>` | Instead of moving children to the root, moves them to the specified `<new_parent>`. Not compatible with `--recursive`. | No        |
 
 #### **Usage Examples**
@@ -200,8 +197,8 @@ axes tree [<context>] [-p, --paths] [-u, --uuids] [--all]
 
 #### **Behavior**
 
-* If run without `<context>`, it shows the entire tree from the root project.
-* If a `<context>` is provided, it shows only that project and its descendants.
+* If `<context>` is provided, it shows the subtree from that project.
+* If omitted, it shows the entire tree from the project in the current directory (`.`). To see the full tree, use `axes global tree` or `axes g! tree`.
 
 #### **Arguments and Flags**
 
@@ -237,14 +234,14 @@ Shows a complete summary of a project's **final and merged** configuration, incl
 #### **Syntax**
 
 ```sh
-axes <context> info
+axes [<context>] info
 ```
 
 #### **Arguments and Flags**
 
 | Argument    | Description                                   | Required |
 | :---------- | :-------------------------------------------- | :-------- |
-| `<context>` | The project whose information to display.     | Yes       |
+| `<context>` | The project whose information to display.     | No        |
 
 #### **Usage Examples**
 
@@ -327,18 +324,16 @@ Executes a script defined in the `[scripts]` section of a project's `axes.toml`.
 #### **Syntax**
 
 ```sh
-axes <context> run <script_name> [parameters...]
+axes [<context>] run <script_name> [parameters...]
 ```
-
-* **Shortcut:** `axes <context> <script_name> [parameters...]`
 
 #### **Arguments and Flags**
 
 | Argument         | Description                                                                 | Required |
 | :---------------- | :--------------------------------------------------------------------------- | :-------- |
-| `<context>`       | The project context in which the script will be executed.                    | Yes       |
-| `<script_name>`   | The name of the script to execute (the key under the `[scripts]` table).     | Yes       |
-| `[parameters...]` | Any additional arguments that will be passed to the script.                  | No        |
+| `<context>`       | The project context in which the script will be executed. (Implicitly `.` if omitted). | No       |
+| `<script_name>`   | The name of the script to execute (the key under the `[scripts]` table).     | Yes      |
+| `[parameters...]` | Any additional arguments that will be passed to the script.                  | No       |
 
 #### **Key Functionality**
 
@@ -354,11 +349,11 @@ The `run` command is orchestrated by a powerful text expansion engine. Inside yo
 #### **Usage Examples**
 
 ```sh
+# Run 'build' script in current project (using shortcut)
+axes build
+
 # Executes the 'build' script in the `my-app/frontend` project
 axes my-app/frontend run build
-
-# Uses the shortcut to do the same
-axes my-app/frontend build
 
 # Executes the 'test' script and passes a parameter
 # (assuming `test` uses `<axes::params>` or `<axes::params::0>`)
@@ -378,17 +373,17 @@ Starts an interactive and persistent shell session within a project's context. I
 #### **Syntax**
 
 ```sh
-axes <context> start [parameters...]
+axes [<context>] start [parameters...]
 ```
 
-* **Shortcut:** `axes <context> [parameters...]`
+* **Shortcut:** `axes <context>` is equivalent to `axes <context> start`.
 
 #### **Arguments and Flags**
 
 | Argument         | Description                                                                         | Required |
 | :---------------- | :---------------------------------------------------------------------------------- | :-------- |
-| `<context>`       | The project in which to start the session.                                          | Yes       |
-| `[parameters...]` | Any additional arguments that will be passed to the `at_start` and `at_exit` hooks. | No        |
+| `<context>`       | The project in which to start the session. (Implicitly `.` if omitted).             | No       |
+| `[parameters...]` | Any additional arguments that will be passed to the `at_start` and `at_exit` hooks. | No       |
 
 #### **Session Behavior**
 
@@ -403,7 +398,7 @@ Once inside, you can execute `axes` commands without specifying the context. Whe
 #### **Usage Examples**
 
 ```sh
-# Starts a simple session in the API service
+# Starts a simple session in the API service (using shortcut)
 axes my-app/api
 
 # Assuming an `at_start` like: "docker-compose up -d <axes::params::service>"
@@ -420,16 +415,16 @@ Opens a project's root directory using a pre-configured application.
 #### **Syntax**
 
 ```sh
-axes <context> open [<app_key>] [parameters...]
+axes [<context>] open [<app_key>] [parameters...]
 ```
 
 #### **Arguments and Flags**
 
 | Argument         | Description                                                                          | Required |
 | :---------------- | :----------------------------------------------------------------------------------- | :-------- |
-| `<context>`       | The project to be opened.                                                            | Yes       |
-| `[<app_key>]`     | The key of the application to use (e.g., `code`). If omitted, the `default` key is used. | No        |
-| `[parameters...]` | (New in v0.1.8) Any additional arguments that will be passed to the `app_key` script. | No        |
+| `<context>`       | The project to be opened. (Implicitly `.` if omitted).                               | No       |
+| `[<app_key>]`     | The key of the application to use (e.g., `code`). If omitted, the `default` key is used. | No       |
+| `[parameters...]` | Any additional arguments that will be passed to the `app_key` script. | No       |
 
 #### **Configuration**
 
@@ -450,8 +445,8 @@ default = "edit"
 #### **Usage Examples**
 
 ```sh
-# Opens the `my-app` project with the default application ('edit' in our example)
-axes my-app open
+# Opens the current project with the default application (implicitly axes . open)
+axes open
 
 # Explicitly opens the `my-app/api` project in the file explorer
 # (Assuming a 'files' key is defined)

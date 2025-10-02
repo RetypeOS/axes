@@ -8,13 +8,37 @@ use uuid::Uuid;
 
 use super::commons;
 use crate::{
-    cli::args::InitArgs,
     constants::{AXES_DIR, PROJECT_CONFIG_FILENAME, PROJECT_REF_FILENAME},
     core::{context_resolver, index_manager},
     models::{ProjectConfig, ProjectRef},
 };
 
 use colored::Colorize;
+
+#[derive(Parser, Debug, Default)]
+#[command(no_binary_name = true)]
+pub struct InitArgs {
+    /// The name for the new project. If not provided, will be asked interactively.
+    pub name: Option<String>,
+    /// The context of the parent project. Defaults to 'global'.
+    #[arg(long)]
+    pub parent: Option<String>,
+    /// The version of the project.
+    #[arg(long)]
+    pub version: Option<String>,
+    /// A short description of the project.
+    #[arg(long)]
+    pub description: Option<String>,
+    /// Do not ask for user input, use defaults for unspecified values.
+    #[arg(long)]
+    pub autosolve: bool,
+    /// Set environment variables for the project (e.g., "KEY=VALUE").
+    #[arg(long, value_delimiter = ',', num_args = 1..)]
+    pub env: Vec<String>,
+    /// Set interpolation variables for the project (e.g., "KEY=VALUE").
+    #[arg(long, value_delimiter = ',', num_args = 1..)]
+    pub var: Vec<String>,
+}
 
 /// The main handler for the `init` command.
 /// Allows creating and registering new projects to axes.

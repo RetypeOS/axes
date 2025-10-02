@@ -148,11 +148,21 @@ pub enum TemplateComponent {
     Version,
 }
 
+/// Represents the specific action to be performed for a single line in a script.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum CommandAction {
+    /// Execute a shell command.
+    Execute(Vec<TemplateComponent>),
+    /// Print a line directly to the console.
+    Print(Vec<TemplateComponent>),
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CommandExecution {
-    pub template: Vec<TemplateComponent>,
+    pub action: CommandAction,
     pub ignore_errors: bool,
     pub run_in_parallel: bool,
+    pub silent_mode: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
