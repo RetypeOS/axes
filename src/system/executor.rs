@@ -124,7 +124,7 @@ pub fn execute_command(
                         Err(ExecutionError::NonZeroExitStatus(trimmed_command.to_string()))
                     }
                     Ok(_) => Ok(()), // Success
-                    Err(e) => Err(ExecutionError::CommandFailed(trimmed_command.to_string(), e)),   
+                    Err(e) => Err(ExecutionError::CommandFailed(trimmed_command.to_string(), e)),
                 }
             }
         }
