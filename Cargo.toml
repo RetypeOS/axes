@@ -1,6 +1,6 @@
 [package]
 name = "axes"
-version = "0.2.1-Beta"
+version = "0.2.2-Beta"
 edition = "2024"
 license = "MIT"
 

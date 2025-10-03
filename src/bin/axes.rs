@@ -2,7 +2,10 @@
 
 use anyhow::Result;
 use axes::{
-    cli::{Cli, handlers},
+    cli::{
+        Cli,
+        handlers::{self, run::parse_script_path},
+    },
     system::executor,
 };
 use clap::Parser;
@@ -122,7 +125,7 @@ fn main() {
     }
 }
 
-/// The main application dispatcher implementing the universal grammar.
+/// The main application dispatcher implementing the new universal grammar.
 fn run_cli(cli: Cli) -> Result<()> {
     log::debug!("CLI args parsed: {:?}", cli);
 
@@ -133,57 +136,52 @@ fn run_cli(cli: Cli) -> Result<()> {
         return Ok(());
     }
 
-    // --- Universal Dispatch Logic Cascade ---
-    let (action_name, context, handler_args) = {
-        // We clone the first two arguments for checks, leaving `all_args` untouched.
-        let arg1 = all_args.first().cloned();
-        let arg2 = all_args.get(1).cloned();
+    let arg1 = &all_args[0];
+    let arg2 = all_args.get(1);
 
-        if let Some(arg2_val) = arg2 {
-            if find_command(&arg2_val).is_some() {
-                // Grammar 1: `axes <context> <action> [args...]`
-                // Action is arg2. Context is arg1. Handler gets args from arg3 onwards.
-                let handler_args = all_args.into_iter().skip(2).collect();
-                (arg2_val, arg1, handler_args)
-            } else if let Some(arg1_val) = arg1.as_ref() {
-                if find_command(arg1_val).is_some() {
-                    // Grammar 2: `axes <action> [args...]`
-                    // Action is arg1. No context. Handler gets args from arg2 onwards.
-                    let handler_args = all_args.into_iter().skip(1).collect();
-                    (arg1_val.clone(), None, handler_args)
-                } else {
-                    // Grammar 3 (Default): `axes <script> [params...]` -> run
-                    // Neither arg1 nor arg2 is an action. Default to `run`. No context.
-                    // Handler for `run` gets all arguments, including the script name.
-                    ("run".to_string(), None, all_args)
-                }
-            } else {
-                // This case should be impossible if all_args is not empty, but for safety:
-                ("run".to_string(), None, all_args)
-            }
-        } else if let Some(arg1_val) = arg1.as_ref() {
-            if find_command(arg1_val).is_some() {
-                // Grammar 2 (with only 1 arg): `axes <action>`
-                // Action is arg1. No context. No args for handler.
-                (arg1_val.clone(), None, vec![])
-            } else {
-                // Grammar 3 (Default with only 1 arg): `axes <script_or_context>`
-                // Following the new logic, we simplify this: a single non-command argument
-                // is always a script execution with an implicit context.
-                // The explicit `start` command must be used: `axes my-app start`.
-                ("run".to_string(), None, all_args)
-            }
+    // --- New Dispatch Logic Cascade ---
+    let (command_def, context, handler_args) = if let Some(arg2_val) = arg2 {
+        if arg2_val == "--" {
+            // Regla 1 (Escape Hatch): `axes <ruta_script> -- [params...]`
+            // Normalizamos la ruta de script aquí mismo.
+            let (ctx_part, script_part) = parse_script_path(arg1);
+            let mut params = vec![script_part.to_string()];
+            params.extend(all_args.iter().skip(2).cloned());
+            (
+                find_command("run").unwrap(),
+                ctx_part.map(|s| s.to_string()),
+                params,
+            )
+        } else if let Some(command) = find_command(arg2_val) {
+            // Regla 2 (Acción Explícita): `axes <contexto> <acción> [args...]`
+            // El `run` explícito (`axes proj run build`) entra por aquí.
+            let params = all_args.iter().skip(2).cloned().collect();
+            (command, Some(arg1.to_string()), params)
+        } else if let Some(command) = find_command(arg1) {
+            // Regla 3 (Acción Global): `axes <acción> [args...]`
+            let params = all_args.iter().skip(1).cloned().collect();
+            (command, None, params)
         } else {
-            // This case is impossible because we checked for `all_args.is_empty()` at the start.
-            unreachable!();
+            // Regla 4 (Por Defecto, Script Implícito): `axes <ruta_script> [params...]`
+            // Normalizamos la ruta de script.
+            let (ctx_part, script_part) = parse_script_path(arg1);
+            let mut params = vec![script_part.to_string()];
+            params.extend(all_args.iter().skip(1).cloned());
+            (find_command("run").unwrap(), ctx_part, params)
         }
+    } else if let Some(command) = find_command(arg1) {
+        // Regla 3 con un solo argumento
+        (command, None, vec![])
+    } else {
+        // Regla 4 con un solo argumento
+        let (ctx_part, script_part) = parse_script_path(arg1);
+        (
+            find_command("run").unwrap(),
+            ctx_part.map(|s| s.to_string()),
+            vec![script_part.to_string()],
+        )
     };
 
     // --- Dispatch to Handler ---
-    if let Some(command) = find_command(&action_name) {
-        (command.handler)(context, handler_args)
-    } else {
-        // This is now impossible, as the default case always resolves to "run".
-        unreachable!();
-    }
+    (command_def.handler)(context, handler_args)
 }

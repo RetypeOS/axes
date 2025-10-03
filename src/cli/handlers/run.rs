@@ -5,7 +5,7 @@ use crate::{
     core::{config_resolver, index_manager, parameters::ArgResolver, task_executor},
     models::{CommandAction, TemplateComponent},
 };
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use clap::Parser;
 use colored::*;
 
@@ -19,34 +19,42 @@ struct RunArgs {
     params: Vec<String>,
 }
 
+// Esta función es llamada por el despachador.
+pub fn parse_script_path(full_path: &str) -> (Option<String>, &str) {
+    if let Some((context, script_name)) = full_path.rsplit_once('/') {
+        (Some(context.to_string()), script_name)
+    } else {
+        (None, full_path)
+    }
+}
+
 ///
 /// Main entry point for the 'run' command.
-/// Orchestrates the entire script execution process based on the "Task" model.
+/// It now receives the full script path (e.g., "my-app/build") as its context
+/// and is responsible for parsing it.
 ///
-pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
-    // 1. Initial argument parsing and configuration resolution.
-    let run_args = RunArgs::try_parse_from(&args)?;
-    //println!("{:?}", context);
-    let context_str = context.unwrap_or_else(|| ".".to_string());
-    //println!("{}", context_str);
+pub fn handle(context: Option<String>, mut args: Vec<String>) -> Result<()> {
+    if args.is_empty() {
+        return Err(anyhow!(
+            "Internal error: 'run' handler called without a script name."
+        ));
+    }
+
+    let script_name = args.remove(0);
+    let params = args;
+
     let index = index_manager::load_and_ensure_global_project()?;
-    let mut config = commons::resolve_config_from_context_or_session(Some(context_str), &index)?;
+    let mut config = commons::resolve_config_from_context_or_session(context, &index)?;
 
-    println!(
-        "▶️  Running script '{}' for project '{}'...",
-        run_args.script.cyan(),
-        config.qualified_name.yellow()
-    );
-
-    // 2. Resolve the script into a `Task` object using the new expander logic.
-    let task = config_resolver::resolve_script_task(&mut config, &run_args.script, &index)?;
+    // 4. Resolve the script into a `Task` object.
+    let task = config_resolver::resolve_script_task(&mut config, &script_name, &index)?;
 
     if task.commands.is_empty() {
         println!("{}", "Script is empty. Nothing to execute.".yellow());
         return Ok(());
     }
 
-    // 3. Collect all parameter definitions from every command in the task.
+    // 5. Collect parameter definitions from the task.
     let all_definitions: Vec<_> = task
         .commands
         .iter()
@@ -67,19 +75,12 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
         })
         .any(|c| matches!(c, TemplateComponent::GenericParams));
 
-    // 4. Create a single `ArgResolver` for the entire task.
-    let resolver = ArgResolver::new(&all_definitions, &run_args.params, has_generic_params)?;
+    // 6. Create the `ArgResolver`. The `params` are now directly the `args` vector
+    //    passed to this handler.
+    let resolver = ArgResolver::new(&all_definitions, &params, has_generic_params)?;
 
-    // 5. Execute the task using the shared task executor.
+    // 7. Execute the task.
     task_executor::execute_task(&task, &config, &resolver)?;
-
-    // 6. Persist any changes to the cache (from lazy expansions).
-    // This is now a no-op since the cache is in-memory only, but we keep it for potential future use.
-
-    println!(
-        "\n✅ {} Script '{}' completed successfully.",
-        "Success:".green().bold(),
-        run_args.script.cyan()
-    );
+    
     Ok(())
 }

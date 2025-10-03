@@ -4,7 +4,6 @@
 
 use anyhow::{Context, Result, anyhow};
 use std::collections::{HashMap, HashSet};
-use std::env;
 use uuid::Uuid;
 
 use crate::{
@@ -143,41 +142,29 @@ fn check_reparent_collisions(
     Ok((warnings, conflicts))
 }
 
-/// Helper function to resolve a project's configuration from a context string.
+/// Helper function to resolve a project's configuration.
+/// It normalizes the context input before passing it to the main context_resolver.
 pub fn resolve_config_from_context_or_session(
     context_str: Option<String>,
     index: &GlobalIndex,
 ) -> Result<ResolvedConfig> {
-    match context_str {
-        Some(context) => {
-            // Contexto explícito, tiene prioridad
-            let (uuid, qualified_name) = context_resolver::resolve_context(&context, index)?;
-            Ok(config_resolver::resolve_config_for_uuid(
-                uuid,
-                qualified_name,
-                index,
-            )?)
-        }
-        None => {
-            // Sin contexto explícito, intentar modo sesión
-            if let Ok(uuid_str) = env::var("AXES_PROJECT_UUID") {
-                let uuid = Uuid::parse_str(&uuid_str)
-                    .with_context(|| "Invalid UUID found in AXES_PROJECT_UUID.")?;
-                let qualified_name =
-                    index_manager::build_qualified_name(uuid, index).ok_or_else(|| {
-                        anyhow!("Could not build qualified name for session project.")
-                    })?;
-                Ok(config_resolver::resolve_config_for_uuid(
-                    uuid,
-                    qualified_name,
-                    index,
-                )?)
-            } else {
-                // Ni explícito ni implícito
-                Err(anyhow!(t!("error.context_required")))
-            }
-        }
-    }
+    // This function now acts as a clean bridge to the powerful context_resolver.
+
+    // If no context is provided (e.g., from `axes build`), we default to `.`
+    // which means "find project in current dir or parents". The session-awareness
+    // logic is now correctly handled inside `context_resolver`.
+    let final_context_str = context_str.unwrap_or_else(|| ".".to_string());
+
+    // Delegate the complex resolution logic to the expert module.
+    let (uuid, qualified_name) = context_resolver::resolve_context(&final_context_str, index)?;
+
+    // Once we have the canonical UUID, we can resolve its config.
+    config_resolver::resolve_config_for_uuid(uuid, qualified_name, index).with_context(|| {
+        format!(
+            "Failed to resolve configuration for context '{}'",
+            final_context_str
+        )
+    })
 }
 
 /// Interactive, multi-modal parent selector.

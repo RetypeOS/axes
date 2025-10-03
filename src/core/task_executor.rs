@@ -127,7 +127,7 @@ fn execute_single_command(
     config: &ResolvedConfig,
 ) -> Result<()> {
     if !silent {
-        println!("\n→ {}", command_str.green());
+        println!("→ {}", command_str.green());
     }
 
     executor::execute_command(

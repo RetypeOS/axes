@@ -10,24 +10,6 @@ description = "The development workflow configuration for the `axes` project its
 # === Development Scripts ===
 # Defines workflows for building, testing, and managing the tool.
 [scripts]
-
-# --- Tests ---
-hello = {desc = "Say Hello, World!", run = "-- echo Hello, <axes::params::0(default='World')>!"}
-test_q = [
-    "# --- Executing test_q of '<axes::path>'! --- ",
-    "> echo 0 in parallel",
-    "> echo 1 in parallel with timeout",
-    "> echo 2 in parallel",
-    " echo 3 normal",
-    "@ echo 4 with no final command show",
-    "> echo 5 in parallel",
-    "-> eecho 6 in parallel and ignore errors",
-    "- eecho 7 ingore errors",
-    "@> echo 8 with no final command show and in batch",
-    "@-> echo 9 no final command show, in batch and ignore errors",
-    "# echo 10 from axes print!",
-]
-
 # --- Core Development Workflows ---
 build = { desc = "Builds the project in debug mode with fast compilation.", run = "cargo build <axes::params>" }
 build_release = { desc = "Builds the project in release mode for distribution.", run = "cargo build --release" }
