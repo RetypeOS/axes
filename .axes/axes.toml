@@ -12,7 +12,7 @@ description = "The development workflow configuration for the `axes` project its
 [scripts]
 
 # --- Tests ---
-hello = {desc = "Say Hello, World!", run = "echo Hello, <axes::params::0(default='World')>!"}
+hello = {desc = "Say Hello, World!", run = "-- echo Hello, <axes::params::0(default='World')>!"}
 test_q = [
     "# --- Executing test_q of '<axes::path>'! --- ",
     "> echo 0 in parallel",

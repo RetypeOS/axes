@@ -78,14 +78,16 @@ For this tutorial, we will build the structure of a fictional corporate website 
 
 Before starting, it is crucial to understand how `axes` refers to projects. Just as you navigate a file system with `cd`, `axes` navigates its logical project tree using **contexts**. These are used to tell commands like `info`, `tree`, or `start` which project to operate on.
 
-| Context | Description                                                                 | Example (from `.../innovatech-website/blog`)                |
-| :------ | :-------------------------------------------------------------------------- | :---------------------------------------------------------- |
-| `name`  | A direct child of the root project (default name is `global`).              | `axes innovatech-website info`                              |
-| `/`     | The level separator in the hierarchy.                                       | `axes innovatech-website/blog info`                         |
-| `.`     | The project in the current directory, or the first ancestor found.          | `axes . info` (resolves to `innovatech-website/blog`)        |
-| `_`     | The project whose root directory is *exactly* the current directory.        | `axes _ info` (resolves to `innovatech-website/blog`)        |
-| `..`    | The parent of the current context project or the first ancestor found.      | `axes .. info` (resolves to `innovatech-website`)          |
-| `alias!`| A custom shortcut you create.                                               | `axes blog! info` (if `blog!` points to our project)        |
+| Context | Description                                                                 | Example (from `.../innovatech-website/blog`) |
+| :------ | :-------------------------------------------------------------------------- | :----------------------------------- |
+| `name`  | A direct child of the root project (default name is `global`).              | `axes innovatech-website info`       |
+| `/`     | The level separator in the hierarchy.                                       | `axes innovatech-website/blog info`  |
+| `.`     | The project in the current directory, or the first ancestor found.          | `axes . info` (resolves to `innovatech-website/blog`)    |
+| `_`     | The project whose root directory is *exactly* the current directory.        | `axes _ info` (resolves to `innovatech-website/blog`)    |
+| `..`    | The parent of the current context project or the first ancestor found.      | `axes .. info` (resolves to `innovatech-website`)  |
+| `**`    | (Double asterisk) Resolves to the last project you used in the **entire system.** Useful for quickly returning. | `axes ** start`    |
+| `*`     | (Single asterisk) Resolves to the last child you used **of the current parent project**. | `axes mi-super-app/* start`    |
+| `alias!`| A custom shortcut you create.                                               | `axes blog! info` (if `blog!` points to our project)  |
 
 Throughout this tutorial, we will use these contexts so you can see how fluid and powerful they are.
 

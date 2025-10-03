@@ -1,1 +1,144 @@
-link.error.missing_parent_context = "El comando 'link' requiere el contexto del nuevo padre."
+# locales/es.toml
+
+# Common terms
+"common.success" = "✔ ¡Éxito!"
+"common.prompt.continue" = "¿Continuar?"
+"common.info.operation_cancelled" = "Operación cancelada."
+"common.info.caches_will_regenerate" = "Nota: Las cachés se regenerarán automáticamente en la próxima resolución."
+"common.prompt.are_you_sure" = "¿Estás seguro de que quieres proceder?"
+
+# Common Messages
+"common.info.tui_placeholder" = "El modo interactivo aún no está implementado. Por favor, proporciona un comando."
+"common.info.cancellation_requested" = "Se solicitó la cancelación. Por favor, espera a que la operación actual termine limpiamente..."
+"common.info.cancellation_requested_interactive" = "Se solicitó la cancelación. Presiona Enter o Esc para salir del prompt actual."
+"common.error.operation_cancelled" = "Operación cancelada por el usuario."
+
+# Errors
+"error.context_required" = "El comando '{command}' requiere un contexto de proyecto explícito."
+"error.dont_use_any_context" = "Esta acción no utiliza un contexto de proyecto."
+"error.saving_global_index" = "No se pudo guardar el índice global actualizado."
+"error.local_ref_failed" = "No se pudo obtener o crear la referencia local del proyecto (`project_ref.bin`)."
+
+# Validation errors
+"validation.error.empty_name" = "El nombre del proyecto no puede estar vacío."
+"validation.error.contains_whitespace" = "Los nombres de proyecto no pueden contener espacios. Usa '-' o '_' en su lugar."
+"validation.error.invalid_chars" = "El nombre del proyecto no puede contener caracteres de ruta ('/' o '\\')."
+"validation.error.reserved_name" = "El nombre '{name}' está reservado para la navegación y no puede usarse como nombre de proyecto."
+
+# Link command
+"link.error.missing_parent_context" = "El comando 'link' requiere el contexto del nuevo padre."
+"link.error.empty_parent_context" = "El contexto del nuevo padre no puede estar vacío."
+"link.info.attempting" = "Intentando mover '{name}' para que sea hijo de '{new_parent}'..."
+"link.error.cannot_resolve_parent" = "No se pudo resolver el contexto del nuevo padre '{parent}'."
+"link.error.link_failed" = "Fallo al enlazar el proyecto '{name}'."
+"link.warning.local_ref_update_failed" = "Advertencia: El proyecto fue enlazado en el índice global, pero el archivo de referencia local `project_ref.bin` no pudo actualizarse: {error}"
+"link.success.header" = "El proyecto '{old_name}' es ahora hijo de '{new_parent}'."
+
+# Start command
+"start.info.starting_session" = "Iniciando sesión para '{name}'..."
+"start.error.session_failed" = "No se pudo iniciar la sesión para el proyecto '{name}'."
+
+# Run command
+"run.error.missing_script" = "Debes especificar un script para ejecutar con 'run'."
+"run.error.script_not_found" = "Script '{script}' no encontrado en la configuración del proyecto."
+"run.info.executing_sequence" = "Ejecutando secuencia de script para '{script}'..."
+"run.success.sequence_completed" = "✔ Secuencia completada con éxito."
+"run.error.params_not_accepted" = "El script fue llamado con parámetros, pero no está configurado para aceptarlos. Agrega `<axes::params>` a la definición del script en tu `axes.toml` para especificar dónde inyectarlos."
+"run.error.params_not_used" = "Se proporcionaron argumentos no utilizados. El script no está configurado para aceptarlos o todos los parámetros explícitos ya han sido consumidos."
+
+# Open command
+"open.error.too_many_args" = "El comando 'open' acepta como máximo un argumento (la clave de la aplicación)."
+"open.error.default_is_reserved" = "La clave 'default' está reservada y no puede ejecutarse directamente. Debe apuntar a otra clave (ej. default = \"vsc\")."
+"open.error.action_not_found" = "No se encontró ninguna acción de apertura para la clave '{key}' en [options.open_with]."
+"open.error.no_app_no_default" = "No se especificó ninguna aplicación y no se encontró ninguna clave 'default' en [options.open_with]."
+"open.error.default_key_invalid" = "La clave de apertura por defecto está configurada como '{key}', pero no se encontró ninguna acción correspondiente."
+
+# Rename command
+"rename.error.invalid_args" = "El comando 'rename' requiere exactamente un argumento: el nuevo nombre."
+"rename.error.empty_name" = "El nuevo nombre del proyecto no puede estar vacío."
+"rename.error.contains_whitespace" = "Los nombres de proyecto no pueden contener espacios. Usa '-' o '_' en su lugar."
+"rename.error.invalid_chars" = "El nuevo nombre del proyecto no puede contener caracteres de ruta ('/' o '\\')."
+"rename.error.reserved_name" = "El nombre '{name}' está reservado para la navegación y no puede usarse como nombre de proyecto."
+"rename.warning.renaming_global_header" = "⚠️ Estás a punto de renombrar el proyecto especial 'global'."
+"rename.warning.renaming_global_docs" = "Toda la documentación del sistema y los ejemplos de la comunidad se refieren a él como 'global'."
+"rename.warning.renaming_global_community" = "Esto puede dificultar la obtención de ayuda o el intercambio de configuraciones."
+"rename.error.rename_failed" = "Fallo al renombrar el proyecto '{name}'. Podría existir ya un hermano con el mismo nombre."
+"rename.info.renaming" = "Renombrando el proyecto '{old_name}' a '{new_name}'..."
+"rename.warning.local_ref_update_failed" = "Advertencia: El proyecto fue enlazado en el índice global, pero el archivo de referencia local en '{path}' no pudo actualizarse: {error}"
+"rename.success.header" = "El proyecto '{old_name}' ha sido renombrado con éxito a '{new_name}'."
+
+# Unregister command
+"unregister.error.cannot_unregister_global" = "El proyecto raíz no puede ser desregistrado."
+"unregister.info.header" = "Los siguientes proyectos serán desregistrados:"
+"unregister.info.header_recursive" = "El siguiente proyecto y todos sus descendientes serán desregistrados (los archivos del proyecto NO serán eliminados):"
+"unregister.info.header_reparent" = "El proyecto '{name}' será desregistrado y sus hijos directos serán movidos a '{new_parent}'."
+"unregister.success.header" = "{count} proyecto(s) han sido desregistrados."
+"unregister.success.reparented" = "El proyecto '{name}' ha sido desregistrado y sus hijos han sido reasignados a un nuevo padre."
+
+# Delete command
+"delete.error.cannot_delete_global" = "El proyecto raíz no puede ser eliminado. Para reiniciar `axes`, elimina manualmente el directorio `~/.config/axes`."
+"delete.error.reparent_collision" = "No se puede eliminar: Reasignar el hijo '{child_name}' entraría en conflicto con un proyecto existente en '{root_name}'. Por favor, renombra uno de ellos primero."
+"delete.warning.destructive_header" = "☢️  ADVERTENCIA: ¡OPERACIÓN DESTRUCTIVA! ☢️"
+"delete.info.header_single" = "El directorio `.axes` del siguiente proyecto será eliminado y será desregistrado. Sus hijos serán movidos a '{root_name}'."
+"delete.info.header_recursive" = "El siguiente proyecto y TODOS sus descendientes verán eliminados sus directorios `.axes` y serán desregistrados."
+"delete.prompt.are_you_sure" = "Esta acción es irreversible. ¿Estás seguro?"
+"delete.success.header" = "Se eliminaron {purged} directorios `.axes` y se desregistraron {unregistered} proyecto(s)."
+"delete.info.files_to_be_deleted" = "Los siguientes directorios `.axes` serán ELIMINADOS IRREVERSIBLEMENTE:"
+
+# Shared Plan Summary
+"plan.summary.unregister_recursive" = "Este proyecto y todos sus descendientes se verán afectados."
+"plan.summary.unregister_single" = "Solo el proyecto '{name}' se verá afectado."
+"plan.summary.reparent_to" = "Los hijos directos serán movidos al proyecto '{name}'."
+"plan.error.reparent_collision" = "No se puede proceder: La reasignación causaría colisiones de nombres para los siguientes hijos: '{conflicts}'. Por favor, resuélvelos manualmente primero."
+"plan.error.recursive_and_reparent" = "Las banderas '--recursive' y '--reparent-to' son mutuamente excluyentes."
+
+# Register command
+"register.error.failed" = "No se pudo registrar el proyecto en '{path}'."
+"register.info.finished" = "Operación de registro finalizada."
+
+# Tree command
+"tree.header.all_projects" = "Árbol de Proyectos Registrados:"
+"tree.header.from_project" = "Sub-árbol de Proyectos desde '{name}':"
+"tree.info.no_projects" = "No hay proyectos registrados. Usa `axes init <nombre>` para empezar."
+"tree.error.project_not_found" = "Error: El proyecto inicial especificado no se encontró en el índice."
+"tree.error.root_project_missing" = "Advertencia: El proyecto raíz no se encuentra, pero hay otros proyectos registrados. El índice podría ser inconsistente."
+
+# Alias command
+"alias.error.not_in_session" = "El comando 'alias' no está disponible dentro de una sesión de proyecto."
+"alias.error.empty_name" = "El nombre del alias no puede estar vacío."
+"alias.error.invalid_chars" = "El nombre del alias '{name}' no puede contener espacios ni separadores de ruta ('/' o '\\')."
+"alias.error.reserved_name" = "El nombre '{name}' está reservado para la navegación y no puede usarse como alias."
+"alias.error.not_found" = "Alias '{name}!' no encontrado."
+"alias.warning.modifying_g" = "⚠️ Estás a punto de modificar o eliminar el alias especial 'g!', que es un valor por defecto del sistema para el proyecto raíz. Esto puede romper flujos de trabajo comunes."
+"alias.success.set" = "Alias establecido:"
+"alias.success.removed" = "Alias '{name}!' eliminado."
+"alias.info.no_aliases" = "No hay alias definidos. Usa `axes alias set <nombre> <contexto>` para crear uno."
+"alias.info.header" = "Alias Definidos"
+"alias.info.broken_link" = "<enlace roto>"
+
+# Info command
+"info.header" = "Información para"
+"info.label.uuid" = "UUID"
+"info.label.root_path" = "Ruta Raíz"
+"info.label.config_file" = "Archivo de Configuración"
+"info.label.version" = "Versión"
+"info.label.description" = "Descripción"
+"info.label.available_scripts" = "Scripts Disponibles"
+"info.label.no_scripts" = "No hay scripts definidos para este proyecto."
+"info.label.vars" = "Variables Fusionadas ([vars])"
+"info.label.env" = "Entorno Fusionado ([env])"
+"info.script_type.platform" = "Específico de plataforma"
+"info.script_type.sequence" = "Secuencia"
+"info.error.unexpected_args" = "El comando 'info' no acepta argumentos adicionales."
+
+# Shell / Session
+"shell.info.welcome" = "--- Sesión de `axes` para '{name}' iniciada. Escribe 'exit' para salir. ---"
+"shell.info.executing_at_exit" = "Ejecutando hook 'at_exit'..."
+"shell.warning.at_exit_failed" = "Advertencia: El hook 'at_exit' falló al ejecutarse: {error}"
+
+# Interpolator Errors
+"interpolator.error.max_depth" = "Profundidad máxima de recursión ({depth}) excedida durante la expansión del script. Comprueba si hay ciclos indirectos o infinitos."
+"interpolator.error.token_not_found" = "El token '<axes::{token}>' no pudo ser resuelto. No es una palabra clave reservada, variable o script."
+"interpolator.error.invalid_param_spec" = "Especificación de parámetro no soportada: '{spec}'. Usa un índice posicional (ej. '0') o un flag mapeado (ej. 'flag=value')."
+"interpolator.error.unknown_namespace" = "Namespace de token desconocido: '<axes::{ns}>'. Los namespaces soportados son 'vars', 'env', 'scripts', y 'run'."
+"interpolator.error.cycle" = "Referencia de script cíclica detectada: {path} -> {script}"

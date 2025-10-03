@@ -222,13 +222,15 @@ fn expand_and_get_task_internal(
 
     // --- Main Expansion Loop for Each Line ---
     for line in &flattened_command.command_lines {
-        let metadata = if kind == ValueKind::Script {
-            parse_execution_prefixes(line)
-        } else {
+        // A `Variable` should not have executable lines, but we guard against it.
+        // For all other kinds (Script, Hook, OpenWith), prefixes are always parsed.
+        let metadata = if kind == ValueKind::Variable {
             ExecutionMetadata {
                 command_text: line,
                 ..Default::default()
             }
+        } else {
+            parse_execution_prefixes(line)
         };
 
         if let Some(script_key) = is_pure_script_composition(metadata.command_text) {
@@ -536,61 +538,44 @@ struct ExecutionMetadata<'a> {
     command_text: &'a str,
 }
 
-/// Parses execution prefixes (`-`, `>`, `@`, `#`) from the start of a line,
-/// respecting user-defined termination rules.
+/// Parses execution prefixes (`-`, `>`, `@`, `#`) from the start of a line efficiently,
+/// following a strict precedence order and handling combinations correctly.
 fn parse_execution_prefixes(line: &str) -> ExecutionMetadata<'_> {
     let mut metadata = ExecutionMetadata::default();
-    let mut remainder = line.trim_start();
-
+    let remainder = line;
     // --- Rule 1 (Highest Precedence): Check for the '#' echo prefix. ---
-    // If the very first non-whitespace character is '#', it's an echo command,
-    // and no other prefixes are parsed.
     if let Some(command_text) = remainder.strip_prefix('#') {
         metadata.is_echo = true;
-        // The rest of the line is the text to be printed.
-        // We trim at most one leading space for convenience (e.g., `# message`).
         metadata.command_text = command_text.strip_prefix(' ').unwrap_or(command_text);
         return metadata;
     }
 
-    // --- Rule 2: If not an echo, parse for other prefixes (`-`, `>`, `@`). ---
-    loop {
-        // Find the first character of the current remainder.
-        let next_char = match remainder.chars().next() {
-            Some(c) => c,
-            None => {
-                // End of string, all prefixes consumed.
-                remainder = "";
-                break;
-            }
-        };
-
-        let mut prefix_consumed = true;
-        match next_char {
+    // --- Rule 2: If not an echo, parse for a contiguous block of other prefixes. ---
+    let mut current_pos = 0;
+    for (i, char) in remainder.char_indices() {
+        match char {
             '-' => metadata.ignore_errors = true,
             '>' => metadata.run_in_parallel = true,
             '@' => metadata.silent_mode = true,
             '|' => {
-                // Explicit terminator. Consume it and stop.
-                remainder = remainder.get(1..).unwrap_or("").trim_start();
+                // Explicit terminator
+                current_pos = i + 1;
                 break;
             }
             _ => {
-                // Not a recognized prefix, so this is the start of the command.
-                prefix_consumed = false;
+                // Not a prefix character, this is the start of the command
+                current_pos = i;
+                break;
             }
-        };
-
-        if prefix_consumed {
-            // Advance past the consumed prefix and any subsequent whitespace.
-            remainder = remainder.get(1..).unwrap_or("").trim_start();
-        } else {
-            // Stop the loop if no prefix was consumed.
-            break;
+        }
+        // If we reach the end of the string while parsing prefixes
+        if i == remainder.len() - 1 {
+            current_pos = remainder.len();
         }
     }
 
-    metadata.command_text = remainder;
+    metadata.command_text = remainder.get(current_pos..).unwrap_or("").trim_start();
+
     metadata
 }
 
