@@ -37,8 +37,8 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     let cache_args = CacheArgs::try_parse_from(&args)?;
 
     // 3. Resolve the project entry from the context.
-    let index = index_manager::load_and_ensure_global_project()?;
-    let (uuid, _) = context_resolver::resolve_context(&context_str, &index)?;
+    let mut index = index_manager::load_and_ensure_global_project()?;
+    let (uuid, _) = context_resolver::resolve_context(&context_str, &mut index)?;
     let project = index.projects.get(&uuid).unwrap();
     let cache_path = project.path.join(AXES_DIR).join(CONFIG_CACHE_FILENAME);
 

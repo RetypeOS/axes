@@ -22,10 +22,10 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     let rename_args = RenameArgs::try_parse_from(&args)?;
     let context_str =
         context.ok_or_else(|| anyhow!(t!("error.context_required"), command = "delete"))?;
-    let mut index = index_manager::load_and_ensure_global_project()?;
 
     // 2. Solve config.
-    let config = commons::resolve_config_from_context_or_session(Some(context_str), &index)?;
+    let mut index = index_manager::load_and_ensure_global_project()?;
+    let config = commons::resolve_config_and_update_index_if_needed(Some(context_str), &mut index)?;
     let old_qualified_name = config.qualified_name.clone();
 
     let simple_name = config

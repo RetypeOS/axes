@@ -177,11 +177,11 @@ fn resolve_project_name(
 
 /// Resuelve el UUID del padre, desde flags, interactivamente, o usando 'global' como default.
 fn resolve_parent_project(args: &InitArgs, is_interactive: bool) -> Result<Uuid> {
-    let index = index_manager::load_and_ensure_global_project()?;
+    let mut index = index_manager::load_and_ensure_global_project()?;
 
     if let Some(parent_context) = &args.parent {
         println!("Resolving parent '{}'...", parent_context);
-        let (uuid, qualified_name) = context_resolver::resolve_context(parent_context, &index)?;
+        let (uuid, qualified_name) = context_resolver::resolve_context(parent_context, &mut index)?;
         println!(
             "Parent project '{}' found (UUID: {}).",
             qualified_name, uuid
@@ -191,7 +191,7 @@ fn resolve_parent_project(args: &InitArgs, is_interactive: bool) -> Result<Uuid>
 
     if is_interactive {
         // NOTE: Uses the new interactive tree selector.
-        commons::choose_parent_interactive(&index)
+        commons::choose_parent_interactive(&mut index)
     } else {
         println!("No parent specified. Linking to 'global' project.");
         Ok(index_manager::GLOBAL_PROJECT_UUID)

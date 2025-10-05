@@ -58,6 +58,8 @@ pub fn load_and_ensure_global_project() -> IndexResult<GlobalIndex> {
             name: "global".to_string(),
             path: config_dir.clone(),
             parent: None,
+            cache_path: None,
+            last_used_child: None,
         };
         e.insert(global_entry.clone());
 
@@ -117,6 +119,8 @@ pub fn add_project_to_index(
         name,
         path,
         parent: Some(final_parent_uuid),
+        cache_path: None,
+        last_used_child: None,
     };
 
     index.projects.insert(new_uuid, new_entry.clone());

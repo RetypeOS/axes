@@ -34,8 +34,8 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     }
 
     // 2. Load index and resolve the project configuration.
-    let index = index_manager::load_and_ensure_global_project()?;
-    let mut config = commons::resolve_config_from_context_or_session(Some(context_str), &index)?;
+    let mut index = index_manager::load_and_ensure_global_project()?;
+    let mut config = commons::resolve_config_and_update_index_if_needed(Some(context_str), &mut index)?;
 
     // 3. Resolve `at_start` and `at_exit` into `Task` objects.
     let task_start =

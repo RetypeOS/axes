@@ -29,10 +29,11 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     let delete_args = DeleteArgs::try_parse_from(&args)?;
     let context_str =
         context.ok_or_else(|| anyhow!(t!("error.context_required"), command = "delete"))?;
-    let mut index = index_manager::load_and_ensure_global_project()?;
+    
 
     // Solve config.
-    let config = commons::resolve_config_from_context_or_session(Some(context_str), &index)?;
+    let mut index = index_manager::load_and_ensure_global_project()?;
+    let config = commons::resolve_config_and_update_index_if_needed(Some(context_str), &mut index)?;
 
     if config.uuid == index_manager::GLOBAL_PROJECT_UUID {
         return Err(anyhow!(t!("delete.error.cannot_delete_global")));
@@ -42,7 +43,7 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
 
     // 1. Prepare the plan.
     let plan = commons::prepare_unregister_plan(
-        &index,
+        &mut index,
         &config,
         delete_args.recursive,
         delete_args.reparent_to.clone(),
@@ -87,7 +88,7 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     // 5. EXECUTE PLAN - INDEX PART
     if !delete_args.recursive {
         let new_parent_uuid = match delete_args.reparent_to {
-            Some(ctx) => context_resolver::resolve_context(&ctx, &index)?.0,
+            Some(ctx) => context_resolver::resolve_context(&ctx, &mut index)?.0,
             None => index_manager::GLOBAL_PROJECT_UUID,
         };
         index_manager::reparent_children(&mut index, config.uuid, new_parent_uuid)?;

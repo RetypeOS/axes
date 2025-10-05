@@ -18,6 +18,4 @@ pub const GLOBAL_INDEX_FILENAME: &str = "index.bin";
 /// The name of the file containing a project's identity and references.
 pub const PROJECT_REF_FILENAME: &str = "project_ref.bin";
 
-pub const LAST_USED_CACHE_FILENAME: &str = "last_used.cache.bin";
-
 pub const MAX_RECURSION_DEPTH: u32 = 32;

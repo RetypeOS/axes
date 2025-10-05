@@ -61,7 +61,7 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
                 }
             }
 
-            let (target_uuid, target_name) = context_resolver::resolve_context(&context, &index)?;
+            let (target_uuid, target_name) = context_resolver::resolve_context(&context, &mut index)?;
             index_manager::set_alias(&mut index, clean_name.clone(), target_uuid);
             index_manager::save_global_index(&index)?;
 

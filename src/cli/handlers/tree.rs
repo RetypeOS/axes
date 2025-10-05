@@ -30,10 +30,10 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     let context_str = context.unwrap_or_else(|| ".".to_string());
 
     // 2. Load the index.
-    let index = index_manager::load_and_ensure_global_project()?;
+    let mut index = index_manager::load_and_ensure_global_project()?;
 
     // 3. Determine the starting node.
-    let (uuid, qualified_name) = context_resolver::resolve_context(&context_str, &index)?;
+    let (uuid, qualified_name) = context_resolver::resolve_context(&context_str, &mut index)?;
     let header = format!(t!("tree.header.from_project"), name = qualified_name);
     let start_node_uuid = Some(uuid);
 

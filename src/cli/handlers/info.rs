@@ -28,9 +28,8 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     let _info_args = InfoArgs::try_parse_from(&args)?;
 
     // 3. Load index and resolve configuration using the provided context.
-    let index = crate::core::index_manager::load_and_ensure_global_project()?;
-    // The call to resolve_config_from_context_or_session is now cleaner.
-    let config = commons::resolve_config_from_context_or_session(Some(context_str), &index)?;
+    let mut index = crate::core::index_manager::load_and_ensure_global_project()?;
+    let config = commons::resolve_config_and_update_index_if_needed(Some(context_str), &mut index)?;
 
     // 3. Print all sections.
     print_metadata(&config);

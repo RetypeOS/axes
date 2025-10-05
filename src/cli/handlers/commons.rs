@@ -2,13 +2,13 @@
 
 // This module contains shared functions used by multiple handlers.
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::{
     core::{
-        config_resolver, context_resolver,
+        config_resolver::{self, ConfigResolutionResult}, context_resolver,
         index_manager::{self},
     },
     models::{GlobalIndex, IndexEntry, ResolvedConfig},
@@ -30,7 +30,7 @@ pub struct UnregisterPlan {
 /// Prepares a plan for unregistering projects. This function is a "dry run"
 /// and does not modify the index; it only calculates the effects.
 pub fn prepare_unregister_plan(
-    index: &GlobalIndex,
+    index: &mut GlobalIndex,
     config: &ResolvedConfig,
     recursive: bool,
     reparent_to: Option<String>,
@@ -144,31 +144,77 @@ fn check_reparent_collisions(
 
 /// Helper function to resolve a project's configuration.
 /// It normalizes the context input before passing it to the main context_resolver.
-pub fn resolve_config_from_context_or_session(
+//pub fn resolve_config_from_context_or_session(
+//    context_str: Option<String>,
+//    index: &GlobalIndex,
+//) -> Result<ResolvedConfig> {
+//    // This function now acts as a clean bridge to the powerful context_resolver.
+//
+//    // If no context is provided (e.g., from `axes build`), we default to `.`
+//    // which means "find project in current dir or parents". The session-awareness
+//    // logic is now correctly handled inside `context_resolver`.
+//    let final_context_str = context_str.unwrap_or_else(|| ".".to_string());
+//
+//    // Delegate the complex resolution logic to the expert module.
+//    let (uuid, qualified_name) = context_resolver::resolve_context(&final_context_str, index)?;
+//
+//    // Once we have the canonical UUID, we can resolve its config.
+//    config_resolver::resolve_config_for_uuid(uuid, qualified_name, index).with_context(|| {
+//        format!(
+//            "Failed to resolve configuration for context '{}'",
+//            final_context_str
+//        )
+//    })
+//}
+
+/// The new main helper to resolve configuration for a project.
+/// It handles the entire flow, including updating the global index if the
+/// project's cache path has changed.
+pub fn resolve_config_and_update_index_if_needed(
     context_str: Option<String>,
-    index: &GlobalIndex,
+    index: &mut GlobalIndex,
 ) -> Result<ResolvedConfig> {
-    // This function now acts as a clean bridge to the powerful context_resolver.
-
-    // If no context is provided (e.g., from `axes build`), we default to `.`
-    // which means "find project in current dir or parents". The session-awareness
-    // logic is now correctly handled inside `context_resolver`.
+    // 1. Resolve context to a canonical UUID.
+    // Note: The `resolve_context` call itself doesn't need a mutable index.
     let final_context_str = context_str.unwrap_or_else(|| ".".to_string());
-
-    // Delegate the complex resolution logic to the expert module.
     let (uuid, qualified_name) = context_resolver::resolve_context(&final_context_str, index)?;
 
-    // Once we have the canonical UUID, we can resolve its config.
-    config_resolver::resolve_config_for_uuid(uuid, qualified_name, index).with_context(|| {
-        format!(
-            "Failed to resolve configuration for context '{}'",
-            final_context_str
-        )
-    })
+    // 2. After successful resolution, we update the `last_used` caches.
+    // This is the "write" part of the operation.
+    context_resolver::update_last_used_caches(uuid, index)?;
+
+    // 3. Call the config resolver to get config and potential new cache path.
+    let ConfigResolutionResult { config, new_cache_path } =
+        config_resolver::resolve_config_for_uuid(uuid, qualified_name, index)?;
+
+    // 4. If the cache path changed, update the index entry.
+    let index_dirty = if let Some(path) = new_cache_path {
+        if let Some(entry) = index.projects.get_mut(&uuid) {
+            entry.cache_path = Some(path);
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    
+    // We set index_dirty also if last_used caches were updated.
+    // For simplicity, we can just check if any last_used_child field is not None,
+    // but a more robust check would compare before/after states. For now, we assume
+    // any context resolution might dirty the index.
+    //index_dirty = true; // Assume dirty for now to ensure saves.
+
+    // 5. Save the index to disk if any part of it was modified.
+    if index_dirty {
+        index_manager::save_global_index(index)?;
+    }
+
+    Ok(config)
 }
 
 /// Interactive, multi-modal parent selector.
-pub fn choose_parent_interactive(index: &GlobalIndex) -> Result<Uuid> {
+pub fn choose_parent_interactive(index: &mut GlobalIndex) -> Result<Uuid> {
     loop {
         let items = &[
             "Enter a context path (e.g., 'my-app/api', 'g!', '*')",
@@ -205,7 +251,7 @@ pub fn choose_parent_interactive(index: &GlobalIndex) -> Result<Uuid> {
 
 /// Handles the "Enter context" workflow. Returns `Ok(Some(Uuid))` on success,
 /// `Ok(None)` if the user cancels, and `Err` on I/O failure.
-fn select_parent_by_context(index: &GlobalIndex) -> Result<Option<Uuid>> {
+fn select_parent_by_context(index: &mut GlobalIndex) -> Result<Option<Uuid>> {
     loop {
         let input: String = Input::with_theme(&ColorfulTheme::default())
             .with_prompt("Enter context path (leave empty to go back)")

@@ -1,16 +1,12 @@
 // src/core/context_resolver.rs
 
-use crate::models::{GlobalIndex, IndexEntry, LastUsedCache};
+use crate::models::{GlobalIndex, IndexEntry};
 use dialoguer::{Error as DialoguerError, Select, theme::ColorfulTheme};
-use std::{env, fs, path::Path};
+use std::{env, path::Path};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::constants::AXES_DIR;
-use crate::constants::LAST_USED_CACHE_FILENAME;
 use crate::core::index_manager::{self, GLOBAL_PROJECT_UUID};
-
-use bincode::error::DecodeError;
 
 #[derive(Error, Debug)]
 pub enum ContextError {
@@ -62,7 +58,7 @@ type ContextResult<T> = Result<T, ContextError>;
 /// Resolves a project context string to its canonical UUID and fully qualified name.
 /// The resolution follows a strict, multi-layered priority order to ensure
 /// predictable behavior both inside and outside of project sessions.
-pub fn resolve_context(context: &str, index: &GlobalIndex) -> ContextResult<(Uuid, String)> {
+pub fn resolve_context(context: &str, index: &mut GlobalIndex) -> ContextResult<(Uuid, String)> {
     let parts: Vec<&str> = context.split('/').filter(|s| !s.is_empty()).collect();
     if parts.is_empty() {
         return Err(ContextError::EmptyContext);
@@ -163,19 +159,14 @@ pub fn resolve_context(context: &str, index: &GlobalIndex) -> ContextResult<(Uui
 
 /// Resolves '*' for a child, with interactive fallback.
 fn resolve_last_used_child(
-    parent_uuid: Uuid,
+    parent_uuid: Uuid, // No longer needed directly, but kept for context
     parent_entry: &IndexEntry,
     index: &GlobalIndex,
 ) -> ContextResult<Uuid> {
-    let cache_path = parent_entry
-        .path
-        .join(AXES_DIR)
-        .join(LAST_USED_CACHE_FILENAME);
-    if let Ok(Some(cache)) = read_last_used_cache(&cache_path)
-        && let Some(uuid) = cache.child_uuid
-    {
+    // Read directly from the parent's in-memory index entry.
+    if let Some(uuid) = parent_entry.last_used_child {
         log::debug!(
-            "Last used child '{}' found in cache for '{}'.",
+            "Last used child '{}' found in index for parent '{}'.",
             uuid,
             parent_entry.name
         );
@@ -270,80 +261,33 @@ fn find_child_by_name(
         })
 }
 
-/// Reads the "last used" cache for a parent project.
-fn read_last_used_cache(path: &Path) -> ContextResult<Option<LastUsedCache>> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    let bytes = fs::read(path)?;
+/// Updates `last_used` information directly in the mutable GlobalIndex.
+pub fn update_last_used_caches(final_uuid: Uuid, index: &mut GlobalIndex) -> ContextResult<()> {
+    // 1. Update the global `last_used` for the `**` token.
+    index.last_used = Some(final_uuid);
 
-    let decode_result: Result<(LastUsedCache, usize), _> =
-        bincode::serde::decode_from_slice(&bytes, bincode::config::standard());
-
-    match decode_result {
-        Ok((cache, _)) => Ok(Some(cache)),
-        Err(e) => {
-            if !matches!(e, DecodeError::Io { .. }) {
-                log::warn!(
-                    "'last used' cache at '{}' is corrupt. It will be regenerated. (Error: {})",
-                    path.display(),
-                    e
-                );
-                let _ = fs::remove_file(path);
-                Ok(None)
-            } else {
-                Err(ContextError::BincodeDecode(e))
-            }
-        }
-    }
-}
-
-/// Writes the "last used" cache for a parent project.
-fn write_last_used_cache(path: &Path, cache: &LastUsedCache) -> ContextResult<()> {
-    let cache_dir = path.parent().unwrap(); // Ensures the directory exists
-    if !cache_dir.exists() {
-        fs::create_dir_all(cache_dir)?;
-    }
-    let bytes = bincode::serde::encode_to_vec(cache, bincode::config::standard())?;
-    fs::write(path, bytes)?;
-    Ok(())
-}
-
-fn update_last_used_caches(final_uuid: Uuid, index: &GlobalIndex) -> ContextResult<()> {
-    // 1. Update the global `last_used`.
-    let mut global_index = index_manager::load_and_ensure_global_project()?;
-    global_index.last_used = Some(final_uuid);
-    index_manager::save_global_index(&global_index)?;
-
-    // 2. Update child caches (`*`) by moving up the tree.
-    let mut current_entry = index.projects.get(&final_uuid).unwrap();
+    // 2. Update the parent's `last_used_child` for the `*` token by traversing up.
+    let mut current_entry = match index.projects.get(&final_uuid) {
+        Some(entry) => entry.clone(), // Clone to avoid borrow checker issues
+        None => return Ok(()),
+    };
     let mut child_uuid_to_save = final_uuid;
 
-    // Climb the inheritance chain
     while let Some(parent_uuid) = current_entry.parent {
-        if let Some(parent_entry) = index.projects.get(&parent_uuid) {
+        if let Some(parent_entry) = index.projects.get_mut(&parent_uuid) {
             log::debug!(
-                "Updating 'last used' for parent '{}' to '{}'",
+                "Updating 'last_used_child' for parent '{}' to '{}'",
                 parent_entry.name,
                 child_uuid_to_save
             );
-            let cache = LastUsedCache {
-                child_uuid: Some(child_uuid_to_save),
-            };
-            let cache_path = parent_entry
-                .path
-                .join(AXES_DIR)
-                .join(LAST_USED_CACHE_FILENAME);
+            // Mutate the parent entry in the index directly.
+            parent_entry.last_used_child = Some(child_uuid_to_save);
 
-            // Call the function that was not used before
-            write_last_used_cache(&cache_path, &cache)?;
-
-            // Prepare for the next iteration
+            // Prepare for the next iteration up the tree.
             child_uuid_to_save = parent_uuid;
-            current_entry = parent_entry;
+            current_entry = parent_entry.clone();
         } else {
-            // If the parent is not found in the index (broken link), we stop.
-            break;
+            break; // Broken parent link, stop traversal.
         }
     }
 

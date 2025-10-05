@@ -20,7 +20,7 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     let context_str =
         context.ok_or_else(|| anyhow!(t!("error.context_required"), command = "delete"))?;
     let mut index = index_manager::load_and_ensure_global_project()?;
-    let config = commons::resolve_config_from_context_or_session(Some(context_str), &index)?;
+    let config = commons::resolve_config_and_update_index_if_needed(Some(context_str), &mut index)?;
 
     // 2. Get the new parent's context from the arguments.
     let new_parent_context = link_args.new_parent.trim();
@@ -37,7 +37,7 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
 
     // 3. Load the index and resolve the new parent's UUID.
     let (new_parent_uuid, new_parent_qualified_name) =
-        context_resolver::resolve_context(new_parent_context, &index).with_context(|| {
+        context_resolver::resolve_context(new_parent_context, &mut index).with_context(|| {
             anyhow!(
                 t!("link.error.cannot_resolve_parent"),
                 parent = new_parent_context

@@ -4,6 +4,7 @@ use crate::constants::{
     AXES_DIR, CONFIG_CACHE_FILENAME, MAX_RECURSION_DEPTH, PROJECT_CONFIG_FILENAME,
 };
 use crate::core::parameters::{self};
+use crate::core::paths;
 use crate::models::{
     CacheableValue, CanonicalCommand, Command, CommandAction, CommandExecution, FlattenedCommand,
     GlobalIndex, IndexEntry, ProjectConfig, ResolvedConfig, ResolvedOptionsConfig, RunSpec,
@@ -56,6 +57,12 @@ pub enum ResolverError {
     Expansion(#[from] anyhow::Error),
 }
 
+// Helper to avoid passing the whole index around just to update one field
+pub struct ConfigResolutionResult {
+    pub config: ResolvedConfig,
+    pub new_cache_path: Option<PathBuf>, // Some if a new path was calculated
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hook {
     AtStart,
@@ -80,20 +87,25 @@ pub fn resolve_config_for_uuid(
     target_uuid: Uuid,
     qualified_name: String,
     index: &GlobalIndex,
-) -> ResolverResult<ResolvedConfig> {
+) -> Result<ConfigResolutionResult> {
     let leaf_entry = index
         .projects
         .get(&target_uuid)
         .ok_or(ResolverError::UuidNotFoundInIndex { uuid: target_uuid })?;
-    let config_cache_path = leaf_entry.path.join(AXES_DIR).join(CONFIG_CACHE_FILENAME);
-
-    if let Some(cached_config) =
-        read_and_validate_config_cache(&config_cache_path, &qualified_name)?
-    {
-        log::debug!("Valid configuration cache found for '{}'.", qualified_name);
-        return Ok(cached_config);
+    
+    // --- 1. Attempt to read from cache using path from index ---
+    if let Some(cached_path) = &leaf_entry.cache_path {
+        let cache_file_path = cached_path.join(CONFIG_CACHE_FILENAME);
+        if let Some(cached_config) = read_and_validate_config_cache(&cache_file_path, &qualified_name)? {
+            log::debug!("Valid configuration cache found for '{}' at indexed path.", qualified_name);
+            return Ok(ConfigResolutionResult {
+                config: cached_config,
+                new_cache_path: None, // No change needed
+            });
+        }
     }
 
+    // --- 2. Cache Miss: Resolve from source and calculate new cache path ---
     log::debug!(
         "Invalid or no config cache found. Resolving '{}' from source...",
         qualified_name
@@ -106,16 +118,30 @@ pub fn resolve_config_for_uuid(
     let mut resolved_config = merge_chain_into_config(configs_in_chain);
 
     resolved_config.uuid = target_uuid;
-    resolved_config.qualified_name = qualified_name;
+    resolved_config.qualified_name = qualified_name.clone();
     resolved_config.project_root = leaf_entry.path.clone();
 
-    write_config_cache(&config_cache_path, &resolved_config, dependencies)?;
+    // --- 3. Determine the new correct cache path ---
+    let new_cache_path = paths::get_cache_dir_for_project(&resolved_config)?;
+    let new_cache_file_path = new_cache_path.join(CONFIG_CACHE_FILENAME);
+
+    // --- 4. Write the cache to the new location ---
+    write_config_cache(&new_cache_file_path, &resolved_config, dependencies)?;
     log::debug!(
         "New raw config cache saved at '{}'.",
-        config_cache_path.display()
+        new_cache_file_path.display()
     );
 
-    Ok(resolved_config)
+    // --- 5. Determine if the index needs updating ---
+    let index_update_needed = match &leaf_entry.cache_path {
+        Some(old_path) if *old_path == new_cache_path => None,
+        _ => Some(new_cache_path),
+    };
+
+    Ok(ConfigResolutionResult {
+        config: resolved_config,
+        new_cache_path: index_update_needed,
+    })
 }
 
 /// Public entry point to resolve a script/var into a `Task`.
@@ -501,6 +527,7 @@ fn merge_chain_into_config(chain: Vec<ProjectConfig>) -> ResolvedConfig {
                 .into_iter()
                 .map(|(k, v)| (k, flatten_command(v.0, os))),
         );
+        resolved.options.cache_dir_template = config.options.cache_dir.or(resolved.options.cache_dir_template);
     }
     resolved
 }

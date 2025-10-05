@@ -82,6 +82,8 @@ pub struct OptionsConfig {
     pub shell: Option<String>,
     #[serde(default)]
     pub open_with: HashMap<String, Command>,
+    #[serde(default)]
+    pub cache_dir: Option<String>,
 }
 
 /// Represents the direct structure of an `axes.toml` file.
@@ -193,6 +195,7 @@ pub struct ResolvedOptionsConfig {
     pub at_exit: Option<CacheableValue>,
     pub shell: Option<String>,
     pub open_with: HashMap<String, CacheableValue>,
+    pub cache_dir_template: Option<String>,
 }
 
 /// The final, merged, in-memory view of a project's configuration.
@@ -220,6 +223,8 @@ pub struct IndexEntry {
     pub name: String,
     pub path: PathBuf,
     pub parent: Option<Uuid>,
+    pub cache_path: Option<PathBuf>,
+    pub last_used_child: Option<Uuid>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
@@ -263,6 +268,7 @@ pub(crate) struct SerializableResolvedOptionsConfig {
     pub at_exit: Option<CacheableValue>,
     pub shell: Option<String>,
     pub open_with: HashMap<String, CacheableValue>,
+    pub cache_dir_template: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -282,11 +288,6 @@ pub(crate) struct SerializableResolvedConfig {
 pub(crate) struct SerializableConfigCache {
     pub resolved_config: SerializableResolvedConfig,
     pub dependencies: HashMap<String, SerializableSystemTime>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct LastUsedCache {
-    pub child_uuid: Option<Uuid>,
 }
 
 // =========================================================================
@@ -408,6 +409,7 @@ impl ProjectConfig {
                 at_start: None,
                 at_exit: None,
                 shell: None,
+                cache_dir: None,
             },
             vars: vars_defaults,
             env: HashMap::new(),
@@ -475,6 +477,7 @@ impl From<&ResolvedOptionsConfig> for SerializableResolvedOptionsConfig {
             at_exit: value.at_exit.clone(),
             shell: value.shell.clone(),
             open_with: value.open_with.clone(),
+            cache_dir_template: value.cache_dir_template.clone(),
         }
     }
 }
@@ -486,6 +489,7 @@ impl From<SerializableResolvedOptionsConfig> for ResolvedOptionsConfig {
             at_exit: value.at_exit,
             shell: value.shell,
             open_with: value.open_with,
+            cache_dir_template: value.cache_dir_template,
         }
     }
 }

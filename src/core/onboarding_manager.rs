@@ -159,6 +159,8 @@ fn handle_registration_with_ref(
         name: pref.name.clone(),
         path: project_root.clone(),
         parent: pref.parent_uuid,
+        cache_path: None,
+        last_used_child: None,
     };
     index.projects.insert(pref.self_uuid, final_entry);
 

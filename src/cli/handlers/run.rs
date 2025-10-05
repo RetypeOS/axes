@@ -43,8 +43,8 @@ pub fn handle(context: Option<String>, mut args: Vec<String>) -> Result<()> {
     let script_name = args.remove(0);
     let params = args;
 
-    let index = index_manager::load_and_ensure_global_project()?;
-    let mut config = commons::resolve_config_from_context_or_session(context, &index)?;
+    let mut index = index_manager::load_and_ensure_global_project()?;
+    let mut config = commons::resolve_config_and_update_index_if_needed(context, &mut index)?;
 
     // 4. Resolve the script into a `Task` object.
     let task = config_resolver::resolve_script_task(&mut config, &script_name, &index)?;
