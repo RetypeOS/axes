@@ -3,7 +3,7 @@
 use crate::{
     cli::handlers::commons,
     core::{config_resolver, index_manager, parameters::ArgResolver, task_executor},
-    models::{CacheableValue, CommandAction, ParameterDef, TemplateComponent},
+    models::{CommandAction, GlobalIndex, ParameterDef, TemplateComponent},
 };
 use anyhow::{Result, anyhow};
 use clap::Parser;
@@ -19,7 +19,7 @@ struct OpenArgs {
     params: Vec<String>,
 }
 
-pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
     // 1. Parse args and resolve config.
     let open_args = OpenArgs::try_parse_from(&args)?;
     let context_str = context.unwrap_or_else(|| ".".to_string());
@@ -30,19 +30,17 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     let app_key_from_user = open_args.app_key.as_deref().unwrap_or("default");
 
     let final_key = if app_key_from_user == "default" {
-        config.options.open_with.get("default")
-            .and_then(|val| match val {
-                // The 'default' key MUST be a simple string (Raw Simple Command)
-                CacheableValue::Raw(fc) if fc.command_lines.len() == 1 => Some(fc.command_lines[0].clone()),
-                _ => None,
-            })
-            .ok_or_else(|| anyhow!("No 'default' application key is defined in [options.open_with]. It should be a simple string like 'default = \"editor\"'."))?
+        app_key_from_user.to_string()
     } else {
         app_key_from_user.to_string()
     };
 
+    let task = config.options.open_with.get(&final_key)
+        .ok_or_else(|| anyhow!("Application key '{}' not found in [options.open_with].", final_key))?
+        .clone(); // Clone to own the task
+
     // 3. Resolve the command into a Task.
-    let task = config_resolver::resolve_open_with_task(&mut config, &final_key, &index)?;
+    //let task = config_resolver::resolve_open_with_task(&mut config, &final_key, &index)?;
 
     // 4. Collect definitions and resolve arguments for the task.
     let definitions: Vec<ParameterDef> = task

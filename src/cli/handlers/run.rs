@@ -1,28 +1,18 @@
-// src/cli/handlers/run.rs
-
 use crate::{
     cli::handlers::commons,
-    core::{config_resolver, index_manager, parameters::ArgResolver, task_executor},
-    models::{CommandAction, TemplateComponent},
+    core::{parameters::ArgResolver, task_executor},
+    // FIX: Removed unused `index_manager` and `config_resolver` imports
+    // FIX: Added `ParameterDef` for collecting definitions
+    models::{CommandAction, GlobalIndex, ParameterDef, TemplateComponent},
 };
 use anyhow::{Result, anyhow};
-use clap::Parser;
 use colored::*;
 
-#[derive(Parser, Debug, Default)]
-#[command(no_binary_name = true)]
-struct RunArgs {
-    /// The name of the script to run.
-    script: String,
-    /// Parameters to pass to the script.
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-    params: Vec<String>,
-}
-
-// Esta función es llamada por el despachador.
-pub fn parse_script_path(full_path: &str) -> (Option<String>, &str) {
+/// Parses a script path string like "my-app/api/build" into its context and script name.
+/// This is a helper function used internally by the main dispatcher (`bin/axes.rs`).
+pub fn parse_script_path(full_path: &str) -> (Option<&str>, &str) {
     if let Some((context, script_name)) = full_path.rsplit_once('/') {
-        (Some(context.to_string()), script_name)
+        (Some(context), script_name)
     } else {
         (None, full_path)
     }
@@ -30,39 +20,42 @@ pub fn parse_script_path(full_path: &str) -> (Option<String>, &str) {
 
 ///
 /// Main entry point for the 'run' command.
-/// It now receives the full script path (e.g., "my-app/build") as its context
-/// and is responsible for parsing it.
+/// It receives a normalized context and the script name as the first argument.
 ///
-pub fn handle(context: Option<String>, mut args: Vec<String>) -> Result<()> {
+pub fn handle(context: Option<String>, mut args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
+    // 1. The dispatcher guarantees that the script name is the first argument.
     if args.is_empty() {
-        return Err(anyhow!(
-            "Internal error: 'run' handler called without a script name."
-        ));
+        return Err(anyhow!("Internal error: 'run' handler called without a script name."));
     }
-
     let script_name = args.remove(0);
-    let params = args;
+    let params = args; // The rest of the arguments are parameters for the script.
 
-    let mut index = index_manager::load_and_ensure_global_project()?;
-    let mut config = commons::resolve_config_and_update_index_if_needed(context, &mut index)?;
+    // 2. Resolve the configuration for the given context.
+    let config = commons::resolve_config_for_context(context, index)?;
 
-    // 4. Resolve the script into a `Task` object.
-    let task = config_resolver::resolve_script_task(&mut config, &script_name, &index)?;
+    // 3. Get the pre-compiled Task for the requested script from the resolved config.
+    let task = config.scripts.get(&script_name).ok_or_else(|| {
+        anyhow!(
+            "Script '{}' not found in project '{}'.",
+            script_name.cyan(),
+            config.qualified_name.yellow()
+        )
+    })?;
 
     if task.commands.is_empty() {
         println!("{}", "Script is empty. Nothing to execute.".yellow());
         return Ok(());
     }
 
-    // 5. Collect parameter definitions from the task.
-    let all_definitions: Vec<_> = task
+    // 4. Collect all parameter definitions from every command in the task.
+    let all_definitions: Vec<ParameterDef> = task
         .commands
         .iter()
         .flat_map(|cmd| match &cmd.action {
-            CommandAction::Execute(t) | CommandAction::Print(t) => t.iter().collect::<Vec<_>>(),
+            CommandAction::Execute(t) | CommandAction::Print(t) => t.iter().cloned().collect::<Vec<_>>(),
         })
         .filter_map(|component| match component {
-            TemplateComponent::Parameter(def) => Some(def.clone()),
+            TemplateComponent::Parameter(def) => Some(def),
             _ => None,
         })
         .collect();
@@ -71,16 +64,15 @@ pub fn handle(context: Option<String>, mut args: Vec<String>) -> Result<()> {
         .commands
         .iter()
         .flat_map(|cmd| match &cmd.action {
-            CommandAction::Execute(t) | CommandAction::Print(t) => t.iter().collect::<Vec<_>>(),
+            CommandAction::Execute(t) | CommandAction::Print(t) => t.iter(),
         })
         .any(|c| matches!(c, TemplateComponent::GenericParams));
 
-    // 6. Create the `ArgResolver`. The `params` are now directly the `args` vector
-    //    passed to this handler.
+    // 5. Create a single `ArgResolver` for the entire task.
     let resolver = ArgResolver::new(&all_definitions, &params, has_generic_params)?;
 
-    // 7. Execute the task.
-    task_executor::execute_task(&task, &config, &resolver)?;
-    
+    // 6. Execute the task using the shared task executor.
+    task_executor::execute_task(task, &config, &resolver)?;
+
     Ok(())
 }

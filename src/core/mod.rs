@@ -10,3 +10,4 @@ pub mod onboarding_manager;
 pub mod parameters;
 pub mod paths;
 pub mod task_executor;
+pub mod cache;

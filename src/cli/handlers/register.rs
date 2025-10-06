@@ -1,13 +1,16 @@
-// EN: src/cli/handlers/register.rs
+// EN: src/cli/handlers/register.rs (CORRECTED AND UPDATED)
 
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use std::{env, path::PathBuf};
 
-use crate::core::{
-    graph_display::{self, DisplayOptions},
-    index_manager,
-    onboarding_manager::{self, OnboardingOptions},
+use crate::{
+    core::{
+        graph_display::{self, DisplayOptions},
+        index_manager,
+        onboarding_manager::{self, OnboardingOptions},
+    },
+    models::GlobalIndex,
 };
 
 #[derive(Parser, Debug, Default)]
@@ -20,7 +23,7 @@ pub struct RegisterArgs {
     pub autosolve: bool,
 }
 
-pub fn handle(_context: Option<String>, args: Vec<String>) -> Result<()> {
+pub fn handle(_context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
     if env::var("AXES_PROJECT_UUID").is_ok() {
         return Err(anyhow!(
             "'register' command is not available inside a project session."
@@ -34,7 +37,6 @@ pub fn handle(_context: Option<String>, args: Vec<String>) -> Result<()> {
         None => env::current_dir()?,
     };
 
-    // Robustness #2: Canonicalize and clean the path from the start.
     let path_to_register = dunce::canonicalize(&initial_path).with_context(|| {
         format!(
             "Could not resolve the absolute path for '{}'",
@@ -49,9 +51,8 @@ pub fn handle(_context: Option<String>, args: Vec<String>) -> Result<()> {
         ));
     }
 
-    let mut index = index_manager::load_and_ensure_global_project()?;
-
-    // Robustness #1: Keep a copy of the index *before* modification to compare.
+    // FIX: Use the passed `index` reference, do not reload it.
+    // We can still clone it if we need to compare before/after states within this handler.
     let index_before = index.clone();
 
     let options = OnboardingOptions {
@@ -59,19 +60,18 @@ pub fn handle(_context: Option<String>, args: Vec<String>) -> Result<()> {
         suggested_parent_uuid: None,
     };
 
-    onboarding_manager::register_project(&path_to_register, &mut index, &options).with_context(
-        || {
-            anyhow!(
-                t!("register.error.failed"),
-                path = path_to_register.display()
-            )
-        },
-    )?;
+    // `register_project` will mutate the `index` passed to it.
+    onboarding_manager::register_project(&path_to_register, index, &options).with_context(|| {
+        anyhow!(
+            t!("register.error.failed"),
+            path = path_to_register.display()
+        )
+    })?;
 
-    // Save changes to disk
-    index_manager::save_global_index(&index)?;
+    // FIX: The saving of the index is now handled by `main`. We remove the explicit save.
+    // index_manager::save_global_index(&index)?;
 
-    // Robustness #4: Provide a meaningful summary of the operation.
+    // The comparison logic to provide user feedback remains valid.
     let projects_registered_count = index.projects.len() - index_before.projects.len();
     if projects_registered_count > 0 {
         println!(
@@ -85,14 +85,13 @@ pub fn handle(_context: Option<String>, args: Vec<String>) -> Result<()> {
             .find(|(_, entry)| entry.path == path_to_register)
         {
             println!("\nProject structure registered:");
-
-            // NOTE: CORRECTION. Provide a default DisplayOptions.
-            // We don't need to show full details here, so default options are fine.
+            
             let display_options = DisplayOptions {
                 show_paths: false,
                 show_uuids: false,
             };
-            graph_display::display_project_tree(&index, Some(*main_uuid), &display_options);
+            // `display_project_tree` only needs an immutable reference, which is fine.
+            graph_display::display_project_tree(index, Some(*main_uuid), &display_options);
         }
     } else {
         println!("\nNo new projects were registered. The project may have already been indexed.");

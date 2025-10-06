@@ -1,4 +1,4 @@
-// EN: src/cli/handlers/init.rs
+// EN: src/cli/handlers/init.rs (CORRECTED AND UPDATED)
 
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
@@ -10,7 +10,7 @@ use super::commons;
 use crate::{
     constants::{AXES_DIR, PROJECT_CONFIG_FILENAME, PROJECT_REF_FILENAME},
     core::{context_resolver, index_manager},
-    models::{ProjectConfig, ProjectRef},
+    models::{GlobalIndex, ProjectConfig, ProjectRef},
 };
 
 use colored::Colorize;
@@ -42,7 +42,7 @@ pub struct InitArgs {
 
 /// The main handler for the `init` command.
 /// Allows creating and registering new projects to axes.
-pub fn handle(_context: Option<String>, args: Vec<String>) -> Result<()> {
+pub fn handle(_context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
     // 1. Parse arguments
     let init_args = InitArgs::try_parse_from(&args)?;
 
@@ -60,12 +60,11 @@ pub fn handle(_context: Option<String>, args: Vec<String>) -> Result<()> {
 
     let is_interactive = !init_args.autosolve;
 
-    // 2. Resolve configuration details
+    // 2. Resolve configuration details, passing the mutable index down.
     let project_name = resolve_project_name(&init_args, &target_dir, is_interactive)?;
 
-    let parent_uuid = resolve_parent_project(&init_args, is_interactive)?;
+    let parent_uuid = resolve_parent_project(&init_args, is_interactive, index)?;
 
-    // --- Interactive step for version and description ---
     let version = resolve_project_version(&init_args, is_interactive)?;
 
     let description = resolve_project_description(&init_args, &project_name, is_interactive)?;
@@ -73,7 +72,6 @@ pub fn handle(_context: Option<String>, args: Vec<String>) -> Result<()> {
     // 3. Build the project configuration object
     let mut project_config = ProjectConfig::new_for_init(&project_name, &version, &description);
 
-    // Apply overrides from flags (`--env`, `--var`) if they exist.
     let env_vars = parse_key_value_pairs(&init_args.env)?;
     project_config.env.extend(env_vars);
 
@@ -81,11 +79,10 @@ pub fn handle(_context: Option<String>, args: Vec<String>) -> Result<()> {
     project_config.vars.extend(vars);
 
     // 4. Perform filesystem and index operations
-    let mut index = index_manager::load_and_ensure_global_project()?;
-
+    // FIX: Use the passed `index` reference, do not reload it.
     let (new_uuid, _) = index_manager::add_project_to_index(
-        &mut index,
-        project_name.clone(), // `project_name` is the validated name
+        index,
+        project_name.clone(),
         target_dir.clone(),
         Some(parent_uuid),
     )
@@ -111,9 +108,9 @@ pub fn handle(_context: Option<String>, args: Vec<String>) -> Result<()> {
             PROJECT_REF_FILENAME
         )
     })?;
-
-    // 4.3. Save updated global index
-    index_manager::save_global_index(&index).with_context(|| t!("error.saving_global_index"))?;
+    
+    // 4.3. The updated global index will be saved by `main` at the end of execution.
+    // No need to save it here explicitly.
 
     println!("\n{}", t!("common.success"));
     println!(
@@ -126,16 +123,14 @@ pub fn handle(_context: Option<String>, args: Vec<String>) -> Result<()> {
     Ok(())
 }
 
-// --- Funciones Auxiliares ---
+// --- Auxiliary Functions ---
 
-/// Resuelve el nombre del proyecto, ya sea desde flags, el directorio, o interactivamente.
 fn resolve_project_name(
     args: &InitArgs,
     target_dir: &Path,
     is_interactive: bool,
 ) -> Result<String> {
     if let Some(name) = &args.name {
-        // If name is provided via flag, validate it. Failure is a hard error.
         return commons::validate_project_name(name);
     }
 
@@ -146,7 +141,6 @@ fn resolve_project_name(
         .to_string();
 
     if is_interactive {
-        // In interactive mode, loop until a valid name is provided.
         loop {
             let input = match Input::with_theme(&ColorfulTheme::default())
                 .with_prompt("Project name")
@@ -157,31 +151,32 @@ fn resolve_project_name(
                 Err(DialoguerError::IO(io_err)) if io_err.kind() == io::ErrorKind::Interrupted => {
                     return Err(anyhow!(t!("common.error.operation_cancelled")));
                 }
-                Err(e) => return Err(e.into()), // Otro error (I/O, etc.).
+                Err(e) => return Err(e.into()),
             };
 
             match commons::validate_project_name(&input) {
                 Ok(name) => return Ok(name),
                 Err(e) => {
-                    // Print the validation error and prompt the user to try again.
                     println!("{}", format!("Error: {}", e).red());
                     continue;
                 }
             }
         }
     } else {
-        // In non-interactive mode, use the default name and validate it.
         commons::validate_project_name(&default_name)
     }
 }
 
-/// Resuelve el UUID del padre, desde flags, interactivamente, o usando 'global' como default.
-fn resolve_parent_project(args: &InitArgs, is_interactive: bool) -> Result<Uuid> {
-    let mut index = index_manager::load_and_ensure_global_project()?;
-
+// FIX: This function now takes and passes `&mut GlobalIndex`.
+fn resolve_parent_project(
+    args: &InitArgs,
+    is_interactive: bool,
+    index: &mut GlobalIndex,
+) -> Result<Uuid> {
     if let Some(parent_context) = &args.parent {
         println!("Resolving parent '{}'...", parent_context);
-        let (uuid, qualified_name) = context_resolver::resolve_context(parent_context, &mut index)?;
+        // `resolve_context` needs a mutable index to update `last_used` caches.
+        let (uuid, qualified_name) = context_resolver::resolve_context(parent_context, index)?;
         println!(
             "Parent project '{}' found (UUID: {}).",
             qualified_name, uuid
@@ -190,8 +185,8 @@ fn resolve_parent_project(args: &InitArgs, is_interactive: bool) -> Result<Uuid>
     }
 
     if is_interactive {
-        // NOTE: Uses the new interactive tree selector.
-        commons::choose_parent_interactive(&mut index)
+        // `choose_parent_interactive` also needs the index. Let's make it immutable for read-only ops.
+        commons::choose_parent_interactive(index)
     } else {
         println!("No parent specified. Linking to 'global' project.");
         Ok(index_manager::GLOBAL_PROJECT_UUID)
@@ -233,20 +228,16 @@ fn resolve_project_description(
     }
 }
 
-/// Parses a vector of "KEY=VALUE" strings into a HashMap.
 fn parse_key_value_pairs(pairs: &[String]) -> Result<HashMap<String, String>> {
     let mut map = HashMap::new();
     for pair in pairs {
-        match pair.split_once('=') {
-            Some((key, value)) => {
-                map.insert(key.trim().to_string(), value.trim().to_string());
-            }
-            None => {
-                return Err(anyhow!(
-                    "Invalid format for key-value pair: '{}'. Expected 'KEY=VALUE'.",
-                    pair
-                ));
-            }
+        if let Some((key, value)) = pair.split_once('=') {
+            map.insert(key.trim().to_string(), value.trim().to_string());
+        } else {
+            return Err(anyhow!(
+                "Invalid format for key-value pair: '{}'. Expected 'KEY=VALUE'.",
+                pair
+            ));
         }
     }
     Ok(map)

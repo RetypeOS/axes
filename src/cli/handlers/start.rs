@@ -3,7 +3,7 @@
 use crate::{
     cli::handlers::commons,
     core::{config_resolver, index_manager, parameters::ArgResolver},
-    models::{CommandAction, ParameterDef, Task, TemplateComponent},
+    models::{CommandAction, GlobalIndex, ParameterDef, Task, TemplateComponent},
     system::shell,
 };
 use anyhow::{Result, anyhow};
@@ -23,7 +23,7 @@ struct StartArgs {
 /// Main entry point for the `start` command.
 /// Orchestrates session setup, including parameter resolution for `at_start` and `at_exit`.
 ///
-pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
     // 1. Parse args and prevent nested sessions.
     let start_args = StartArgs::try_parse_from(&args)?;
     let context_str = context.unwrap_or_else(|| ".".to_string());

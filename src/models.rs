@@ -66,6 +66,16 @@ impl From<TomlCommand> for CanonicalCommand {
 #[derive(Serialize, Debug, Clone, Default)]
 pub struct Command(pub CanonicalCommand);
 
+// We need a way to create a Command from a simple string, for `vars`.
+impl From<String> for Command {
+    fn from(s: String) -> Self {
+        Command(CanonicalCommand {
+            default: Some(Runnable::Single(s)),
+            ..Default::default()
+        })
+    }
+}
+
 impl<'de> Deserialize<'de> for Command {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -175,41 +185,28 @@ pub struct Task {
 
 // --- Cache & Resolved Config Models ---
 
-/// Represents a command after OS-specific resolution but before expansion.
-/// This is the content of `CacheableValue::Raw`.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct FlattenedCommand {
-    pub command_lines: Vec<String>,
-    pub desc: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum CacheableValue {
-    Raw(FlattenedCommand),
-    Expanded(Task),
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct ResolvedOptionsConfig {
-    pub at_start: Option<CacheableValue>,
-    pub at_exit: Option<CacheableValue>,
+    pub at_start: Option<Task>,
+    pub at_exit: Option<Task>,
     pub shell: Option<String>,
-    pub open_with: HashMap<String, CacheableValue>,
-    pub cache_dir_template: Option<String>,
+    pub open_with: HashMap<String, Task>,
+    pub cache_dir: Option<String>, // This is the template string
 }
 
-/// The final, merged, in-memory view of a project's configuration.
-#[derive(Debug, Clone)]
+// This struct will now be built dynamically by merging `CachedProjectConfig` layers.
+// For Phase 1, we will still build it monolithically, but the structure is prepared for Phase 2.
+#[derive(Debug, Clone, Default)]
 pub struct ResolvedConfig {
     pub uuid: Uuid,
     pub qualified_name: String,
     pub project_root: PathBuf,
     pub version: Option<String>,
     pub description: Option<String>,
-    pub scripts: HashMap<String, CacheableValue>,
-    pub vars: HashMap<String, CacheableValue>,
+    pub scripts: HashMap<String, Task>,
+    pub vars: HashMap<String, Task>,
     pub env: HashMap<String, String>,
-    pub options: ResolvedOptionsConfig,
+    pub options: ResolvedOptionsConfig, // This now holds compiled Tasks
 }
 
 // =========================================================================
@@ -218,16 +215,44 @@ pub struct ResolvedConfig {
 
 // --- Global Index & Local References ---
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct IndexEntry {
     pub name: String,
     pub path: PathBuf,
     pub parent: Option<Uuid>,
-    pub cache_path: Option<PathBuf>,
+    
+    // The hash of the project's own axes.toml file content.
+    // Used to validate the single-layer cache.
+    pub config_hash: Option<String>,
+    
+    // The resolved, absolute path to the directory where this project's
+    // cache objects are stored. Inherited and resolved.
+    pub cache_dir: Option<PathBuf>,
+    
+    // UUID of the most recently used direct child of this project.
     pub last_used_child: Option<Uuid>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+/// Represents the pre-parsed and pre-expanded content of a single `axes.toml` file.
+/// This is the unit that will be stored in the single-layer cache.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct CachedProjectConfig {
+    /// The project's own version, if defined.
+    pub version: Option<String>,
+    /// The project's own description, if defined.
+    pub description: Option<String>,
+    /// Scripts defined directly in this project's `axes.toml`, already expanded to AST.
+    pub scripts: HashMap<String, Task>,
+    /// Variables defined directly in this project's `axes.toml`, already expanded to AST.
+    pub vars: HashMap<String, Task>,
+    /// Environment variables defined directly in this project's `axes.toml`.
+    pub env: HashMap<String, String>,
+    /// Options defined directly in this project's `axes.toml`.
+    /// Note: `cache_dir` is stored as a template string here.
+    pub options: OptionsConfig,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Default)]
 pub struct GlobalIndex {
     #[serde(default)]
     pub projects: HashMap<Uuid, IndexEntry>,
@@ -261,34 +286,6 @@ pub struct ShellsConfig {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub(crate) struct SerializableSystemTime(Duration);
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub(crate) struct SerializableResolvedOptionsConfig {
-    pub at_start: Option<CacheableValue>,
-    pub at_exit: Option<CacheableValue>,
-    pub shell: Option<String>,
-    pub open_with: HashMap<String, CacheableValue>,
-    pub cache_dir_template: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub(crate) struct SerializableResolvedConfig {
-    pub uuid: Uuid,
-    pub qualified_name: String,
-    pub project_root: String,
-    pub version: Option<String>,
-    pub description: Option<String>,
-    pub scripts: HashMap<String, CacheableValue>,
-    pub vars: HashMap<String, CacheableValue>,
-    pub env: HashMap<String, String>,
-    pub options: SerializableResolvedOptionsConfig,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub(crate) struct SerializableConfigCache {
-    pub resolved_config: SerializableResolvedConfig,
-    pub dependencies: HashMap<String, SerializableSystemTime>,
-}
 
 // =========================================================================
 // === 4. CONVERSIONS & IMPLEMENTATIONS
@@ -469,62 +466,6 @@ impl ProjectConfig {
 }
 
 // --- Conversions for Serialization ---
-
-impl From<&ResolvedOptionsConfig> for SerializableResolvedOptionsConfig {
-    fn from(value: &ResolvedOptionsConfig) -> Self {
-        Self {
-            at_start: value.at_start.clone(),
-            at_exit: value.at_exit.clone(),
-            shell: value.shell.clone(),
-            open_with: value.open_with.clone(),
-            cache_dir_template: value.cache_dir_template.clone(),
-        }
-    }
-}
-
-impl From<SerializableResolvedOptionsConfig> for ResolvedOptionsConfig {
-    fn from(value: SerializableResolvedOptionsConfig) -> Self {
-        Self {
-            at_start: value.at_start,
-            at_exit: value.at_exit,
-            shell: value.shell,
-            open_with: value.open_with,
-            cache_dir_template: value.cache_dir_template,
-        }
-    }
-}
-
-impl From<&ResolvedConfig> for SerializableResolvedConfig {
-    fn from(value: &ResolvedConfig) -> Self {
-        Self {
-            uuid: value.uuid,
-            qualified_name: value.qualified_name.clone(),
-            project_root: value.project_root.to_string_lossy().into_owned(),
-            version: value.version.clone(),
-            description: value.description.clone(),
-            scripts: value.scripts.clone(),
-            vars: value.vars.clone(),
-            env: value.env.clone(),
-            options: (&value.options).into(),
-        }
-    }
-}
-
-impl From<SerializableResolvedConfig> for ResolvedConfig {
-    fn from(value: SerializableResolvedConfig) -> Self {
-        Self {
-            uuid: value.uuid,
-            qualified_name: value.qualified_name,
-            project_root: PathBuf::from(value.project_root),
-            version: value.version,
-            description: value.description,
-            scripts: value.scripts,
-            vars: value.vars,
-            env: value.env,
-            options: value.options.into(),
-        }
-    }
-}
 
 impl From<SystemTime> for SerializableSystemTime {
     fn from(time: SystemTime) -> Self {

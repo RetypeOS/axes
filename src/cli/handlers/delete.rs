@@ -9,7 +9,7 @@ use std::{fs, path::PathBuf};
 use crate::{
     cli::handlers::commons,
     constants::AXES_DIR,
-    core::{context_resolver, index_manager},
+    core::{context_resolver, index_manager}, models::GlobalIndex,
 };
 
 #[derive(Parser, Debug, Default)]
@@ -24,7 +24,7 @@ struct DeleteArgs {
     reparent_to: Option<String>,
 }
 
-pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
     // Parse args.
     let delete_args = DeleteArgs::try_parse_from(&args)?;
     let context_str =

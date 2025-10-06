@@ -6,7 +6,7 @@ use colored::*;
 use dialoguer::{Confirm, theme::ColorfulTheme};
 
 use super::commons;
-use crate::core::{context_resolver, index_manager};
+use crate::{core::{context_resolver, index_manager}, models::GlobalIndex};
 
 #[derive(Parser, Debug, Default)]
 #[command(no_binary_name = true)]
@@ -20,7 +20,7 @@ struct UnregisterArgs {
     reparent_to: Option<String>,
 }
 
-pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
     let unregister_args = UnregisterArgs::try_parse_from(&args)?;
     let context_str =
         context.ok_or_else(|| anyhow!(t!("error.context_required"), command = "delete"))?;

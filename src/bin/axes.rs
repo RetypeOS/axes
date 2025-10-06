@@ -1,15 +1,24 @@
 // EN: src/bin/axes.rs
 
+use std::sync::{Arc, Mutex};
+
 use anyhow::Result;
 use axes::{
     cli::{
-        Cli,
-        handlers::{self, run::parse_script_path},
-    },
-    system::executor,
+        handlers::{self, run::parse_script_path}, Cli
+    }, core::index_manager, models::GlobalIndex, system::executor
 };
 use clap::Parser;
 use colored::*;
+use lazy_static::lazy_static;
+
+// Use a thread-safe global static for the index.
+lazy_static! {
+    static ref GLOBAL_INDEX: Arc<Mutex<GlobalIndex>> = {
+        let index = index_manager::load_and_ensure_global_project().expect("Failed to load global index.");
+        Arc::new(Mutex::new(index))
+    };
+}
 
 // --- Command Definition and Registry ---
 
@@ -18,27 +27,27 @@ use colored::*;
 struct CommandDefinition {
     name: &'static str,
     aliases: &'static [&'static str],
-    handler: fn(Option<String>, Vec<String>) -> Result<()>,
+    handler: fn(Option<String>, Vec<String>, &mut GlobalIndex) -> Result<()>,
 }
 
 /// The single source of truth for all system commands.
 /// The registry is updated to match the new handler signature.
 static COMMAND_REGISTRY: &[CommandDefinition] = &[
-    CommandDefinition {
-        name: "alias",
-        aliases: &[],
-        handler: handlers::alias::handle,
-    },
-    CommandDefinition {
-        name: "_cache",
-        aliases: &[],
-        handler: handlers::debug_cache::handle,
-    },
-    CommandDefinition {
-        name: "delete",
-        aliases: &["del"],
-        handler: handlers::delete::handle,
-    },
+    //CommandDefinition {
+    //    name: "alias",
+    //    aliases: &[],
+    //    handler: handlers::alias::handle,
+    //},
+    //CommandDefinition {
+    //    name: "_cache",
+    //    aliases: &[],
+    //    handler: handlers::debug_cache::handle,
+    //},
+    //CommandDefinition {
+    //    name: "delete",
+    //    aliases: &["del"],
+    //    handler: handlers::delete::handle,
+    //},
     CommandDefinition {
         name: "info",
         aliases: &[],
@@ -49,46 +58,46 @@ static COMMAND_REGISTRY: &[CommandDefinition] = &[
         aliases: &["new"],
         handler: handlers::init::handle,
     },
-    CommandDefinition {
-        name: "link",
-        aliases: &[],
-        handler: handlers::link::handle,
-    },
-    CommandDefinition {
-        name: "open",
-        aliases: &[],
-        handler: handlers::open::handle,
-    },
+    //CommandDefinition {
+    //    name: "link",
+    //    aliases: &[],
+    //    handler: handlers::link::handle,
+    //},
+    //CommandDefinition {
+    //    name: "open",
+    //    aliases: &[],
+    //    handler: handlers::open::handle,
+    //},
     CommandDefinition {
         name: "register",
         aliases: &["reg"],
         handler: handlers::register::handle,
     },
-    CommandDefinition {
-        name: "rename",
-        aliases: &[],
-        handler: handlers::rename::handle,
-    },
+    //CommandDefinition {
+    //    name: "rename",
+    //    aliases: &[],
+    //    handler: handlers::rename::handle,
+    //},
     CommandDefinition {
         name: "run",
         aliases: &[],
         handler: handlers::run::handle,
     },
-    CommandDefinition {
-        name: "start",
-        aliases: &[],
-        handler: handlers::start::handle,
-    },
+    //CommandDefinition {
+    //    name: "start",
+    //    aliases: &[],
+    //    handler: handlers::start::handle,
+    //},
     CommandDefinition {
         name: "tree",
         aliases: &["ls"],
         handler: handlers::tree::handle,
     },
-    CommandDefinition {
-        name: "unregister",
-        aliases: &["unreg"],
-        handler: handlers::unregister::handle,
-    },
+    //CommandDefinition {
+    //    name: "unregister",
+    //    aliases: &["unreg"],
+    //    handler: handlers::unregister::handle,
+    //},
 ];
 
 /// Finds a command definition in the registry by its name or alias.
@@ -104,6 +113,13 @@ fn main() {
     {
         env_logger::init();
     }
+
+    // 1. Load the index and clone its initial state.
+    let index_initial_state = {
+        let index_guard = GLOBAL_INDEX.lock().unwrap();
+        (*index_guard).clone()
+    };
+
     if let Err(e) = run_cli(Cli::parse()) {
         if let Some(exec_err) = e.downcast_ref::<executor::ExecutionError>()
             && matches!(exec_err, executor::ExecutionError::Interrupted { .. })
@@ -123,11 +139,25 @@ fn main() {
         }
         std::process::exit(1);
     }
+
+    // 3. At the very end, check if the index has changed and save if needed.
+    let index_final_state = GLOBAL_INDEX.lock().unwrap();
+    if *index_final_state != index_initial_state {
+        if let Err(e) = index_manager::save_global_index(&index_final_state) {
+            eprintln!("\n{}: Failed to save updated global index: {}", "Critical Error".red().bold(), e);
+            std::process::exit(1);
+        }
+        log::debug!("Global index was modified and has been saved.");
+    }
 }
 
 /// The main application dispatcher implementing the new universal grammar.
 fn run_cli(cli: Cli) -> Result<()> {
     log::debug!("CLI args parsed: {:?}", cli);
+
+    // Get a mutable guard to the global index early.
+    // It will be passed down to handlers that need to mutate the state.
+    let mut index_guard = GLOBAL_INDEX.lock().unwrap();
 
     let all_args = cli.args;
 
@@ -142,46 +172,52 @@ fn run_cli(cli: Cli) -> Result<()> {
     // --- New Dispatch Logic Cascade ---
     let (command_def, context, handler_args) = if let Some(arg2_val) = arg2 {
         if arg2_val == "--" {
-            // Regla 1 (Escape Hatch): `axes <ruta_script> -- [params...]`
-            // Normalizamos la ruta de script aquí mismo.
+            // Rule 1 (Escape Hatch): `axes <script_path> -- [params...]`
             let (ctx_part, script_part) = parse_script_path(arg1);
             let mut params = vec![script_part.to_string()];
             params.extend(all_args.iter().skip(2).cloned());
             (
                 find_command("run").unwrap(),
+                // FIX: Convert Option<&str> to Option<String>
                 ctx_part.map(|s| s.to_string()),
                 params,
             )
         } else if let Some(command) = find_command(arg2_val) {
-            // Regla 2 (Acción Explícita): `axes <contexto> <acción> [args...]`
-            // El `run` explícito (`axes proj run build`) entra por aquí.
+            // Rule 2 (Explicit Action): `axes <context> <action> [args...]`
             let params = all_args.iter().skip(2).cloned().collect();
+            // This branch correctly returns Option<String>
             (command, Some(arg1.to_string()), params)
         } else if let Some(command) = find_command(arg1) {
-            // Regla 3 (Acción Global): `axes <acción> [args...]`
+            // Rule 3 (Global Action): `axes <action> [args...]`
             let params = all_args.iter().skip(1).cloned().collect();
+            // This branch correctly returns Option<String> (via `None`)
             (command, None, params)
         } else {
-            // Regla 4 (Por Defecto, Script Implícito): `axes <ruta_script> [params...]`
-            // Normalizamos la ruta de script.
+            // Rule 4 (Default, Implicit Script): `axes <script_path> [params...]`
             let (ctx_part, script_part) = parse_script_path(arg1);
             let mut params = vec![script_part.to_string()];
             params.extend(all_args.iter().skip(1).cloned());
-            (find_command("run").unwrap(), ctx_part, params)
+            (
+                find_command("run").unwrap(),
+                // FIX: Convert Option<&str> to Option<String>
+                ctx_part.map(|s| s.to_string()),
+                params,
+            )
         }
     } else if let Some(command) = find_command(arg1) {
-        // Regla 3 con un solo argumento
+        // Rule 3 with a single argument
         (command, None, vec![])
     } else {
-        // Regla 4 con un solo argumento
+        // Rule 4 with a single argument
         let (ctx_part, script_part) = parse_script_path(arg1);
         (
             find_command("run").unwrap(),
+            // FIX: Convert Option<&str> to Option<String>
             ctx_part.map(|s| s.to_string()),
             vec![script_part.to_string()],
         )
     };
 
     // --- Dispatch to Handler ---
-    (command_def.handler)(context, handler_args)
+    (command_def.handler)(context, handler_args, &mut index_guard)
 }

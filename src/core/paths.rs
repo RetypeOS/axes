@@ -105,7 +105,7 @@ pub fn expand_path_template(template: &str, project_uuid: Uuid) -> Result<PathBu
 /// # Returns
 /// The absolute, resolved path to the cache directory for this project.
 pub fn get_cache_dir_for_project(config: &ResolvedConfig) -> Result<PathBuf> {
-    let template = match &config.options.cache_dir_template {
+    let template = match &config.options.cache_dir {
         Some(template_str) => template_str.clone(),
         None => {
             // Determine platform-specific default cache location.

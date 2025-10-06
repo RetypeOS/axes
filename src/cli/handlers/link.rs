@@ -3,7 +3,7 @@
 use anyhow::{Context, Result, anyhow};
 
 use super::commons;
-use crate::core::{context_resolver, index_manager};
+use crate::{core::{context_resolver, index_manager}, models::GlobalIndex};
 
 use clap::Parser;
 
@@ -14,7 +14,7 @@ struct LinkArgs {
     new_parent: String,
 }
 
-pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
     // 1. Resolve the project to be moved. This requires a context.
     let link_args = LinkArgs::try_parse_from(&args)?;
     let context_str =

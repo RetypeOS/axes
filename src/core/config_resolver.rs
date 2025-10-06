@@ -1,546 +1,221 @@
-// src/core/config_resolver.rs
+// EN: src/core/config_resolver.rs (REPLACE ENTIRE FILE)
 
-use crate::constants::{
-    AXES_DIR, CONFIG_CACHE_FILENAME, MAX_RECURSION_DEPTH, PROJECT_CONFIG_FILENAME,
-};
-use crate::core::parameters::{self};
-use crate::core::paths;
-use crate::models::{
-    CacheableValue, CanonicalCommand, Command, CommandAction, CommandExecution, FlattenedCommand,
-    GlobalIndex, IndexEntry, ProjectConfig, ResolvedConfig, ResolvedOptionsConfig, RunSpec,
-    Runnable, SerializableConfigCache, Task, TemplateComponent,
+use crate::{
+    core::{cache, parameters, paths},
+    models::{
+        CachedProjectConfig, CanonicalCommand, Command, CommandAction, CommandExecution, GlobalIndex, IndexEntry, OptionsConfig, ProjectConfig, ResolvedConfig, RunSpec, Runnable, Task, TemplateComponent
+    },
 };
 use anyhow::{Context, Result, anyhow};
-use bincode::error::DecodeError;
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::collections::HashMap;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use thiserror::Error;
 use uuid::Uuid;
 
 lazy_static! {
-    // A simple, fast regex that finds ANY <axes::...> token.
-    // The logic is now in the expansion engine, not the regex.
     static ref TOKEN_RE: Regex = Regex::new(r"<axes::([^>]+)>").unwrap();
 }
 
 #[derive(Error, Debug)]
 pub enum ResolverError {
-    #[error("Filesystem Error: {0}")]
+    #[error("Project with UUID '{0}' not found in the index.")]
+    UuidNotFound(Uuid),
+    #[error("I/O error while processing configuration: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Error parsing TOML in '{path}': {source}")]
+    #[error("Failed to parse TOML file at '{path}': {source}")]
     TomlParse {
-        path: String,
+        path: PathBuf,
         #[source]
         source: toml::de::Error,
     },
-    #[error("Error decoding cache: {0}")]
-    BincodeDecode(#[from] bincode::error::DecodeError),
-    #[error("Error encoding cache: {0}")]
-    BincodeEncode(#[from] bincode::error::EncodeError),
-    #[error("Project with UUID '{uuid}' referenced in index not found.")]
-    UuidNotFoundInIndex { uuid: Uuid },
-    #[error("Configuration file for project '{name}' not found at '{path}'.")]
-    ConfigFileNotFound { name: String, path: String },
-    #[error("Maximum recursion depth ({depth}) exceeded during static expansion of '{key}'.")]
-    MaxRecursionDepth { depth: u32, key: String },
-    #[error("Circular dependency detected during expansion: {cycle_path}")]
-    CircularDependency { cycle_path: String },
-    #[error("Invalid value type '{kind:?}' requested for key '{key}'.")]
-    InvalidValueType { kind: ValueKind, key: String },
-    #[error("Key '{key}' of type '{kind:?}' not found in configuration.")]
-    ValueNotFound { kind: ValueKind, key: String },
-    #[error("Expansion/Parsing Error: {0}")]
-    Expansion(#[from] anyhow::Error),
 }
 
-// Helper to avoid passing the whole index around just to update one field
-pub struct ConfigResolutionResult {
-    pub config: ResolvedConfig,
-    pub new_cache_path: Option<PathBuf>, // Some if a new path was calculated
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Hook {
-    AtStart,
-    AtExit,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ValueKind {
-    /// A command or sequence of commands. Interprets execution prefixes ('>', '-').
-    Script,
-    /// An interpolable string fragment. Does NOT interpret execution prefixes.
-    Variable,
-    Hook(Hook),
-    OpenWith,
-}
-
-type ResolverResult<T> = Result<T, ResolverError>;
-
-// --- PUBLIC API ---
-
-pub fn resolve_config_for_uuid(
-    target_uuid: Uuid,
-    qualified_name: String,
-    index: &GlobalIndex,
-) -> Result<ConfigResolutionResult> {
-    let leaf_entry = index
-        .projects
-        .get(&target_uuid)
-        .ok_or(ResolverError::UuidNotFoundInIndex { uuid: target_uuid })?;
-    
-    // --- 1. Attempt to read from cache using path from index ---
-    if let Some(cached_path) = &leaf_entry.cache_path {
-        let cache_file_path = cached_path.join(CONFIG_CACHE_FILENAME);
-        if let Some(cached_config) = read_and_validate_config_cache(&cache_file_path, &qualified_name)? {
-            log::debug!("Valid configuration cache found for '{}' at indexed path.", qualified_name);
-            return Ok(ConfigResolutionResult {
-                config: cached_config,
-                new_cache_path: None, // No change needed
-            });
-        }
+// --- MAIN RESOLVER FUNCTION ---
+pub fn resolve_config(
+    uuid: Uuid,
+    index: &mut GlobalIndex,
+    memoizer: &mut HashMap<Uuid, Arc<ResolvedConfig>>,
+) -> Result<Arc<ResolvedConfig>> {
+    log::debug!("Resolving config for UUID: {}", uuid);
+    if let Some(config) = memoizer.get(&uuid) {
+        log::trace!("Resolved config for {} found in in-session memoizer.", uuid);
+        return Ok(config.clone());
     }
 
-    // --- 2. Cache Miss: Resolve from source and calculate new cache path ---
-    log::debug!(
-        "Invalid or no config cache found. Resolving '{}' from source...",
-        qualified_name
-    );
-    let inheritance_chain = build_inheritance_chain(target_uuid, index)?;
-    let dependencies = get_dependencies_timestamps(&inheritance_chain)?;
+    let entry = index.projects.get(&uuid).ok_or_else(|| anyhow!("Project UUID {} not in index.", uuid))?.clone();
+    let mut hash_memoizer = HashMap::new();
+    let current_state_hash = get_state_hash(uuid, index, &mut hash_memoizer)?;
 
-    let configs_in_chain: Vec<ProjectConfig> =
-        inheritance_chain.into_iter().map(|(_, p)| p).collect();
-    let mut resolved_config = merge_chain_into_config(configs_in_chain);
-
-    resolved_config.uuid = target_uuid;
-    resolved_config.qualified_name = qualified_name.clone();
-    resolved_config.project_root = leaf_entry.path.clone();
-
-    // --- 3. Determine the new correct cache path ---
-    let new_cache_path = paths::get_cache_dir_for_project(&resolved_config)?;
-    let new_cache_file_path = new_cache_path.join(CONFIG_CACHE_FILENAME);
-
-    // --- 4. Write the cache to the new location ---
-    write_config_cache(&new_cache_file_path, &resolved_config, dependencies)?;
-    log::debug!(
-        "New raw config cache saved at '{}'.",
-        new_cache_file_path.display()
-    );
-
-    // --- 5. Determine if the index needs updating ---
-    let index_update_needed = match &leaf_entry.cache_path {
-        Some(old_path) if *old_path == new_cache_path => None,
-        _ => Some(new_cache_path),
-    };
-
-    Ok(ConfigResolutionResult {
-        config: resolved_config,
-        new_cache_path: index_update_needed,
-    })
-}
-
-/// Public entry point to resolve a script/var into a `Task`.
-/// It mutates the passed `ResolvedConfig` by caching the expanded task.
-pub fn resolve_script_task(
-    config: &mut ResolvedConfig,
-    task_key: &str,
-    index: &GlobalIndex,
-) -> Result<Task> {
-    let (task, dirty) = expand_and_get_task_internal(task_key, ValueKind::Script, config, 0)?;
-
-    if dirty {
-        save_config_cache(config, index)
-            .with_context(|| "Failed to save updated configuration cache.")?;
-    }
-
-    Ok(task)
-}
-
-/// Public entry point to resolve an `open_with` task into a `Task`.
-pub fn resolve_open_with_task(
-    config: &mut ResolvedConfig,
-    task_key: &str,
-    index: &GlobalIndex,
-) -> Result<Task> {
-    let (task, dirty) = expand_and_get_task_internal(task_key, ValueKind::OpenWith, config, 0)?;
-
-    if dirty {
-        save_config_cache(config, index)
-            .with_context(|| "Failed to save updated configuration cache.")?;
-    }
-
-    Ok(task)
-}
-
-/// Public entry point to resolve a session hook task (`at_start`/`at_exit`) into a `Task`.
-pub fn resolve_hook_task(
-    config: &mut ResolvedConfig,
-    hook: Hook,
-    index: &GlobalIndex,
-) -> Result<Option<Task>> {
-    // Hooks are optional, so we check for existence first.
-    let key = match hook {
-        Hook::AtStart => "at_start",
-        Hook::AtExit => "at_exit",
-    };
-    if get_cacheable_value(config, key, ValueKind::Hook(hook))?.is_none() {
-        return Ok(None);
-    }
-
-    let (task, dirty) = expand_and_get_task_internal(key, ValueKind::Hook(hook), config, 0)?;
-
-    if dirty {
-        save_config_cache(config, index)
-            .with_context(|| "Failed to save updated configuration cache.")?;
-    }
-
-    Ok(Some(task))
-}
-
-/// The main orchestrator for the expansion engine.
-/// It handles caching, recursion safety, and calls the appropriate expansion logic
-/// for each line of a command, distinguishing between pure structural composition
-/// and inline token expansion.
-fn expand_and_get_task_internal(
-    key: &str,
-    kind: ValueKind,
-    config: &mut ResolvedConfig,
-    depth: u32,
-) -> Result<(Task, bool)> {
-    let stack_key = format!("{:?}::{}", kind, key);
-
-    // --- Safety Check: Prevent infinite recursion ---
-    if depth >= MAX_RECURSION_DEPTH {
-        return Err(ResolverError::MaxRecursionDepth {
-            depth,
-            key: stack_key,
-        }
-        .into());
-    }
-
-    // --- In-Memory Cache Check ---
-    if let Some(CacheableValue::Expanded(task)) = get_cacheable_value(config, key, kind)? {
-        return Ok((task.clone(), false));
-    }
-
-    // --- Get Raw Value to Expand ---
-    let flattened_command = match get_cacheable_value(config, key, kind)? {
-        Some(CacheableValue::Raw(fc)) => fc.clone(),
-        Some(CacheableValue::Expanded(_)) => unreachable!(), // Handled by cache check above
-        None => {
-            return Err(ResolverError::ValueNotFound {
-                key: key.to_string(),
-                kind,
-            }
-            .into());
-        }
-    };
-
-    let mut final_task = Task {
-        desc: flattened_command.desc,
-        ..Default::default()
-    };
-
-    // --- Main Expansion Loop for Each Line ---
-    for line in &flattened_command.command_lines {
-        // A `Variable` should not have executable lines, but we guard against it.
-        // For all other kinds (Script, Hook, OpenWith), prefixes are always parsed.
-        let metadata = if kind == ValueKind::Variable {
-            ExecutionMetadata {
-                command_text: line,
-                ..Default::default()
-            }
-        } else {
-            parse_execution_prefixes(line)
-        };
-
-        if let Some(script_key) = is_pure_script_composition(metadata.command_text) {
-            let (mut sub_task, _) =
-                expand_and_get_task_internal(script_key, ValueKind::Script, config, depth + 1)?;
-            for cmd in &mut sub_task.commands {
-                cmd.ignore_errors |= metadata.ignore_errors;
-                cmd.run_in_parallel |= metadata.run_in_parallel;
-                cmd.silent_mode |= metadata.silent_mode;
-            }
-            final_task.commands.extend(sub_task.commands);
-        } else {
-            let template = expand_line(metadata.command_text, &mut final_task, config, depth + 1)?;
-            if !template.is_empty() {
-                final_task.commands.push(CommandExecution {
-                    action: if metadata.is_echo {
-                        CommandAction::Print(template)
+    if let Some(saved_hash) = &entry.config_hash {
+        if *saved_hash == current_state_hash {
+            if let Some(cache_dir) = &entry.cache_dir {
+                let cache_file_path = cache_dir.join(saved_hash);
+                if let Ok(cached_layer) = read_cached_layer(&cache_file_path) {
+                    log::debug!("Cache HIT for project '{}'. Merging layers.", entry.name);
+                    let final_config = if let Some(parent_uuid) = entry.parent {
+                        let parent_config = resolve_config(parent_uuid, index, memoizer)?;
+                        merge_configs(parent_config, &cached_layer, uuid, &entry)?
                     } else {
-                        CommandAction::Execute(template)
-                    },
-                    ignore_errors: metadata.ignore_errors,
-                    run_in_parallel: metadata.run_in_parallel,
-                    silent_mode: metadata.silent_mode,
-                });
-            }
-        }
-    }
-
-    for cmd in &mut final_task.commands {
-        let template = match &mut cmd.action {
-            CommandAction::Execute(t) | CommandAction::Print(t) => t,
-        };
-        optimize_literals(template);
-    }
-
-    let cacheable_mut = get_cacheable_value_mut(config, key, kind)?.unwrap();
-    *cacheable_mut = CacheableValue::Expanded(final_task.clone());
-
-    Ok((final_task, true))
-}
-
-/// Checks if a line is a single, pure script composition token.
-fn is_pure_script_composition(line: &str) -> Option<&str> {
-    if let Some(caps) = TOKEN_RE.captures(line)
-        && caps.get(0).unwrap().as_str() == line
-    {
-        let content = caps.get(1).unwrap().as_str().trim();
-        return content.strip_prefix("scripts::");
-    }
-    None
-}
-
-/// The high-performance, single-pass linear expansion engine for a single line.
-/// This function handles "inline" composition, where tokens are mixed with other text.
-fn expand_line(
-    line: &str,
-    _parent_task: &mut Task, // Kept for API consistency, but not used for direct modification
-    config: &mut ResolvedConfig,
-    depth: u32,
-) -> Result<Vec<TemplateComponent>> {
-    let mut components = Vec::new();
-    let mut last_index = 0;
-
-    for caps in TOKEN_RE.captures_iter(line) {
-        let full_match = caps.get(0).unwrap();
-        // Append the literal text that comes before the token
-        let literal_part = &line[last_index..full_match.start()];
-        if !literal_part.is_empty() {
-            add_literal(&mut components, literal_part.to_string());
-        }
-
-        let content = caps.get(1).unwrap().as_str().trim();
-
-        if let Some(var_key) = content.strip_prefix("vars::") {
-            let (var_task, _) =
-                expand_and_get_task_internal(var_key, ValueKind::Variable, config, depth)?;
-            // Variables must expand to a single, simple command line to be used inline.
-            if var_task.commands.len() != 1 {
-                return Err(anyhow!(
-                    "Variable '{}' must expand to a single-line value to be used inline.",
-                    var_key
-                ));
-            }
-            // Inline compose the variable's components.
-            let template_to_extend = match &var_task.commands[0].action {
-                CommandAction::Execute(t) | CommandAction::Print(t) => t,
-            };
-            components.extend(template_to_extend.clone());
-        } else if let Some(script_key) = content.strip_prefix("scripts::") {
-            // This is an inline script composition.
-            let (script_task, _) =
-                expand_and_get_task_internal(script_key, ValueKind::Script, config, depth)?;
-            // Scripts used inline must also resolve to a single command line.
-            if script_task.commands.len() > 1 {
-                return Err(anyhow!(
-                    "Inline script composition for '<axes::scripts::{}>' is not supported because it is a multi-line script. Use it on its own line.",
-                    script_key
-                ));
-            }
-            if let Some(cmd) = script_task.commands.first() {
-                let template_to_extend = match &cmd.action {
-                    CommandAction::Execute(t) | CommandAction::Print(t) => t,
-                };
-                components.extend(template_to_extend.clone());
-            }
-        } else if let Some(param_spec) = content.strip_prefix("params::") {
-            let def = parameters::parse_parameter_token(full_match.as_str(), param_spec)?;
-            components.push(TemplateComponent::Parameter(def));
-        } else if content == "params" {
-            components.push(TemplateComponent::GenericParams);
-        } else if let Some(run_spec) = content.strip_prefix("run") {
-            if run_spec.starts_with("('") && run_spec.ends_with("')") {
-                let cmd = run_spec
-                    .strip_prefix("('")
-                    .unwrap()
-                    .strip_suffix("')")
-                    .unwrap();
-                components.push(TemplateComponent::Run(RunSpec::Literal(cmd.to_string())));
-            } else {
-                return Err(anyhow!("Invalid run syntax: {}", full_match.as_str()));
-            }
-        } else {
-            // Default case: simple static tokens become enum variants
-            let component = match content {
-                "path" => TemplateComponent::Path,
-                "name" => TemplateComponent::Name,
-                "uuid" => TemplateComponent::Uuid,
-                "version" => TemplateComponent::Version,
-                _ => {
-                    return Err(anyhow!(
-                        "Unknown token namespace in: '{}'",
-                        full_match.as_str()
-                    ));
+                        merge_configs(Arc::new(ResolvedConfig::default()), &cached_layer, uuid, &entry)?
+                    };
+                    let final_config_arc = Arc::new(final_config);
+                    memoizer.insert(uuid, final_config_arc.clone());
+                    return Ok(final_config_arc);
                 }
-            };
-            components.push(component);
+            }
         }
-
-        last_index = full_match.end();
     }
 
-    // Append the final literal part of the string (after the last token).
-    let final_literal = &line[last_index..];
-    if !final_literal.is_empty() {
-        add_literal(&mut components, final_literal.to_string());
-    }
-
-    Ok(components)
-}
-
-/// Utility to add a literal and merge it with the previous one if possible.
-fn add_literal(components: &mut Vec<TemplateComponent>, s: String) {
-    if let Some(TemplateComponent::Literal(last)) = components.last_mut() {
-        last.push_str(&s);
+    log::debug!("Cache MISS for project '{}'. Recalculating.", entry.name);
+    let parent_config = if let Some(parent_uuid) = entry.parent {
+        resolve_config(parent_uuid, index, memoizer)?
     } else {
-        components.push(TemplateComponent::Literal(s));
-    }
+        Arc::new(ResolvedConfig::default())
+    };
+
+    let self_layer = load_and_compile_layer(&entry)?;
+    let final_config = merge_configs(parent_config, &self_layer, uuid, &entry)?;
+    let new_cache_dir = paths::get_cache_dir_for_project(&final_config)?;
+    let new_cache_file_path = new_cache_dir.join(&current_state_hash);
+    write_cached_layer(&new_cache_file_path, &self_layer)?;
+
+    let index_entry_mut = index.projects.get_mut(&uuid).unwrap();
+    index_entry_mut.config_hash = Some(current_state_hash);
+    index_entry_mut.cache_dir = Some(new_cache_dir);
+
+    let final_config_arc = Arc::new(final_config);
+    memoizer.insert(uuid, final_config_arc.clone());
+    Ok(final_config_arc)
 }
 
-/// Merges adjacent `Literal` components in a template for optimization.
-fn optimize_literals(template: &mut Vec<TemplateComponent>) {
-    if template.is_empty() {
-        return;
+// --- HASHING ---
+fn get_state_hash(
+    uuid: Uuid,
+    index: &GlobalIndex,
+    memoizer: &mut HashMap<Uuid, String>,
+) -> Result<String> {
+    if let Some(hash) = memoizer.get(&uuid) {
+        return Ok(hash.clone());
     }
-    let mut i = 0;
-    while i < template.len() - 1 {
-        if let (Some(TemplateComponent::Literal(s1)), Some(TemplateComponent::Literal(s2))) =
-            (template.get(i), template.get(i + 1))
-        {
-            let merged = format!("{}{}", s1, s2);
-            template[i] = TemplateComponent::Literal(merged);
-            template.remove(i + 1);
-        } else {
-            i += 1;
-        }
-    }
+
+    let entry = index.projects.get(&uuid).ok_or(ResolverError::UuidNotFound(uuid))?;
+    let parent_hash = if let Some(parent_uuid) = entry.parent {
+        get_state_hash(parent_uuid, index, memoizer)?
+    } else {
+        "root".to_string()
+    };
+
+    let config_path = entry.path.join(".axes").join("axes.toml");
+    let self_toml_hash = if config_path.exists() {
+        cache::calculate_validation_data(&config_path)?.content_hash
+    } else {
+        "empty".to_string()
+    };
+
+    let combined_data = format!("parent:{}|self:{}", parent_hash, self_toml_hash);
+    let state_hash = hex::encode(&blake3::hash(combined_data.as_bytes()).as_bytes()[..16]);
+    memoizer.insert(uuid, state_hash.clone());
+    Ok(state_hash)
 }
 
-pub fn save_config_cache(config: &ResolvedConfig, index: &GlobalIndex) -> ResolverResult<()> {
-    // NOTE: This function is now less critical, as the on-disk cache only stores the `Raw` state.
-    // However, it's good practice to have it in case we reintroduce lazy-writing to the cache.
-    // For now, we can make it a no-op or simply write the current state. We'll write.
-    let entry = index
-        .projects
-        .get(&config.uuid)
-        .ok_or(ResolverError::UuidNotFoundInIndex { uuid: config.uuid })?;
-    let cache_path = entry.path.join(AXES_DIR).join(CONFIG_CACHE_FILENAME);
-    let inheritance_chain = build_inheritance_chain(config.uuid, index)?;
-    let dependencies = get_dependencies_timestamps(&inheritance_chain)?;
-    write_config_cache(&cache_path, config, dependencies)
+// --- MERGING ---
+fn merge_configs(
+    parent_config: Arc<ResolvedConfig>,
+    child_layer: &CachedProjectConfig,
+    child_uuid: Uuid,
+    child_entry: &IndexEntry,
+) -> Result<ResolvedConfig> {
+    let mut merged = Arc::try_unwrap(parent_config).unwrap_or_else(|arc| (*arc).clone());
+    merged.scripts.extend(child_layer.scripts.clone());
+    merged.vars.extend(child_layer.vars.clone());
+    merged.env.extend(child_layer.env.clone());
+    merged.version = child_layer.version.clone().or(merged.version);
+    merged.description = child_layer.description.clone().or(merged.description);
+    merged.options.shell = child_layer.options.shell.clone().or(merged.options.shell);
+    merged.options.cache_dir = child_layer.options.cache_dir.clone().or(merged.options.cache_dir);
+
+    if let Some(at_start_cmd) = child_layer.options.at_start.clone() {
+        merged.options.at_start = Some(compile_command_to_task(at_start_cmd.0)?);
+    }
+    if let Some(at_exit_cmd) = child_layer.options.at_exit.clone() {
+        merged.options.at_exit = Some(compile_command_to_task(at_exit_cmd.0)?);
+    }
+    let compiled_open_with = compile_command_map(child_layer.options.open_with.clone())?;
+    merged.options.open_with.extend(compiled_open_with);
+
+    merged.uuid = child_uuid;
+    merged.project_root = child_entry.path.clone();
+
+    if child_entry.parent.is_none() {
+        merged.qualified_name = child_entry.name.clone();
+    } else {
+        merged.qualified_name = format!("{}/{}", merged.qualified_name, child_entry.name);
+    }
+    Ok(merged)
 }
 
-// --- TASK EXPANSION ENGINE ---
-
-// --- INHERITANCE AND MERGE LOGIC ---
-
-impl Default for ResolvedConfig {
-    fn default() -> Self {
-        Self {
-            uuid: Uuid::nil(),
-            qualified_name: String::new(),
-            project_root: PathBuf::new(),
+// --- LAYER COMPILATION ---
+fn load_and_compile_layer(entry: &IndexEntry) -> Result<CachedProjectConfig> {
+    let config_path = entry.path.join(".axes").join("axes.toml");
+    if !config_path.exists() {
+        // If a project has no axes.toml, it's an empty layer.
+        return Ok(CachedProjectConfig {
+            version: None,
+            description: None,
             scripts: HashMap::new(),
             vars: HashMap::new(),
             env: HashMap::new(),
-            options: ResolvedOptionsConfig::default(),
-            version: None,
-            description: None,
-        }
+            options: OptionsConfig::default(),
+        });
     }
+
+    let content = fs::read_to_string(&config_path)?;
+    let project_config: ProjectConfig = toml::from_str(&content).map_err(|e| ResolverError::TomlParse {
+        path: config_path,
+        source: e,
+    })?;
+
+    let scripts = compile_command_map(project_config.scripts)?;
+    let vars_as_commands: HashMap<String, Command> = project_config
+        .vars
+        .into_iter()
+        .map(|(k, v)| (k, Command::from(v)))
+        .collect();
+    let vars = compile_command_map(vars_as_commands)?;
+
+    Ok(CachedProjectConfig {
+        version: project_config.version,
+        description: project_config.description,
+        scripts,
+        vars,
+        env: project_config.env,
+        options: project_config.options,
+    })
 }
 
-fn build_inheritance_chain(
-    leaf_uuid: Uuid,
-    index: &GlobalIndex,
-) -> ResolverResult<Vec<(&IndexEntry, ProjectConfig)>> {
-    let mut chain = Vec::new();
-    let mut current_uuid_opt = Some(leaf_uuid);
-
-    while let Some(current_uuid) = current_uuid_opt {
-        let entry = index
-            .projects
-            .get(&current_uuid)
-            .ok_or(ResolverError::UuidNotFoundInIndex { uuid: current_uuid })?;
-        let config = load_project_config(entry)?;
-        chain.push((entry, config));
-        current_uuid_opt = entry.parent;
-    }
-    chain.reverse();
-    Ok(chain)
+fn compile_command_map(command_map: HashMap<String, Command>) -> Result<HashMap<String, Task>> {
+    command_map
+        .into_iter()
+        .map(|(name, cmd)| compile_command_to_task(cmd.0).map(|task| (name, task)))
+        .collect()
 }
 
-fn merge_chain_into_config(chain: Vec<ProjectConfig>) -> ResolvedConfig {
-    let mut resolved = ResolvedConfig::default();
-
-    for config in chain {
-        resolved.version = config.version.or(resolved.version);
-        resolved.description = config.description.or(resolved.description);
-        resolved.env.extend(config.env);
-
-        let os = std::env::consts::OS;
-
-        resolved.scripts.extend(
-            config
-                .scripts
-                .into_iter()
-                .map(|(k, v)| (k, flatten_command(v.0, os))),
-        );
-        resolved.vars.extend(config.vars.into_iter().map(|(k, v)| {
-            let cmd = Command(CanonicalCommand {
-                default: Some(Runnable::Single(v)),
-                ..Default::default()
-            });
-            (k, flatten_command(cmd.0, os))
-        }));
-
-        resolved.options.shell = config.options.shell.or(resolved.options.shell);
-        if let Some(cmd) = config.options.at_start {
-            resolved.options.at_start = Some(flatten_command(cmd.0, os));
-        }
-        if let Some(cmd) = config.options.at_exit {
-            resolved.options.at_exit = Some(flatten_command(cmd.0, os));
-        }
-        resolved.options.open_with.extend(
-            config
-                .options
-                .open_with
-                .into_iter()
-                .map(|(k, v)| (k, flatten_command(v.0, os))),
-        );
-        resolved.options.cache_dir_template = config.options.cache_dir.or(resolved.options.cache_dir_template);
-    }
-    resolved
-}
-
-fn flatten_command(cmd: CanonicalCommand, os: &str) -> CacheableValue {
+fn compile_command_to_task(command: CanonicalCommand) -> Result<Task> {
+    let os = std::env::consts::OS;
     let runnable = if os == "windows" {
-        cmd.windows.or(cmd.default)
+        command.windows.or(command.default)
     } else if os == "linux" {
-        cmd.linux.or(cmd.default)
+        command.linux.or(command.default)
     } else if os == "macos" {
-        cmd.macos.or(cmd.default)
+        command.macos.or(command.default)
     } else {
-        cmd.default
+        command.default
     };
 
     let command_lines = match runnable {
@@ -549,215 +224,266 @@ fn flatten_command(cmd: CanonicalCommand, os: &str) -> CacheableValue {
         None => Vec::new(),
     };
 
-    CacheableValue::Raw(FlattenedCommand {
-        command_lines,
-        desc: cmd.desc,
-    })
-}
-
-/// Holds the metadata parsed from the execution prefixes of a command line.
-#[derive(Debug, Default)]
-struct ExecutionMetadata<'a> {
-    ignore_errors: bool,
-    run_in_parallel: bool,
-    silent_mode: bool, // For `@` prefix
-    is_echo: bool,     // For `#` prefix
-    command_text: &'a str,
-}
-
-/// Parses execution prefixes (`-`, `>`, `@`, `#`) from the start of a line efficiently,
-/// following a strict precedence order and handling combinations correctly.
-fn parse_execution_prefixes(line: &str) -> ExecutionMetadata<'_> {
-    let mut metadata = ExecutionMetadata::default();
-    let remainder = line;
-    // --- Rule 1 (Highest Precedence): Check for the '#' echo prefix. ---
-    if let Some(command_text) = remainder.strip_prefix('#') {
-        metadata.is_echo = true;
-        metadata.command_text = command_text.strip_prefix(' ').unwrap_or(command_text);
-        return metadata;
-    }
-
-    // --- Rule 2: If not an echo, parse for a contiguous block of other prefixes. ---
-    let mut current_pos = 0;
-    for (i, char) in remainder.char_indices() {
-        match char {
-            '-' => metadata.ignore_errors = true,
-            '>' => metadata.run_in_parallel = true,
-            '@' => metadata.silent_mode = true,
-            '|' => {
-                // Explicit terminator
-                current_pos = i + 1;
-                break;
-            }
-            _ => {
-                // Not a prefix character, this is the start of the command
-                current_pos = i;
-                break;
-            }
-        }
-        // If we reach the end of the string while parsing prefixes
-        if i == remainder.len() - 1 {
-            current_pos = remainder.len();
-        }
-    }
-
-    metadata.command_text = remainder.get(current_pos..).unwrap_or("").trim_start();
-
-    metadata
-}
-
-// --- CACHE READ/WRITE LOGIC ---
-
-fn load_project_config(entry: &IndexEntry) -> ResolverResult<ProjectConfig> {
-    let config_path = entry.path.join(AXES_DIR).join(PROJECT_CONFIG_FILENAME);
-    if !config_path.is_file() {
-        return Err(ResolverError::ConfigFileNotFound {
-            name: entry.name.clone(),
-            path: config_path.display().to_string(),
-        });
-    }
-    let content = fs::read_to_string(&config_path)?;
-    toml::from_str(&content).map_err(|e| ResolverError::TomlParse {
-        path: config_path.display().to_string(),
-        source: e,
-    })
-}
-
-fn get_dependencies_timestamps(
-    inheritance_chain: &[(&IndexEntry, ProjectConfig)],
-) -> ResolverResult<HashMap<PathBuf, SystemTime>> {
-    inheritance_chain
+    let commands = command_lines
         .iter()
-        .map(|(entry, _)| {
-            let config_path = entry.path.join(AXES_DIR).join(PROJECT_CONFIG_FILENAME);
-            let metadata = fs::metadata(&config_path)?;
-            Ok((config_path, metadata.modified()?))
-        })
-        .collect()
+        .map(|line| expand_line_to_execution(line))
+        .collect::<Result<_>>()?;
+
+    Ok(Task {
+        commands,
+        desc: command.desc,
+    })
 }
 
-fn read_and_validate_config_cache(
-    cache_path: &Path,
-    expected_name: &str,
-) -> ResolverResult<Option<ResolvedConfig>> {
-    if !cache_path.exists() {
-        return Ok(None);
-    }
-    let cached_bytes = match fs::read(cache_path) {
-        Ok(bytes) => bytes,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e.into()),
+fn expand_line_to_execution(line: &str) -> Result<CommandExecution> {
+    let (prefixes, command_text) = parse_prefixes(line);
+    let action = if prefixes.is_echo {
+        CommandAction::Print(tokenize_string(command_text)?)
+    } else {
+        CommandAction::Execute(tokenize_string(command_text)?)
     };
+    Ok(CommandExecution {
+        action,
+        ignore_errors: prefixes.ignore_errors,
+        run_in_parallel: prefixes.run_in_parallel,
+        silent_mode: prefixes.silent_mode,
+    })
+}
 
-    if cached_bytes.is_empty() {
-        return Ok(None);
-    }
-
-    let decode_result: Result<(SerializableConfigCache, usize), _> =
-        bincode::serde::decode_from_slice(&cached_bytes, bincode::config::standard());
-
-    let serializable_cache = match decode_result {
-        Ok((cache, _)) => cache,
-        Err(e) => {
-            if !matches!(e, DecodeError::Io { .. }) {
-                log::warn!(
-                    "Config cache at '{}' is corrupt. Regenerating. (Error: {})",
-                    cache_path.display(),
-                    e
-                );
-                let _ = fs::remove_file(cache_path);
-            }
-            return Ok(None);
+fn tokenize_string(text: &str) -> Result<Vec<TemplateComponent>> {
+    let mut components = Vec::new();
+    let mut last_index = 0;
+    for caps in TOKEN_RE.captures_iter(text) {
+        let full_match = caps.get(0).unwrap();
+        if last_index < full_match.start() {
+            components.push(TemplateComponent::Literal(text[last_index..full_match.start()].to_string()));
         }
-    };
-
-    if serializable_cache.resolved_config.qualified_name != expected_name {
-        log::debug!(
-            "Cache is for a different project name ('{}' vs '{}'). Invalid.",
-            serializable_cache.resolved_config.qualified_name,
-            expected_name
-        );
-        return Ok(None);
-    }
-
-    for (path_str, cached_mod_time_serializable) in serializable_cache.dependencies.iter() {
-        let path = PathBuf::from(path_str);
-        let current_mod_time = match fs::metadata(&path).and_then(|m| m.modified()) {
-            Ok(time) => time,
-            Err(_) => {
-                log::debug!(
-                    "Cache dependency '{}' no longer exists. Cache invalid.",
-                    path.display()
-                );
-                return Ok(None);
+        let content = caps.get(1).unwrap().as_str().trim();
+        let component = if let Some(param_spec) = content.strip_prefix("params::") {
+            TemplateComponent::Parameter(parameters::parse_parameter_token(full_match.as_str(), param_spec)?)
+        } else if content == "params" {
+            TemplateComponent::GenericParams
+        } else if let Some(run_spec) = content.strip_prefix("run") {
+            if let Some(cmd) = run_spec.strip_prefix("('").and_then(|s| s.strip_suffix("')")) {
+                TemplateComponent::Run(RunSpec::Literal(cmd.to_string()))
+            } else {
+                return Err(anyhow!("Invalid run syntax in token: {}", full_match.as_str()));
+            }
+        } else {
+            match content {
+                "path" => TemplateComponent::Path, "name" => TemplateComponent::Name,
+                "uuid" => TemplateComponent::Uuid, "version" => TemplateComponent::Version,
+                s if s.starts_with("scripts::") || s.starts_with("vars::") => {
+                    return Err(anyhow!(
+                        "Inter-script composition ('{}') is not allowed in single-layer compilation. It will be handled by the lazy resolver.",
+                        full_match.as_str()
+                    ));
+                }
+                _ => return Err(anyhow!("Unknown token namespace in: '{}'", full_match.as_str())),
             }
         };
-        let cached_mod_time: SystemTime = (*cached_mod_time_serializable).into();
-        if current_mod_time > cached_mod_time {
-            log::debug!(
-                "Cache dependency '{}' has been modified. Cache invalid.",
-                path.display()
-            );
-            return Ok(None);
-        }
+        components.push(component);
+        last_index = full_match.end();
     }
-    Ok(Some(serializable_cache.resolved_config.into()))
+    if last_index < text.len() {
+        components.push(TemplateComponent::Literal(text[last_index..].to_string()));
+    }
+    Ok(components)
 }
 
-fn write_config_cache(
-    cache_path: &Path,
-    config: &ResolvedConfig,
-    dependencies: HashMap<PathBuf, SystemTime>,
-) -> ResolverResult<()> {
-    let cache_dir = cache_path.parent().unwrap_or_else(|| Path::new("."));
-    if !cache_dir.exists() {
-        fs::create_dir_all(cache_dir)?;
+#[derive(Debug, Default)]
+struct Prefixes {
+    ignore_errors: bool, run_in_parallel: bool,
+    silent_mode: bool, is_echo: bool,
+}
+
+fn parse_prefixes(line: &str) -> (Prefixes, &str) {
+    let mut prefixes = Prefixes::default();
+    if let Some(command_text) = line.strip_prefix('#') {
+        prefixes.is_echo = true;
+        return (prefixes, command_text.strip_prefix(' ').unwrap_or(command_text));
     }
-    let serializable_deps = dependencies
-        .into_iter()
-        .map(|(path, time)| (path.to_string_lossy().into_owned(), time.into()))
-        .collect();
-    let cache_data = SerializableConfigCache {
-        resolved_config: config.into(),
-        dependencies: serializable_deps,
-    };
-    let bytes = bincode::serde::encode_to_vec(cache_data, bincode::config::standard())?;
-    fs::write(cache_path, &bytes)?;
+    let mut current_pos = 0;
+    for (i, char) in line.char_indices() {
+        match char {
+            '-' => prefixes.ignore_errors = true, '>' => prefixes.run_in_parallel = true,
+            '@' => prefixes.silent_mode = true, '|' => { current_pos = i + 1; break; }
+            _ if !char.is_whitespace() => { current_pos = i; break; }
+            _ => (),
+        }
+        if i == line.len() - 1 { current_pos = line.len(); }
+    }
+    (prefixes, line.get(current_pos..).unwrap_or("").trim_start())
+}
+
+// --- CACHE I/O ---
+fn read_cached_layer(path: &Path) -> Result<CachedProjectConfig> {
+    let bytes = fs::read(path).with_context(|| format!("Failed to read cache file at '{}'", path.display()))?;
+    let (cached_layer, _): (CachedProjectConfig, usize) =
+        bincode::serde::decode_from_slice(&bytes, bincode::config::standard())
+            .with_context(|| format!("Failed to deserialize cache file '{}'. It might be corrupt.", path.display()))?;
+    Ok(cached_layer)
+}
+
+fn write_cached_layer(path: &Path, layer: &CachedProjectConfig) -> Result<()> {
+    if let Some(parent_dir) = path.parent() {
+        fs::create_dir_all(parent_dir).with_context(|| format!("Failed to create cache directory '{}'", parent_dir.display()))?;
+    }
+    let bytes = bincode::serde::encode_to_vec(layer, bincode::config::standard()).context("Failed to serialize cache layer.")?;
+    fs::write(path, &bytes).with_context(|| format!("Failed to write cache file to '{}'", path.display()))?;
     Ok(())
 }
 
-// ---MARK: HELPERS to access fields in ResolvedConfig ---
 
-/// Retrieves an immutable reference to a `CacheableValue` from the correct map in `ResolvedConfig`.
-/// This function centralizes the logic for finding any script-like or var-like value.
-fn get_cacheable_value<'a>(
-    config: &'a ResolvedConfig,
-    key: &str,
-    kind: ValueKind,
-) -> Result<Option<&'a CacheableValue>> {
-    let cacheable = match kind {
-        ValueKind::Variable => config.vars.get(key),
-        ValueKind::Script => config.scripts.get(key),
-        ValueKind::OpenWith => config.options.open_with.get(key),
-        ValueKind::Hook(Hook::AtStart) => config.options.at_start.as_ref(),
-        ValueKind::Hook(Hook::AtExit) => config.options.at_exit.as_ref(),
-    };
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{Command, OptionsConfig, ProjectConfig, ResolvedConfig};
+    use std::fs;
+    use tempfile::tempdir;
+    use uuid::Uuid;
 
-    Ok(cacheable)
-}
+    // --- TEST HELPER: Creates a temporary project structure ---
+    fn setup_test_project(
+        dir: &Path,
+        toml_content: &str,
+    ) -> IndexEntry {
+        let axes_dir = dir.join(".axes");
+        fs::create_dir_all(&axes_dir).unwrap();
+        fs::write(axes_dir.join("axes.toml"), toml_content).unwrap();
 
-/// Retrieves a mutable reference to a `CacheableValue` from the correct map in `ResolvedConfig`.
-fn get_cacheable_value_mut<'a>(
-    config: &'a mut ResolvedConfig,
-    key: &str,
-    kind: ValueKind,
-) -> Result<Option<&'a mut CacheableValue>> {
-    let cacheable = match kind {
-        ValueKind::Variable => config.vars.get_mut(key),
-        ValueKind::Script => config.scripts.get_mut(key),
-        ValueKind::OpenWith => config.options.open_with.get_mut(key),
-        ValueKind::Hook(Hook::AtStart) => config.options.at_start.as_mut(),
-        ValueKind::Hook(Hook::AtExit) => config.options.at_exit.as_mut(),
-    };
-    Ok(cacheable)
+        IndexEntry {
+            name: dir.file_name().unwrap().to_str().unwrap().to_string(),
+            path: dir.to_path_buf(),
+            parent: None,
+            config_hash: None,
+            cache_dir: None,
+            last_used_child: None,
+        }
+    }
+
+    // --- TESTS FOR `load_and_compile_layer` ---
+    
+    #[test]
+    fn test_load_and_compile_simple_layer() {
+        // --- Setup ---
+        let dir = tempdir().unwrap();
+        let toml = r#"
+            version = "1.0.0"
+            description = "A test project"
+
+            [scripts]
+            hello = "echo 'Hello'"
+
+            [vars]
+            my_var = "World"
+        "#;
+        let entry = setup_test_project(dir.path(), toml);
+
+        // --- Execute ---
+        let result = load_and_compile_layer(&entry);
+
+        // --- Assert ---
+        assert!(result.is_ok());
+        let layer = result.unwrap();
+
+        assert_eq!(layer.version, Some("1.0.0".to_string()));
+        assert_eq!(layer.description, Some("A test project".to_string()));
+        assert!(layer.scripts.contains_key("hello"));
+        assert!(layer.vars.contains_key("my_var"));
+
+        // Check if the script was compiled to a Task
+        let hello_task = layer.scripts.get("hello").unwrap();
+        assert_eq!(hello_task.commands.len(), 1);
+        match &hello_task.commands[0].action {
+            CommandAction::Execute(template) => {
+                assert_eq!(template.len(), 1);
+                match &template[0] {
+                    TemplateComponent::Literal(s) => assert_eq!(s, "echo 'Hello'"),
+                    _ => panic!("Expected a literal component"),
+                }
+            }
+            _ => panic!("Expected an Execute action"),
+        }
+    }
+    
+    // --- TESTS FOR `merge_configs` ---
+
+    #[test]
+    fn test_merge_configs_child_overrides_parent() {
+        // --- Setup ---
+        // Parent config
+        let parent_config = Arc::new(ResolvedConfig {
+            version: Some("1.0.0".to_string()),
+            qualified_name: "parent".to_string(),
+            scripts: HashMap::from([(
+                "common".to_string(),
+                Task { desc: Some("from parent".to_string()), ..Default::default() },
+            )]),
+            ..Default::default()
+        });
+
+        // Child layer
+        let child_layer = CachedProjectConfig {
+            version: Some("2.0.0".to_string()), // Override
+            scripts: HashMap::from([(
+                "child_script".to_string(),
+                Task::default(),
+            )]),
+            ..Default::default()
+        };
+        
+        let child_uuid = Uuid::new_v4();
+        let child_entry = IndexEntry {
+            name: "child".to_string(),
+            path: PathBuf::from("/child"),
+            parent: Some(Uuid::new_v4()), // Dummy parent UUID
+            ..Default::default()
+        };
+
+        // --- Execute ---
+        let result = merge_configs(parent_config, &child_layer, child_uuid, &child_entry);
+
+        // --- Assert ---
+        assert!(result.is_ok());
+        let merged = result.unwrap();
+
+        // Child's version overrides parent's
+        assert_eq!(merged.version, Some("2.0.0".to_string()));
+        // Scripts from both parent and child are present
+        assert!(merged.scripts.contains_key("common"));
+        assert!(merged.scripts.contains_key("child_script"));
+        // Qualified name is correctly constructed
+        assert_eq!(merged.qualified_name, "parent/child");
+        // UUID is correctly set
+        assert_eq!(merged.uuid, child_uuid);
+    }
+    
+    // --- TESTS FOR `get_state_hash` (Placeholder - requires more complex setup) ---
+
+    #[test]
+    fn test_get_state_hash_single_node() {
+        // This test ensures the basic hashing works for a root project.
+        let dir = tempdir().unwrap();
+        let toml = "[scripts]\nkey = 'val'";
+        let mut entry = setup_test_project(dir.path(), toml);
+        entry.parent = None; // Explicitly a root
+
+        let mut index = GlobalIndex::default();
+        let uuid = Uuid::new_v4();
+        index.projects.insert(uuid, entry);
+        
+        let mut memoizer = HashMap::new();
+        let result = get_state_hash(uuid, &index, &mut memoizer);
+
+        assert!(result.is_ok());
+        let hash = result.unwrap();
+
+        // We expect a hash of (parent:"root" + self:hash(toml))
+        let self_hash = cache::calculate_validation_data(&dir.path().join(".axes/axes.toml")).unwrap().content_hash;
+        let combined = format!("parent:root|self:{}", self_hash);
+        let expected_hash = hex::encode(&blake3::hash(combined.as_bytes()).as_bytes()[..16]);
+
+        assert_eq!(hash, expected_hash);
+    }
 }

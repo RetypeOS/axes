@@ -5,7 +5,7 @@ use colored::*;
 use dialoguer::{Confirm, theme::ColorfulTheme};
 
 use super::commons;
-use crate::core::index_manager;
+use crate::{core::index_manager, models::GlobalIndex};
 
 use clap::Parser;
 
@@ -17,7 +17,7 @@ struct RenameArgs {
 }
 
 /// The main handler for the `rename` command.
-pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
     // 1. Parse args.
     let rename_args = RenameArgs::try_parse_from(&args)?;
     let context_str =

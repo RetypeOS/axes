@@ -1,9 +1,10 @@
-// src/cli/handlers/info.rs
+// EN: src/cli/handlers/info.rs
 
 use crate::{
     cli::handlers::commons,
     constants::{AXES_DIR, PROJECT_CONFIG_FILENAME},
-    models::{CacheableValue, CommandAction, ResolvedConfig, TemplateComponent},
+    // FIX: Removed `CacheableValue` and added `GlobalIndex` to the import list.
+    models::{CommandAction, GlobalIndex, ResolvedConfig, TemplateComponent},
 };
 use anyhow::Result;
 use clap::Parser;
@@ -19,19 +20,16 @@ struct InfoArgs {
 
 /// The main handler for the `info` command.
 /// Displays detailed information about the resolved project configuration.
-pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
-    // 1. The handler first validates that it received the context it needs.
-    let context_str = context.unwrap_or(".".to_string());
-    //.ok_or_else(|| anyhow!(t!("error.context_required")))?;
-
-    // 2. It parses its OWN arguments from the `args` vector.
+// FIX: The signature now correctly uses the passed `index` mutable reference.
+pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
+    // 1. Parse this handler's specific arguments.
     let _info_args = InfoArgs::try_parse_from(&args)?;
 
-    // 3. Load index and resolve configuration using the provided context.
-    let mut index = crate::core::index_manager::load_and_ensure_global_project()?;
-    let config = commons::resolve_config_and_update_index_if_needed(Some(context_str), &mut index)?;
+    // 2. Resolve configuration using the new central helper function.
+    //    `context` is passed directly. If it's `None`, the helper defaults to `.`
+    let config = commons::resolve_config_for_context(context, index)?;
 
-    // 3. Print all sections.
+    // 3. Print all sections using the resolved config.
     print_metadata(&config);
     print_scripts(&config);
     print_variables(&config, "vars", t!("info.label.vars"));
@@ -60,6 +58,8 @@ fn print_metadata(config: &ResolvedConfig) {
         t!("info.label.root_path").blue(),
         config.project_root.display()
     );
+    // Note: This path might be misleading if the project has no axes.toml,
+    // but it's consistent behavior. We can refine this later if needed.
     println!(
         "  {:<15} {}",
         t!("info.label.config_file").blue(),
@@ -86,21 +86,17 @@ fn print_scripts(config: &ResolvedConfig) {
     cmd_names.sort();
 
     for cmd_name in cmd_names {
-        if let Some(cacheable_value) = config.scripts.get(cmd_name) {
-            print!("    - {}", cmd_name.cyan());
+        // `get` is guaranteed to return Some within this loop.
+        let task = config.scripts.get(cmd_name).unwrap();
+        
+        print!("    - {}", cmd_name.cyan());
 
-            let description = match cacheable_value {
-                CacheableValue::Raw(fc) => fc.desc.as_deref(),
-                CacheableValue::Expanded(task) => task.desc.as_deref(),
-            };
-
-            if let Some(d) = description
-                && !d.trim().is_empty()
-            {
+        if let Some(d) = &task.desc {
+            if !d.trim().is_empty() {
                 print!(": {}", d.dimmed());
             }
-            println!();
         }
+        println!();
     }
 }
 
@@ -114,45 +110,33 @@ fn print_variables(config: &ResolvedConfig, key: &str, title: &str) {
         let mut sorted_keys: Vec<_> = config.vars.keys().collect();
         sorted_keys.sort();
         for k in sorted_keys {
-            if let Some(val) = config.vars.get(k) {
-                let display_val = match val {
-                    CacheableValue::Raw(fc) => {
-                        // For a var, `command_lines` will have a single entry.
-                        fc.command_lines.join(" && ")
-                    }
-                    CacheableValue::Expanded(task) => {
-                        // This case is unlikely for a var, but we handle it.
-                        // We show a flattened representation.
-                        task.commands
+            if let Some(task) = config.vars.get(k) {
+                // Render the task's AST back into a representative string.
+                let display_val = task
+                    .commands
+                    .iter()
+                    .map(|cmd| {
+                        let template = match &cmd.action {
+                            CommandAction::Execute(t) | CommandAction::Print(t) => t,
+                        };
+                        template
                             .iter()
-                            .map(|cmd| {
-                                let template = match &cmd.action {
-                                    CommandAction::Execute(t) | CommandAction::Print(t) => t,
-                                };
-                                template
-                                    .iter()
-                                    .map(|c| match c {
-                                        TemplateComponent::Literal(s) => s.clone(),
-                                        TemplateComponent::Parameter(p) => p.original_token.clone(),
-                                        TemplateComponent::GenericParams => {
-                                            "<axes::params>".to_string()
-                                        }
-                                        TemplateComponent::Run(spec) => match spec {
-                                            crate::models::RunSpec::Literal(cmd) => {
-                                                format!("<axes::run('{}')>", cmd)
-                                            }
-                                        },
-                                        TemplateComponent::Path => "<axes::path>".to_string(),
-                                        TemplateComponent::Name => "<axes::name>".to_string(),
-                                        TemplateComponent::Uuid => "<axes::uuid>".to_string(),
-                                        TemplateComponent::Version => "<axes::version>".to_string(),
-                                    })
-                                    .collect::<String>()
+                            .map(|c| match c {
+                                TemplateComponent::Literal(s) => s.clone(),
+                                TemplateComponent::Parameter(p) => p.original_token.clone(),
+                                TemplateComponent::GenericParams => "<axes::params>".to_string(),
+                                TemplateComponent::Run(spec) => match spec {
+                                    crate::models::RunSpec::Literal(cmd) => format!("<axes::run('{}')>", cmd),
+                                },
+                                TemplateComponent::Path => "<axes::path>".to_string(),
+                                TemplateComponent::Name => "<axes::name>".to_string(),
+                                TemplateComponent::Uuid => "<axes::uuid>".to_string(),
+                                TemplateComponent::Version => "<axes::version>".to_string(),
                             })
-                            .collect::<Vec<_>>()
-                            .join(" && ")
-                    }
-                };
+                            .collect::<String>()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" && ");
                 println!(
                     "    - {} = {}",
                     k.cyan(),

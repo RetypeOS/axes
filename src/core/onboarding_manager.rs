@@ -154,12 +154,12 @@ fn handle_registration_with_ref(
             .interact_text()?;
     }
 
-    // 4. Register/Update in the index
     let final_entry = IndexEntry {
         name: pref.name.clone(),
         path: project_root.clone(),
         parent: pref.parent_uuid,
-        cache_path: None,
+        config_hash: None,
+        cache_dir: None,
         last_used_child: None,
     };
     index.projects.insert(pref.self_uuid, final_entry);

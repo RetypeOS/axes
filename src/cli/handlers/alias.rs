@@ -6,7 +6,7 @@ use colored::*;
 use dialoguer::{Confirm, console::measure_text_width, theme::ColorfulTheme};
 use std::env;
 
-use crate::core::{context_resolver, index_manager};
+use crate::{core::{context_resolver, index_manager}, models::GlobalIndex};
 
 #[derive(Parser, Debug)]
 #[command(no_binary_name = true)]
@@ -35,14 +35,13 @@ enum AliasCommand {
     },
 }
 
-pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
     if env::var("AXES_PROJECT_UUID").is_ok() {
         return Err(anyhow!(t!("alias.error.not_in_session")));
     }
     context.ok_or_else(|| anyhow!(t!("error.dont_use_any_context")))?;
 
     let alias_args = AliasArgs::try_parse_from(&args)?;
-    let mut index = index_manager::load_and_ensure_global_project()?;
 
     match alias_args.command.unwrap_or(AliasCommand::List) {
         AliasCommand::Set { name, context } => {
@@ -61,8 +60,8 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
                 }
             }
 
-            let (target_uuid, target_name) = context_resolver::resolve_context(&context, &mut index)?;
-            index_manager::set_alias(&mut index, clean_name.clone(), target_uuid);
+            let (target_uuid, target_name) = context_resolver::resolve_context(&context, index)?;
+            index_manager::set_alias(index, clean_name.clone(), target_uuid);
             index_manager::save_global_index(&index)?;
 
             println!(
@@ -117,7 +116,7 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
                 }
             }
 
-            if index_manager::remove_alias(&mut index, &clean_name) {
+            if index_manager::remove_alias(index, &clean_name) {
                 index_manager::save_global_index(&index)?;
                 println!(
                     "{} {}",

@@ -1,6 +1,6 @@
 [package]
 name = "axes"
-version = "0.2.2-Beta"
+version = "0.2.3-Beta-EXPERIMENTAL"
 edition = "2024"
 license = "MIT"
 
@@ -41,7 +41,8 @@ uuid = { version = "1.18.1", features = ["v4", "serde"] }
 # Asynchronous Runtime
 tokio = { version = "1.47.1", features = ["rt-multi-thread", "process", "signal", "macros"] }
 shellexpand = "3.1.1"
-
+blake3 = "1.8.2"
+hex = "0.4.3"
 
 [build-dependencies]
 toml = "0.9.5"

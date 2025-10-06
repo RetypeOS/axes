@@ -3,12 +3,12 @@
 // This module contains shared functions used by multiple handlers.
 
 use anyhow::{Result, anyhow};
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, sync::Arc};
 use uuid::Uuid;
 
 use crate::{
     core::{
-        config_resolver::{self, ConfigResolutionResult}, context_resolver,
+        config_resolver::{self}, context_resolver,
         index_manager::{self},
     },
     models::{GlobalIndex, IndexEntry, ResolvedConfig},
@@ -25,6 +25,30 @@ pub struct UnregisterPlan {
     pub uuids_to_remove: Vec<Uuid>,
     pub reparent_warnings: Vec<String>,
     pub summary_lines: Vec<String>,
+}
+
+/// The new main helper to resolve configuration for a project.
+/// It orchestrates the entire recursive, cache-aware resolution and ensures
+/// the index is updated if necessary.
+pub fn resolve_config_for_context(
+    context_str: Option<String>,
+    index: &mut GlobalIndex,
+) -> Result<ResolvedConfig> {
+    // 1. Resolve context string to a canonical UUID. This also updates `last_used` caches.
+    let final_context_str = context_str.unwrap_or_else(|| ".".to_string());
+    let (uuid, _qualified_name) = context_resolver::resolve_context(&final_context_str, index)?;
+
+    // 2. Call the new top-level resolver.
+    // The memoizer is created here for a single command execution lifespan.
+    let mut memoizer = HashMap::new();
+    let resolved_config_arc = config_resolver::resolve_config(uuid, index, &mut memoizer)?;
+
+    // 3. Convert from Arc to an owned value for the handler to use.
+    // This is efficient as it will move the value if it's the last strong reference.
+    let resolved_config = Arc::try_unwrap(resolved_config_arc)
+        .unwrap_or_else(|arc| (*arc).clone());
+    
+    Ok(resolved_config)
 }
 
 /// Prepares a plan for unregistering projects. This function is a "dry run"
@@ -167,50 +191,26 @@ fn check_reparent_collisions(
 //    })
 //}
 
-/// The new main helper to resolve configuration for a project.
-/// It handles the entire flow, including updating the global index if the
-/// project's cache path has changed.
 pub fn resolve_config_and_update_index_if_needed(
     context_str: Option<String>,
     index: &mut GlobalIndex,
 ) -> Result<ResolvedConfig> {
     // 1. Resolve context to a canonical UUID.
-    // Note: The `resolve_context` call itself doesn't need a mutable index.
     let final_context_str = context_str.unwrap_or_else(|| ".".to_string());
-    let (uuid, qualified_name) = context_resolver::resolve_context(&final_context_str, index)?;
+    // The `resolve_context` call now needs a mutable index.
+    let (uuid, _qualified_name) = context_resolver::resolve_context(&final_context_str, index)?;
 
-    // 2. After successful resolution, we update the `last_used` caches.
-    // This is the "write" part of the operation.
-    context_resolver::update_last_used_caches(uuid, index)?;
+    // --- NEW FLOW ---
+    // For Phase 1, we create the memoizer here. In the future, this might live higher up.
+    let mut memoizer = HashMap::new();
 
-    // 3. Call the config resolver to get config and potential new cache path.
-    let ConfigResolutionResult { config, new_cache_path } =
-        config_resolver::resolve_config_for_uuid(uuid, qualified_name, index)?;
-
-    // 4. If the cache path changed, update the index entry.
-    let index_dirty = if let Some(path) = new_cache_path {
-        if let Some(entry) = index.projects.get_mut(&uuid) {
-            entry.cache_path = Some(path);
-            true
-        } else {
-            false
-        }
-    } else {
-        false
-    };
+    // Call the new top-level resolver.
+    let resolved_config_arc = config_resolver::resolve_config(uuid, index, &mut memoizer)?;
     
-    // We set index_dirty also if last_used caches were updated.
-    // For simplicity, we can just check if any last_used_child field is not None,
-    // but a more robust check would compare before/after states. For now, we assume
-    // any context resolution might dirty the index.
-    //index_dirty = true; // Assume dirty for now to ensure saves.
-
-    // 5. Save the index to disk if any part of it was modified.
-    if index_dirty {
-        index_manager::save_global_index(index)?;
-    }
-
-    Ok(config)
+    // The logic of saving the index if it's dirty will be handled by a higher-level caller (e.g., `main`).
+    // This function's responsibility is just to resolve.
+    
+    Ok(Arc::try_unwrap(resolved_config_arc).unwrap_or_else(|arc| (*arc).clone()))
 }
 
 /// Interactive, multi-modal parent selector.

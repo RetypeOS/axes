@@ -1,9 +1,9 @@
 // EN: src/cli/handlers/debug_cache.rs
 
 use crate::{
-    constants::{AXES_DIR, CONFIG_CACHE_FILENAME},
+    constants::{AXES_DIR},
     core::{context_resolver, index_manager},
-    models::SerializableConfigCache,
+    models::{CachedProjectConfig, GlobalIndex},
 };
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
@@ -28,7 +28,7 @@ struct CacheArgs {
 
 /// The main handler for the `_cache` command.
 /// It now expects the context from the dispatcher and parses only its own subcommands.
-pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
     // 1. The handler requires an explicit context.
     let context_str = context
         .ok_or_else(|| anyhow!("The '_cache' command requires an explicit project context."))?;
@@ -36,11 +36,12 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
     // 2. Parse the specific subcommands for `_cache`.
     let cache_args = CacheArgs::try_parse_from(&args)?;
 
-    // 3. Resolve the project entry from the context.
-    let mut index = index_manager::load_and_ensure_global_project()?;
-    let (uuid, _) = context_resolver::resolve_context(&context_str, &mut index)?;
     let project = index.projects.get(&uuid).unwrap();
-    let cache_path = project.path.join(AXES_DIR).join(CONFIG_CACHE_FILENAME);
+    let cache_dir = project.cache_dir.as_ref()
+        .ok_or_else(|| anyhow!("Project '{}' has no resolved cache directory.", context_str))?;
+    let cache_hash = project.config_hash.as_ref()
+        .ok_or_else(|| anyhow!("Project '{}' has no resolved config hash.", context_str))?;
+    let cache_path = cache_dir.join(cache_hash);
 
     // 4. Execute logic based on the subcommand.
     match cache_args.command {
@@ -62,7 +63,7 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
                 return Ok(());
             }
 
-            let (cache_data, _): (SerializableConfigCache, usize) =
+            let (cache_data, _): (CachedProjectConfig, usize) =
                 bincode::serde::decode_from_slice(&bytes, bincode::config::standard())
                     .context("Failed to deserialize cache file. It might be corrupt.")?;
 
@@ -73,15 +74,17 @@ pub fn handle(context: Option<String>, args: Vec<String>) -> Result<()> {
             println!("{}", json_output);
         }
         CacheSubcommand::Clear => {
+            // This now clears the object file. We can also add a command to clear the whole dir.
             if cache_path.exists() {
                 fs::remove_file(&cache_path)?;
+                // Also clear the hash from the index so it gets regenerated.
+                if let Some(entry) = index.projects.get_mut(&uuid) {
+                    entry.config_hash = None;
+                    entry.cache_dir = None; // Force re-resolution of path too
+                }
+                index_manager::save_global_index(index)?;
                 println!(
                     "✅ Successfully cleared cache for project '{}'.",
-                    context_str
-                );
-            } else {
-                println!(
-                    "- Cache for project '{}' did not exist. Nothing to do.",
                     context_str
                 );
             }
