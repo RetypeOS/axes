@@ -108,7 +108,7 @@ pub fn handle(_context: Option<String>, args: Vec<String>, index: &mut GlobalInd
             PROJECT_REF_FILENAME
         )
     })?;
-    
+
     // 4.3. The updated global index will be saved by `main` at the end of execution.
     // No need to save it here explicitly.
 

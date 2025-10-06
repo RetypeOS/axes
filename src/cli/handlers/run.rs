@@ -24,7 +24,11 @@ pub fn parse_script_path(full_path: &str) -> (Option<&str>, &str) {
 /// It receives a normalized context and the script name as the first argument,
 /// then orchestrates the lazy execution of the corresponding task.
 ///
-pub fn handle(context: Option<String>, mut args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
+pub fn handle(
+    context: Option<String>,
+    mut args: Vec<String>,
+    index: &mut GlobalIndex,
+) -> Result<()> {
     // 1. The dispatcher guarantees that the script name is the first argument.
     if args.is_empty() {
         return Err(anyhow!(
@@ -40,13 +44,15 @@ pub fn handle(context: Option<String>, mut args: Vec<String>, index: &mut Global
     // 3. Lazily get the top-level task for the requested script.
     //    We initialize a fresh call_stack here for the execution flow.
     let mut call_stack = HashSet::new();
-    let task = config.get_script(&script_name, index, &mut call_stack)?.ok_or_else(|| {
-        anyhow!(
-            "Script '{}' not found in project '{}'.",
-            script_name.cyan(),
-            config.qualified_name.yellow()
-        )
-    })?;
+    let task = config
+        .get_script(&script_name, index, &mut call_stack)?
+        .ok_or_else(|| {
+            anyhow!(
+                "Script '{}' not found in project '{}'.",
+                script_name.cyan(),
+                config.qualified_name.yellow()
+            )
+        })?;
 
     if task.commands.is_empty() {
         println!("{}", "Script is empty. Nothing to execute.".yellow());
@@ -59,7 +65,9 @@ pub fn handle(context: Option<String>, mut args: Vec<String>, index: &mut Global
         .iter()
         .flat_map(|cmd| match &cmd.action {
             // Cloned is needed as we need to own the ParameterDef
-            CommandAction::Execute(t) | CommandAction::Print(t) => t.iter().cloned().collect::<Vec<_>>(),
+            CommandAction::Execute(t) | CommandAction::Print(t) => {
+                t.iter().cloned().collect::<Vec<_>>()
+            }
         })
         .filter_map(|component| match component {
             TemplateComponent::Parameter(def) => Some(def),

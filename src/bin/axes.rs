@@ -5,8 +5,12 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use axes::{
     cli::{
-        handlers::{self, run::parse_script_path}, Cli
-    }, core::index_manager, models::GlobalIndex, system::executor
+        Cli,
+        handlers::{self, run::parse_script_path},
+    },
+    core::index_manager,
+    models::GlobalIndex,
+    system::executor,
 };
 use clap::Parser;
 use colored::*;
@@ -15,7 +19,8 @@ use lazy_static::lazy_static;
 // Use a thread-safe global static for the index.
 lazy_static! {
     static ref GLOBAL_INDEX: Arc<Mutex<GlobalIndex>> = {
-        let index = index_manager::load_and_ensure_global_project().expect("Failed to load global index.");
+        let index =
+            index_manager::load_and_ensure_global_project().expect("Failed to load global index.");
         Arc::new(Mutex::new(index))
     };
 }
@@ -144,7 +149,11 @@ fn main() {
     let index_final_state = GLOBAL_INDEX.lock().unwrap();
     if *index_final_state != index_initial_state {
         if let Err(e) = index_manager::save_global_index(&index_final_state) {
-            eprintln!("\n{}: Failed to save updated global index: {}", "Critical Error".red().bold(), e);
+            eprintln!(
+                "\n{}: Failed to save updated global index: {}",
+                "Critical Error".red().bold(),
+                e
+            );
             std::process::exit(1);
         }
         log::debug!("Global index was modified and has been saved.");

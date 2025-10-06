@@ -78,9 +78,13 @@ pub fn launch_session(
         task.commands
             .iter()
             .map(|cmd| match &cmd.action {
-                CommandAction::Execute(template) => {
-                    task_executor::assemble_final_command(template, config, resolver, index, &mut call_stack)
-                }
+                CommandAction::Execute(template) => task_executor::assemble_final_command(
+                    template,
+                    config,
+                    resolver,
+                    index,
+                    &mut call_stack,
+                ),
                 CommandAction::Print(_) => Ok(String::new()), // Ignored in init scripts
             })
             .collect::<Result<Vec<String>>>()?
@@ -95,9 +99,13 @@ pub fn launch_session(
     let temp_script_path = temp_script_file.with_extension(script_extension);
 
     // This function now lazily gets the environment variables.
-    let script_content = build_init_script(config, &at_start_final_commands, is_windows_shell, index)?;
+    let script_content =
+        build_init_script(config, &at_start_final_commands, is_windows_shell, index)?;
     fs::write(&temp_script_path, &script_content)?;
-    log::debug!("Temporary init script created at: {}", temp_script_path.display());
+    log::debug!(
+        "Temporary init script created at: {}",
+        temp_script_path.display()
+    );
 
     // 4. Spawn the interactive shell process.
     println!(
@@ -219,7 +227,11 @@ fn generate_default_shells_config() -> ShellsConfig {
             );
         }
     }
-    let bash_path_str = if cfg!(target_os = "windows") { "bash.exe" } else { "bash" };
+    let bash_path_str = if cfg!(target_os = "windows") {
+        "bash.exe"
+    } else {
+        "bash"
+    };
     if is_executable_in_path(bash_path_str) {
         shells.insert(
             "bash".to_string(),
@@ -244,5 +256,9 @@ fn is_executable_in_path(executable_name: &str) -> bool {
 }
 
 fn get_default_shell_name() -> &'static str {
-    if cfg!(target_os = "windows") { "cmd" } else { "bash" }
+    if cfg!(target_os = "windows") {
+        "cmd"
+    } else {
+        "bash"
+    }
 }

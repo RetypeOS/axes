@@ -60,12 +60,14 @@ pub fn handle(_context: Option<String>, args: Vec<String>, index: &mut GlobalInd
     };
 
     // `register_project` will mutate the `index` passed to it.
-    onboarding_manager::register_project(&path_to_register, index, &options).with_context(|| {
-        anyhow!(
-            t!("register.error.failed"),
-            path = path_to_register.display()
-        )
-    })?;
+    onboarding_manager::register_project(&path_to_register, index, &options).with_context(
+        || {
+            anyhow!(
+                t!("register.error.failed"),
+                path = path_to_register.display()
+            )
+        },
+    )?;
 
     // FIX: The saving of the index is now handled by `main`. We remove the explicit save.
     // index_manager::save_global_index(&index)?;
@@ -84,7 +86,7 @@ pub fn handle(_context: Option<String>, args: Vec<String>, index: &mut GlobalInd
             .find(|(_, entry)| entry.path == path_to_register)
         {
             println!("\nProject structure registered:");
-            
+
             let display_options = DisplayOptions {
                 show_paths: false,
                 show_uuids: false,

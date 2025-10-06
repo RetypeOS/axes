@@ -4,8 +4,8 @@ use crate::{
     core::{cache, parameters, paths},
     models::{
         CachedProjectConfig, CanonicalCommand, Command, CommandAction, CommandExecution,
-        GlobalIndex, IndexEntry, OptionsConfig, ProjectConfig, ResolvedConfig,
-        Runnable, RunSpec, Task, TemplateComponent,
+        GlobalIndex, IndexEntry, OptionsConfig, ProjectConfig, ResolvedConfig, RunSpec, Runnable,
+        Task, TemplateComponent,
     },
 };
 use anyhow::{Context, Result, anyhow};
@@ -54,10 +54,11 @@ fn load_and_compile_layer(entry: &IndexEntry) -> Result<CachedProjectConfig> {
     }
 
     let content = fs::read_to_string(&config_path)?;
-    let project_config: ProjectConfig = toml::from_str(&content).map_err(|e| ResolverError::TomlParse {
-        path: config_path,
-        source: e,
-    })?;
+    let project_config: ProjectConfig =
+        toml::from_str(&content).map_err(|e| ResolverError::TomlParse {
+            path: config_path,
+            source: e,
+        })?;
 
     let scripts = compile_command_map(project_config.scripts)?;
     let vars_as_commands: HashMap<String, Command> = project_config
@@ -92,10 +93,13 @@ pub fn resolve_config(
 pub fn load_layer_for_uuid(
     uuid: Uuid,
     index: &mut GlobalIndex,
-) -> Result<Arc<CachedProjectConfig>> { // FIX: Corrected typo `CachedProject-Config`
+) -> Result<Arc<CachedProjectConfig>> {
+    // FIX: Corrected typo `CachedProject-Config`
     log::debug!("Loading layer for UUID: {}", uuid);
-    
-    let entry = index.projects.get(&uuid)
+
+    let entry = index
+        .projects
+        .get(&uuid)
         .ok_or_else(|| anyhow!("Project UUID {} not found in index.", uuid))?
         .clone();
 
@@ -118,11 +122,14 @@ pub fn load_layer_for_uuid(
 
     log::debug!("Cache MISS for layer '{}'. Recompiling.", entry.name);
     let new_layer = load_and_compile_layer(&entry)?;
-    
+
     // NOTE: This cache_dir resolution is temporary for Phase 1.
     // In Phase 2, this will be determined by resolving the parent's config first.
     let cache_dir = entry.cache_dir.clone().unwrap_or_else(|| {
-        paths::get_axes_config_dir().unwrap().join("cache").join("projects")
+        paths::get_axes_config_dir()
+            .unwrap()
+            .join("cache")
+            .join("projects")
     });
 
     let new_cache_file_path = cache_dir.join(&current_toml_hash);
@@ -131,11 +138,13 @@ pub fn load_layer_for_uuid(
     let index_entry_mut = index.projects.get_mut(&uuid).unwrap();
     index_entry_mut.config_hash = Some(current_toml_hash);
     index_entry_mut.cache_dir = Some(cache_dir);
-    
+
     Ok(Arc::new(new_layer))
 }
 
-pub(crate) fn compile_command_map(command_map: HashMap<String, Command>) -> Result<HashMap<String, Task>> {
+pub(crate) fn compile_command_map(
+    command_map: HashMap<String, Command>,
+) -> Result<HashMap<String, Task>> {
     command_map
         .into_iter()
         .map(|(name, cmd)| compile_command_to_task(cmd.0).map(|task| (name, task)))
@@ -192,18 +201,29 @@ fn tokenize_string(text: &str) -> Result<Vec<TemplateComponent>> {
     for caps in TOKEN_RE.captures_iter(text) {
         let full_match = caps.get(0).unwrap();
         if last_index < full_match.start() {
-            components.push(TemplateComponent::Literal(text[last_index..full_match.start()].to_string()));
+            components.push(TemplateComponent::Literal(
+                text[last_index..full_match.start()].to_string(),
+            ));
         }
         let content = caps.get(1).unwrap().as_str().trim();
         let component = if let Some(param_spec) = content.strip_prefix("params::") {
-            TemplateComponent::Parameter(parameters::parse_parameter_token(full_match.as_str(), param_spec)?)
+            TemplateComponent::Parameter(parameters::parse_parameter_token(
+                full_match.as_str(),
+                param_spec,
+            )?)
         } else if content == "params" {
             TemplateComponent::GenericParams
         } else if let Some(run_spec) = content.strip_prefix("run") {
-            if let Some(cmd) = run_spec.strip_prefix("('").and_then(|s| s.strip_suffix("')")) {
+            if let Some(cmd) = run_spec
+                .strip_prefix("('")
+                .and_then(|s| s.strip_suffix("')"))
+            {
                 TemplateComponent::Run(RunSpec::Literal(cmd.to_string()))
             } else {
-                return Err(anyhow!("Invalid run syntax in token: {}", full_match.as_str()));
+                return Err(anyhow!(
+                    "Invalid run syntax in token: {}",
+                    full_match.as_str()
+                ));
             }
         } else {
             // Static tokens and NEW symbolic references
@@ -212,7 +232,7 @@ fn tokenize_string(text: &str) -> Result<Vec<TemplateComponent>> {
                 "name" => TemplateComponent::Name,
                 "uuid" => TemplateComponent::Uuid,
                 "version" => TemplateComponent::Version,
-                
+
                 // FIX: Instead of erroring, create symbolic components.
                 s if s.starts_with("scripts::") => {
                     TemplateComponent::Script(s.strip_prefix("scripts::").unwrap().to_string())
@@ -220,8 +240,13 @@ fn tokenize_string(text: &str) -> Result<Vec<TemplateComponent>> {
                 s if s.starts_with("vars::") => {
                     TemplateComponent::Var(s.strip_prefix("vars::").unwrap().to_string())
                 }
-                
-                _ => return Err(anyhow!("Unknown token namespace in: '{}'", full_match.as_str())),
+
+                _ => {
+                    return Err(anyhow!(
+                        "Unknown token namespace in: '{}'",
+                        full_match.as_str()
+                    ));
+                }
             }
         };
         components.push(component);
@@ -235,44 +260,73 @@ fn tokenize_string(text: &str) -> Result<Vec<TemplateComponent>> {
 
 #[derive(Debug, Default)]
 struct Prefixes {
-    ignore_errors: bool, run_in_parallel: bool,
-    silent_mode: bool, is_echo: bool,
+    ignore_errors: bool,
+    run_in_parallel: bool,
+    silent_mode: bool,
+    is_echo: bool,
 }
 
 fn parse_prefixes(line: &str) -> (Prefixes, &str) {
     let mut prefixes = Prefixes::default();
     if let Some(command_text) = line.strip_prefix('#') {
         prefixes.is_echo = true;
-        return (prefixes, command_text.strip_prefix(' ').unwrap_or(command_text));
+        return (
+            prefixes,
+            command_text.strip_prefix(' ').unwrap_or(command_text),
+        );
     }
     let mut current_pos = 0;
     for (i, char) in line.char_indices() {
         match char {
-            '-' => prefixes.ignore_errors = true, '>' => prefixes.run_in_parallel = true,
-            '@' => prefixes.silent_mode = true, '|' => { current_pos = i + 1; break; }
-            _ if !char.is_whitespace() => { current_pos = i; break; }
+            '-' => prefixes.ignore_errors = true,
+            '>' => prefixes.run_in_parallel = true,
+            '@' => prefixes.silent_mode = true,
+            '|' => {
+                current_pos = i + 1;
+                break;
+            }
+            _ if !char.is_whitespace() => {
+                current_pos = i;
+                break;
+            }
             _ => (),
         }
-        if i == line.len() - 1 { current_pos = line.len(); }
+        if i == line.len() - 1 {
+            current_pos = line.len();
+        }
     }
     (prefixes, line.get(current_pos..).unwrap_or("").trim_start())
 }
 
 // --- CACHE I/O ---
 fn read_cached_layer(path: &Path) -> Result<CachedProjectConfig> {
-    let bytes = fs::read(path).with_context(|| format!("Failed to read cache file at '{}'", path.display()))?;
+    let bytes = fs::read(path)
+        .with_context(|| format!("Failed to read cache file at '{}'", path.display()))?;
     let (cached_layer, _): (CachedProjectConfig, usize) =
-        bincode::serde::decode_from_slice(&bytes, bincode::config::standard())
-            .with_context(|| format!("Failed to deserialize cache file '{}'. It might be corrupt.", path.display()))?;
+        bincode::serde::decode_from_slice(&bytes, bincode::config::standard()).with_context(
+            || {
+                format!(
+                    "Failed to deserialize cache file '{}'. It might be corrupt.",
+                    path.display()
+                )
+            },
+        )?;
     Ok(cached_layer)
 }
 
 fn write_cached_layer(path: &Path, layer: &CachedProjectConfig) -> Result<()> {
     if let Some(parent_dir) = path.parent() {
-        fs::create_dir_all(parent_dir).with_context(|| format!("Failed to create cache directory '{}'", parent_dir.display()))?;
+        fs::create_dir_all(parent_dir).with_context(|| {
+            format!(
+                "Failed to create cache directory '{}'",
+                parent_dir.display()
+            )
+        })?;
     }
-    let bytes = bincode::serde::encode_to_vec(layer, bincode::config::standard()).context("Failed to serialize cache layer.")?;
-    fs::write(path, &bytes).with_context(|| format!("Failed to write cache file to '{}'", path.display()))?;
+    let bytes = bincode::serde::encode_to_vec(layer, bincode::config::standard())
+        .context("Failed to serialize cache layer.")?;
+    fs::write(path, &bytes)
+        .with_context(|| format!("Failed to write cache file to '{}'", path.display()))?;
     Ok(())
 }
 
@@ -309,7 +363,7 @@ mod tests {
         // FIX: Use `TempDir::into_path` is deprecated, but for tests it is fine.
         // Let's keep it but acknowledge the warning. For production code we would use `keep()`.
         let dir = tempdir().unwrap();
-        let project_path = dir.into_path();
+        let project_path = dir.keep();
 
         let axes_dir = project_path.join(".axes");
         fs::create_dir_all(&axes_dir).unwrap();
@@ -331,7 +385,7 @@ mod tests {
     #[test]
     fn test_lazy_facade_inheritance_and_override() {
         let mut index = setup_test_index();
-        
+
         let parent_toml = r#"
             version = "1.0.0"
             description = "Parent description"
@@ -343,7 +397,8 @@ mod tests {
             PARENT_VAR = "parent_value"
             SHARED_VAR = "from_parent"
         "#;
-        let parent_uuid = setup_test_project(&mut index, Some(GLOBAL_PROJECT_UUID), "parent", parent_toml);
+        let parent_uuid =
+            setup_test_project(&mut index, Some(GLOBAL_PROJECT_UUID), "parent", parent_toml);
 
         let child_toml = r#"
             version = "2.0.0" # Override
@@ -361,13 +416,34 @@ mod tests {
             &mut index,
         )
         .unwrap();
-        
+
         let mut call_stack = HashSet::new();
-        assert_eq!(config.get_version(&mut index).unwrap(), Some("2.0.0".to_string()));
-        assert_eq!(config.get_description(&mut index).unwrap(), Some("Parent description".to_string()));
-        assert!(config.get_script("child_script", &mut index, &mut call_stack).unwrap().is_some());
-        assert!(config.get_script("common", &mut index, &mut call_stack).unwrap().is_some());
-        assert!(config.get_var("theme", &mut index, &mut call_stack).unwrap().is_some());
+        assert_eq!(
+            config.get_version(&mut index).unwrap(),
+            Some("2.0.0".to_string())
+        );
+        assert_eq!(
+            config.get_description(&mut index).unwrap(),
+            Some("Parent description".to_string())
+        );
+        assert!(
+            config
+                .get_script("child_script", &mut index, &mut call_stack)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            config
+                .get_script("common", &mut index, &mut call_stack)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            config
+                .get_var("theme", &mut index, &mut call_stack)
+                .unwrap()
+                .is_some()
+        );
         let env = config.get_env(&mut index).unwrap();
         assert_eq!(env.get("SHARED_VAR"), Some(&"from_child".to_string()));
     }
@@ -382,7 +458,7 @@ mod tests {
         "#;
         let uuid = setup_test_project(&mut index, Some(GLOBAL_PROJECT_UUID), "test", toml);
         let entry = index.projects.get(&uuid).unwrap();
-        
+
         // --- Execute ---
         let result = load_and_compile_layer(entry);
 
@@ -391,7 +467,7 @@ mod tests {
         let layer = result.unwrap();
         assert!(layer.scripts.contains_key("hello"));
     }
-    
+
     #[test]
     fn test_circular_dependency_detection() {
         let mut index = setup_test_index();
@@ -402,7 +478,7 @@ mod tests {
         "#;
         // FIX: Use the returned UUID to avoid unused_variable warning
         let _uuid = setup_test_project(&mut index, Some(GLOBAL_PROJECT_UUID), "cycle", toml);
-        
+
         let config = crate::cli::handlers::commons::resolve_config_for_context(
             Some("cycle".to_string()),
             &mut index,
@@ -418,37 +494,47 @@ mod tests {
         // The cycle is detected when the executor tries to resolve the *inner* references.
         assert!(result.is_ok());
         let task_a = result.unwrap().unwrap();
-        
+
         // Manually simulate the executor's recursive resolution.
         // 1. Executor wants to run task 'a', it sees a symbolic ref to 'b'.
-        if let TemplateComponent::Script(name_b) = &task_a.commands[0].action.clone().try_into_execute().unwrap()[0] {
-             assert_eq!(name_b, "b");
-             // 2. It calls get_script for 'b'. The call_stack now contains "script::a".
-             let result_b = config.get_script(name_b, &mut index, &mut call_stack);
-             assert!(result_b.is_ok());
-             let task_b = result_b.unwrap().unwrap();
-             
-             // 3. Executor sees task 'b' contains a symbolic ref to 'a'.
-             if let TemplateComponent::Script(name_a_final) = &task_b.commands[0].action.clone().try_into_execute().unwrap()[0] {
-                  assert_eq!(name_a_final, "a");
-                  // 4. It calls get_script for 'a' again. The call_stack now contains "script::a" and "script::b".
-                  //    This call should fail because "script::a" is already in the stack.
-                  let final_result = config.get_script(name_a_final, &mut index, &mut call_stack);
-                  
-                  // --- THE ASSERTION ---
-                  assert!(final_result.is_err());
-                  let error_message = final_result.unwrap_err().to_string();
-                  assert!(error_message.contains("Circular dependency detected"));
-                  // Check that the error path is correct
-                  assert!(error_message.contains("script::a -> script::b -> script::a"));
-             } else {
-                 panic!("Expected a script component in task b");
-             }
+        if let TemplateComponent::Script(name_b) = &task_a.commands[0]
+            .action
+            .clone()
+            .try_into_execute()
+            .unwrap()[0]
+        {
+            assert_eq!(name_b, "b");
+            // 2. It calls get_script for 'b'. The call_stack now contains "script::a".
+            let result_b = config.get_script(name_b, &mut index, &mut call_stack);
+            assert!(result_b.is_ok());
+            let task_b = result_b.unwrap().unwrap();
+
+            // 3. Executor sees task 'b' contains a symbolic ref to 'a'.
+            if let TemplateComponent::Script(name_a_final) = &task_b.commands[0]
+                .action
+                .clone()
+                .try_into_execute()
+                .unwrap()[0]
+            {
+                assert_eq!(name_a_final, "a");
+                // 4. It calls get_script for 'a' again. The call_stack now contains "script::a" and "script::b".
+                //    This call should fail because "script::a" is already in the stack.
+                let final_result = config.get_script(name_a_final, &mut index, &mut call_stack);
+
+                // --- THE ASSERTION ---
+                assert!(final_result.is_err());
+                let error_message = final_result.unwrap_err().to_string();
+                assert!(error_message.contains("Circular dependency detected"));
+                // Check that the error path is correct
+                assert!(error_message.contains("script::a -> script::b -> script::a"));
+            } else {
+                panic!("Expected a script component in task b");
+            }
         } else {
             panic!("Expected a script component in task a");
         }
     }
-    
+
     // Helper impl remains the same
     impl CommandAction {
         fn try_into_execute(self) -> Result<Vec<TemplateComponent>> {

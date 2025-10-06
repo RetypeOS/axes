@@ -3,12 +3,16 @@
 // This module contains shared functions used by multiple handlers.
 
 use anyhow::{Result, anyhow};
-use std::{collections::{HashMap, HashSet}, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 use uuid::Uuid;
 
 use crate::{
     core::{
-        config_resolver::{self}, context_resolver,
+        config_resolver::{self},
+        context_resolver,
         index_manager::{self},
     },
     models::{GlobalIndex, IndexEntry, ResolvedConfig},
@@ -37,19 +41,27 @@ pub fn resolve_config_for_context(
     // 1. Resolve context to get the target UUID.
     let final_context_str = context_str.unwrap_or_else(|| ".".to_string());
     let (uuid, qualified_name) = context_resolver::resolve_context(&final_context_str, index)?;
-    
+
     // 2. Build the inheritance hierarchy (child-to-parent).
     let mut hierarchy = Vec::new();
     let mut current_uuid = Some(uuid);
     while let Some(id) = current_uuid {
         hierarchy.push(id);
-        let entry = index.projects.get(&id).ok_or_else(|| anyhow!("Broken parent link for UUID {}", id))?;
+        let entry = index
+            .projects
+            .get(&id)
+            .ok_or_else(|| anyhow!("Broken parent link for UUID {}", id))?;
         current_uuid = entry.parent;
     }
 
     // 3. Create and return the lazy facade.
     let project_root = index.projects.get(&uuid).unwrap().path.clone();
-    Ok(ResolvedConfig::new(uuid, qualified_name, project_root, hierarchy))
+    Ok(ResolvedConfig::new(
+        uuid,
+        qualified_name,
+        project_root,
+        hierarchy,
+    ))
 }
 
 /// Prepares a plan for unregistering projects. This function is a "dry run"
@@ -207,10 +219,10 @@ pub fn resolve_config_and_update_index_if_needed(
 
     // Call the new top-level resolver.
     let resolved_config_arc = config_resolver::resolve_config(uuid, index, &mut memoizer)?;
-    
+
     // The logic of saving the index if it's dirty will be handled by a higher-level caller (e.g., `main`).
     // This function's responsibility is just to resolve.
-    
+
     Ok(Arc::try_unwrap(resolved_config_arc).unwrap_or_else(|arc| (*arc).clone()))
 }
 

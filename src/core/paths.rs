@@ -1,13 +1,16 @@
 // src/core/paths.rs
 
-use crate::{constants::GLOBAL_INDEX_FILENAME, models::{GlobalIndex, ResolvedConfig}};
+use crate::{
+    constants::GLOBAL_INDEX_FILENAME,
+    models::{GlobalIndex, ResolvedConfig},
+};
+use anyhow::{Result, anyhow};
 use lazy_static::lazy_static;
-use uuid::Uuid;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use thiserror::Error;
-use anyhow::{Result, anyhow};
+use uuid::Uuid;
 
 lazy_static! {
     static ref AXES_CONFIG_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
@@ -88,7 +91,7 @@ pub fn expand_path_template(template: &str, project_uuid: Uuid) -> Result<PathBu
 
     // 2. Expand `axes` tokens.
     let with_axes_tokens = template.replace("<axes::uuid>", &project_uuid.to_string());
-    
+
     // 3. Expand home directory (`~`) and environment variables (`$VAR` or `%VAR%`).
     // `shellexpand::full` handles both home dir and env vars across platforms.
     let expanded_path_str = shellexpand::full(&with_axes_tokens)
@@ -104,7 +107,10 @@ pub fn expand_path_template(template: &str, project_uuid: Uuid) -> Result<PathBu
 ///
 /// # Returns
 /// The absolute, resolved path to the cache directory for this project.
-pub fn get_cache_dir_for_project(config: &ResolvedConfig, index: &mut GlobalIndex) -> Result<PathBuf> {
+pub fn get_cache_dir_for_project(
+    config: &ResolvedConfig,
+    index: &mut GlobalIndex,
+) -> Result<PathBuf> {
     let options = config.get_options(index)?;
     let template = match &options.cache_dir {
         Some(template_str) => template_str.clone(),
@@ -115,15 +121,22 @@ pub fn get_cache_dir_for_project(config: &ResolvedConfig, index: &mut GlobalInde
                 let local_app_data = std::env::var("LOCALAPPDATA")
                     .map(PathBuf::from)
                     .unwrap_or_else(|_| get_axes_config_dir().unwrap().join("cache")); // Fallback
-                return Ok(local_app_data.join("axes").join("cache").join(config.uuid.to_string()));
+                return Ok(local_app_data
+                    .join("axes")
+                    .join("cache")
+                    .join(config.uuid.to_string()));
             } else {
                 // ~/.cache/axes/<axes::uuid> (XDG Base Directory Specification)
-                let home_dir = dirs::home_dir().ok_or_else(|| anyhow!("Could not find home directory"))?;
-                return Ok(home_dir.join(".cache").join("axes").join(config.uuid.to_string()));
+                let home_dir =
+                    dirs::home_dir().ok_or_else(|| anyhow!("Could not find home directory"))?;
+                return Ok(home_dir
+                    .join(".cache")
+                    .join("axes")
+                    .join(config.uuid.to_string()));
             }
         }
     };
-    
+
     // Expand the user-defined template.
     expand_path_template(&template, config.uuid)
 }

@@ -35,11 +35,11 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
     //    If no context is given, default to '.', which `resolve_context` will
     //    interpret correctly (either CWD or session).
     let context_str = context.unwrap_or_else(|| ".".to_string());
-    
+
     // FIX: Use the passed mutable `index`. No need to load it again.
     //      `resolve_context` will update `last_used` caches in the index.
     let (uuid, qualified_name) = context_resolver::resolve_context(&context_str, index)?;
-    
+
     let header = format!(t!("tree.header.from_project"), name = qualified_name);
     let start_node_uuid = Some(uuid);
 

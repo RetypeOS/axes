@@ -2,11 +2,7 @@
 
 use anyhow::{Context, Result};
 use log::debug;
-use std::{
-    fs,
-    path::Path,
-    time::{SystemTime},
-};
+use std::{fs, path::Path, time::SystemTime};
 
 const HASH_TRUNCATE_LENGTH: usize = 16; // 16 bytes = 32 hex characters
 
@@ -30,21 +26,21 @@ pub struct CacheValidationData {
 /// Returns an I/O error if the file cannot be read or its metadata cannot be accessed.
 pub fn calculate_validation_data(path: &Path) -> Result<CacheValidationData> {
     debug!("Calculating validation data for '{}'", path.display());
-    
+
     // Layer 0 & 1: Timestamp and file size (fast metadata check)
     let metadata = fs::metadata(path)
         .with_context(|| format!("Failed to read metadata for file '{}'", path.display()))?;
-    
+
     let timestamp = metadata.modified()?;
     let file_size = metadata.len();
-    
+
     // Layer 2: Content Hash (definitive check)
     let content = fs::read(path)
         .with_context(|| format!("Failed to read content of file '{}'", path.display()))?;
-    
+
     let hash = blake3::hash(&content);
     let content_hash = hex::encode(&hash.as_bytes()[..HASH_TRUNCATE_LENGTH]);
-    
+
     debug!(
         "Validation data for '{}': size={}, hash={}",
         path.display(),
@@ -70,7 +66,7 @@ mod tests {
         // --- Setup ---
         let content = b"hello world"; // Use a byte string literal
         let mut temp_file = NamedTempFile::new().unwrap();
-        
+
         // FIX: Use `write_all` to write the exact bytes without any translation.
         temp_file.write_all(content).unwrap();
         temp_file.flush().unwrap(); // Ensure data is written to disk before reading metadata
@@ -87,11 +83,11 @@ mod tests {
         // Pre-calculated blake3 hash of the bytes "hello world", truncated to 16 bytes.
         // This hash is now platform-independent and correct.
         let expected_hash = "d74981efa70a0c880b8d8c1985d075db";
-        
+
         // FIX: Update the expected hash to the correct one calculated from raw bytes.
         // Your machine's calculation was the correct one!
         assert_eq!(data.content_hash, expected_hash);
-        
+
         // Timestamp check (can be brittle, just check it's recent)
         let now = SystemTime::now();
         let difference = now.duration_since(data.timestamp).unwrap();

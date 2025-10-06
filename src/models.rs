@@ -251,15 +251,12 @@ impl ResolvedConfig {
         index: &mut GlobalIndex,
         call_stack: &mut HashSet<String>,
     ) -> Result<Option<Arc<Task>>> {
-        // Memoizer check is fine
         if let Some(cached) = self.memoized_scripts.lock().unwrap().get(name) {
             return Ok(cached.clone());
         }
-        println!("{:?}", call_stack);
         let key = format!("script::{}", name);
         if !call_stack.insert(key.clone()) {
             let mut stack_path = call_stack.iter().cloned().collect::<Vec<_>>();
-            stack_path.sort(); // Sort for deterministic error message
             stack_path.push(key);
             return Err(anyhow!("Circular dependency detected: {}", stack_path.join(" -> ")));
         }
@@ -272,10 +269,8 @@ impl ResolvedConfig {
                 break;
             }
         }
-        println!("{:?}", call_stack);
         call_stack.remove(&key);
         self.memoized_scripts.lock().unwrap().insert(name.to_string(), result.clone());
-        println!("{:?}", call_stack);
         Ok(result)
     }
 

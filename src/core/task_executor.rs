@@ -50,9 +50,11 @@ fn execute_task_inner(
                 if template.len() == 1 {
                     if let TemplateComponent::Script(script_name) = &template[0] {
                         log::debug!("Executing composed script: '{}'", script_name);
-                        let sub_task = config.get_script(script_name, index, call_stack)?.ok_or_else(|| {
-                            anyhow!("Script '{}' not found for composition.", script_name)
-                        })?;
+                        let sub_task = config
+                            .get_script(script_name, index, call_stack)?
+                            .ok_or_else(|| {
+                                anyhow!("Script '{}' not found for composition.", script_name)
+                            })?;
 
                         // Recursive call to execute the sub-task.
                         execute_task_inner(&sub_task, config, resolver, index, call_stack)?;
@@ -61,7 +63,8 @@ fn execute_task_inner(
                 }
 
                 // Not a pure composition, so assemble the command string.
-                let rendered_string = assemble_final_command(template, config, resolver, index, call_stack)?;
+                let rendered_string =
+                    assemble_final_command(template, config, resolver, index, call_stack)?;
                 let trimmed_string = rendered_string.trim();
 
                 if trimmed_string.is_empty() {
@@ -86,7 +89,8 @@ fn execute_task_inner(
             }
             CommandAction::Print(template) => {
                 // Print actions are always sequential.
-                let rendered_string = assemble_final_command(template, config, resolver, index, call_stack)?;
+                let rendered_string =
+                    assemble_final_command(template, config, resolver, index, call_stack)?;
                 println!("{}", rendered_string);
             }
         }
@@ -116,12 +120,19 @@ pub fn assemble_final_command(
         match component {
             TemplateComponent::Literal(s) => final_command.push_str(s),
             TemplateComponent::Parameter(def) => {
-                let value = resolver.get_specific_value(&def.original_token).ok_or_else(|| {
-                    anyhow!("Internal logic error: resolved value not found for token '{}'", def.original_token)
-                })?;
+                let value = resolver
+                    .get_specific_value(&def.original_token)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "Internal logic error: resolved value not found for token '{}'",
+                            def.original_token
+                        )
+                    })?;
                 final_command.push_str(value);
             }
-            TemplateComponent::GenericParams => final_command.push_str(resolver.get_generic_value()),
+            TemplateComponent::GenericParams => {
+                final_command.push_str(resolver.get_generic_value())
+            }
             TemplateComponent::Run(spec) => {
                 let command_to_run = match spec {
                     RunSpec::Literal(cmd) => {
@@ -131,10 +142,16 @@ pub fn assemble_final_command(
                     }
                 };
                 let env = config.get_env(index)?;
-                let output = executor::execute_and_capture_output(&command_to_run, &config.project_root, &env)?;
+                let output = executor::execute_and_capture_output(
+                    &command_to_run,
+                    &config.project_root,
+                    &env,
+                )?;
                 final_command.push_str(output.trim());
             }
-            TemplateComponent::Path => final_command.push_str(&config.project_root.to_string_lossy()),
+            TemplateComponent::Path => {
+                final_command.push_str(&config.project_root.to_string_lossy())
+            }
             TemplateComponent::Name => final_command.push_str(&config.qualified_name),
             TemplateComponent::Uuid => final_command.push_str(&config.uuid.to_string()),
             TemplateComponent::Version => {
@@ -145,32 +162,50 @@ pub fn assemble_final_command(
             // --- LAZY RESOLUTION OF SYMBOLIC REFERENCES ---
             TemplateComponent::Script(script_name) => {
                 log::debug!("Resolving inline script reference: '{}'", script_name);
-                let script_task = config.get_script(script_name, index, call_stack)?.ok_or_else(|| {
-                    anyhow!("Referenced script '{}' not found.", script_name)
-                })?;
+                let script_task = config
+                    .get_script(script_name, index, call_stack)?
+                    .ok_or_else(|| anyhow!("Referenced script '{}' not found.", script_name))?;
                 if script_task.commands.len() > 1 {
-                    return Err(anyhow!("Inline script composition for '<axes::scripts::{}>' is not supported because it is a multi-line script.", script_name));
+                    return Err(anyhow!(
+                        "Inline script composition for '<axes::scripts::{}>' is not supported because it is a multi-line script.",
+                        script_name
+                    ));
                 }
                 if let Some(command) = script_task.commands.first() {
                     let sub_template = match &command.action {
                         CommandAction::Execute(t) | CommandAction::Print(t) => t,
                     };
-                    final_command.push_str(&assemble_final_command(sub_template, config, resolver, index, call_stack)?);
+                    final_command.push_str(&assemble_final_command(
+                        sub_template,
+                        config,
+                        resolver,
+                        index,
+                        call_stack,
+                    )?);
                 }
             }
             TemplateComponent::Var(var_name) => {
                 log::debug!("Resolving var reference: '{}'", var_name);
-                let var_task = config.get_var(var_name, index, call_stack)?.ok_or_else(|| {
-                    anyhow!("Referenced variable '{}' not found.", var_name)
-                })?;
+                let var_task = config
+                    .get_var(var_name, index, call_stack)?
+                    .ok_or_else(|| anyhow!("Referenced variable '{}' not found.", var_name))?;
                 if var_task.commands.len() > 1 {
-                    return Err(anyhow!("Variable '{}' must expand to a single-line value.", var_name));
+                    return Err(anyhow!(
+                        "Variable '{}' must expand to a single-line value.",
+                        var_name
+                    ));
                 }
                 if let Some(command) = var_task.commands.first() {
                     let sub_template = match &command.action {
                         CommandAction::Execute(t) | CommandAction::Print(t) => t,
                     };
-                    final_command.push_str(&assemble_final_command(sub_template, config, resolver, index, call_stack)?);
+                    final_command.push_str(&assemble_final_command(
+                        sub_template,
+                        config,
+                        resolver,
+                        index,
+                        call_stack,
+                    )?);
                 }
             }
         }
@@ -205,7 +240,13 @@ fn execute_parallel_batch(
     let is_globally_silent = batch.iter().all(|(_, _, silent)| *silent);
     if !is_globally_silent {
         let mut header_block = String::new();
-        writeln!(header_block, "\n{} {}", "┌─".dimmed(), format!("Running {} commands in parallel...", batch.len()).blue()).unwrap();
+        writeln!(
+            header_block,
+            "\n{} {}",
+            "┌─".dimmed(),
+            format!("Running {} commands in parallel...", batch.len()).blue()
+        )
+        .unwrap();
         for (command_str, _, silent) in batch.iter() {
             if !*silent {
                 writeln!(header_block, "{} {}", "├─˃".dimmed(), command_str.green()).unwrap();

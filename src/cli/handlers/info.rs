@@ -18,7 +18,7 @@ struct InfoArgs {}
 /// Displays detailed information about the lazily resolved project configuration.
 pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
     let _info_args = InfoArgs::try_parse_from(&args)?;
-    
+
     // `resolve_config_for_context` now returns our lazy facade.
     let config = commons::resolve_config_for_context(context, index)?;
 
@@ -34,7 +34,10 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
 
 /// Prints the core metadata of the project.
 fn print_metadata(config: &ResolvedConfig, index: &mut GlobalIndex) -> Result<()> {
-    let config_file_path = config.project_root.join(AXES_DIR).join(PROJECT_CONFIG_FILENAME);
+    let config_file_path = config
+        .project_root
+        .join(AXES_DIR)
+        .join(PROJECT_CONFIG_FILENAME);
 
     println!(
         "\n--- {} '{}' ---",
@@ -68,7 +71,7 @@ fn print_metadata(config: &ResolvedConfig, index: &mut GlobalIndex) -> Result<()
 fn print_scripts(config: &ResolvedConfig, index: &mut GlobalIndex) -> Result<()> {
     // To get all available scripts, we merge them from all layers.
     let scripts = config.get_all_scripts(index)?;
-    
+
     if scripts.is_empty() {
         println!("\n  {}", t!("info.label.no_scripts").dimmed());
         return Ok(());
@@ -81,7 +84,7 @@ fn print_scripts(config: &ResolvedConfig, index: &mut GlobalIndex) -> Result<()>
     for cmd_name in cmd_names {
         // `get` is guaranteed to return Some within this loop.
         let task = scripts.get(&cmd_name).unwrap();
-        
+
         print!("    - {}", cmd_name.cyan());
 
         if let Some(d) = &task.desc {
@@ -115,7 +118,6 @@ fn render_template_to_string(template: &[TemplateComponent]) -> String {
         .collect::<String>()
 }
 
-
 /// A generic function to print key-value maps like [vars] and [env].
 fn print_variables(
     config: &ResolvedConfig,
@@ -129,7 +131,7 @@ fn print_variables(
         if vars.is_empty() {
             return Ok(());
         }
-        
+
         println!("\n  {}:", title.blue());
         let mut sorted_keys: Vec<_> = vars.keys().cloned().collect();
         sorted_keys.sort();
