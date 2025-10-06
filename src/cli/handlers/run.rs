@@ -7,7 +7,6 @@ use crate::{
 };
 use anyhow::{Result, anyhow};
 use colored::*;
-use std::collections::HashSet; // Import HashSet for the call_stack
 
 /// Parses a script path string like "my-app/api/build" into its context and script name.
 /// This is a helper function used internally by the main dispatcher (`bin/axes.rs`).
@@ -36,23 +35,20 @@ pub fn handle(
         ));
     }
     let script_name = args.remove(0);
-    let params = args; // The rest of the arguments are parameters for the script.
+    let params = args;
 
     // 2. Get the LAZY `ResolvedConfig` facade for the given context.
     let config = commons::resolve_config_for_context(context, index)?;
 
     // 3. Lazily get the top-level task for the requested script.
-    //    We initialize a fresh call_stack here for the execution flow.
-    let mut call_stack = HashSet::new();
-    let task = config
-        .get_script(&script_name, index, &mut call_stack)?
-        .ok_or_else(|| {
-            anyhow!(
-                "Script '{}' not found in project '{}'.",
-                script_name.cyan(),
-                config.qualified_name.yellow()
-            )
-        })?;
+    //    FIX: Start the recursion depth count at 0.
+    let task = config.get_script(&script_name, index, 0)?.ok_or_else(|| {
+        anyhow!(
+            "Script '{}' not found in project '{}'.",
+            script_name.cyan(),
+            config.qualified_name.yellow()
+        )
+    })?;
 
     if task.commands.is_empty() {
         println!("{}", "Script is empty. Nothing to execute.".yellow());
@@ -64,7 +60,6 @@ pub fn handle(
         .commands
         .iter()
         .flat_map(|cmd| match &cmd.action {
-            // Cloned is needed as we need to own the ParameterDef
             CommandAction::Execute(t) | CommandAction::Print(t) => {
                 t.iter().cloned().collect::<Vec<_>>()
             }
@@ -86,8 +81,7 @@ pub fn handle(
     // 5. Create a single `ArgResolver` for the entire task.
     let resolver = ArgResolver::new(&all_definitions, &params, has_generic_params)?;
 
-    // 6. Execute the task, passing the config facade, resolver, and the mutable index.
-    //    The task_executor will handle the recursive, lazy resolution of any sub-tasks.
+    // 6. Execute the task.
     task_executor::execute_task(&task, &config, &resolver, index)?;
 
     Ok(())

@@ -8,7 +8,7 @@ use crate::{
 use anyhow::{Context, Result, anyhow};
 use colored::*;
 use rayon::prelude::*;
-use std::{collections::HashSet, fmt::Write, sync::Arc};
+use std::{fmt::Write, sync::Arc};
 
 // --- Main Public Function ---
 
@@ -20,9 +20,8 @@ pub fn execute_task(
     resolver: &ArgResolver,
     index: &mut GlobalIndex,
 ) -> Result<()> {
-    // Top-level call stack for detecting circular dependencies during execution.
-    let mut call_stack = HashSet::new();
-    execute_task_inner(task, config, resolver, index, &mut call_stack)
+    // Start the execution with an initial depth of 0.
+    execute_task_inner(task, config, resolver, index, 0)
 }
 
 // --- Internal Recursive Executor ---
@@ -33,7 +32,7 @@ fn execute_task_inner(
     config: &ResolvedConfig,
     resolver: &ArgResolver,
     index: &mut GlobalIndex,
-    call_stack: &mut HashSet<String>,
+    depth: u32, // Add depth parameter
 ) -> Result<()> {
     let mut parallel_batch: Vec<(String, bool, bool)> = Vec::new();
 
@@ -46,25 +45,24 @@ fn execute_task_inner(
 
         match &command_exec.action {
             CommandAction::Execute(template) => {
-                // Handle pure script composition: `run = "<axes::scripts::sub_script>"`
                 if template.len() == 1 {
                     if let TemplateComponent::Script(script_name) = &template[0] {
-                        log::debug!("Executing composed script: '{}'", script_name);
+                        // FIX: Pass incremented depth to the recursive call.
                         let sub_task = config
-                            .get_script(script_name, index, call_stack)?
+                            .get_script(script_name, index, depth + 1)?
                             .ok_or_else(|| {
                                 anyhow!("Script '{}' not found for composition.", script_name)
                             })?;
 
                         // Recursive call to execute the sub-task.
-                        execute_task_inner(&sub_task, config, resolver, index, call_stack)?;
+                        execute_task_inner(&sub_task, config, resolver, index, depth + 1)?;
                         continue; // Skip to the next command in the outer task.
                     }
                 }
 
                 // Not a pure composition, so assemble the command string.
                 let rendered_string =
-                    assemble_final_command(template, config, resolver, index, call_stack)?;
+                    assemble_final_command(template, config, resolver, index, depth)?;
                 let trimmed_string = rendered_string.trim();
 
                 if trimmed_string.is_empty() {
@@ -88,9 +86,9 @@ fn execute_task_inner(
                 }
             }
             CommandAction::Print(template) => {
-                // Print actions are always sequential.
+                // FIX: Pass current depth to `assemble_final_command`.
                 let rendered_string =
-                    assemble_final_command(template, config, resolver, index, call_stack)?;
+                    assemble_final_command(template, config, resolver, index, depth)?;
                 println!("{}", rendered_string);
             }
         }
@@ -113,7 +111,7 @@ pub fn assemble_final_command(
     config: &ResolvedConfig,
     resolver: &ArgResolver,
     index: &mut GlobalIndex,
-    call_stack: &mut HashSet<String>,
+    depth: u32,
 ) -> Result<String> {
     let mut final_command = String::new();
     for component in template {
@@ -138,7 +136,7 @@ pub fn assemble_final_command(
                     RunSpec::Literal(cmd) => {
                         let temp_template = vec![TemplateComponent::Literal(cmd.clone())];
                         // Recursively assemble to expand tokens inside the `run` literal.
-                        assemble_final_command(&temp_template, config, resolver, index, call_stack)?
+                        assemble_final_command(&temp_template, config, resolver, index, depth + 1)?
                     }
                 };
                 let env = config.get_env(index)?;
@@ -163,7 +161,7 @@ pub fn assemble_final_command(
             TemplateComponent::Script(script_name) => {
                 log::debug!("Resolving inline script reference: '{}'", script_name);
                 let script_task = config
-                    .get_script(script_name, index, call_stack)?
+                    .get_script(script_name, index, depth + 1)?
                     .ok_or_else(|| anyhow!("Referenced script '{}' not found.", script_name))?;
                 if script_task.commands.len() > 1 {
                     return Err(anyhow!(
@@ -180,14 +178,14 @@ pub fn assemble_final_command(
                         config,
                         resolver,
                         index,
-                        call_stack,
+                        depth + 1,
                     )?);
                 }
             }
             TemplateComponent::Var(var_name) => {
                 log::debug!("Resolving var reference: '{}'", var_name);
                 let var_task = config
-                    .get_var(var_name, index, call_stack)?
+                    .get_var(var_name, index, depth + 1)?
                     .ok_or_else(|| anyhow!("Referenced variable '{}' not found.", var_name))?;
                 if var_task.commands.len() > 1 {
                     return Err(anyhow!(
@@ -204,7 +202,7 @@ pub fn assemble_final_command(
                         config,
                         resolver,
                         index,
-                        call_stack,
+                        depth + 1,
                     )?);
                 }
             }

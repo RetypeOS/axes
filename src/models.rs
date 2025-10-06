@@ -1,13 +1,14 @@
 // EN: src/models.rs
 
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
-use anyhow::{anyhow, Result};
 
+use crate::constants::MAX_RECURSION_DEPTH;
 use crate::core::config_resolver;
 
 // =========================================================================
@@ -249,28 +250,37 @@ impl ResolvedConfig {
         &self,
         name: &str,
         index: &mut GlobalIndex,
-        call_stack: &mut HashSet<String>,
+        depth: u32, // Add depth parameter
     ) -> Result<Option<Arc<Task>>> {
-        if let Some(cached) = self.memoized_scripts.lock().unwrap().get(name) {
-            return Ok(cached.clone());
-        }
-        let key = format!("script::{}", name);
-        if !call_stack.insert(key.clone()) {
-            let mut stack_path = call_stack.iter().cloned().collect::<Vec<_>>();
-            stack_path.push(key);
-            return Err(anyhow!("Circular dependency detected: {}", stack_path.join(" -> ")));
+        // 1. Check recursion depth limit.
+        println!("{}", depth);
+        if depth > MAX_RECURSION_DEPTH {
+            return Err(anyhow!(
+                "Maximum recursion depth exceeded while resolving script '{}'. Check for circular dependencies.",
+                name
+            ));
         }
 
-        let mut result = None;
+        // 2. Check in-session memoizer.
+        if let Some(cached_result) = self.memoized_scripts.lock().unwrap().get(name) {
+            return Ok(cached_result.clone());
+        }
+
+        // 3. Iterate through hierarchy to find the script.
+        let mut result: Option<Arc<Task>> = None;
         for uuid in self.hierarchy.iter() {
             let layer = self.get_layer(*uuid, index)?;
             if let Some(task) = layer.scripts.get(name) {
                 result = Some(Arc::new(task.clone()));
-                break;
+                break; // Stop searching up the chain.
             }
         }
-        call_stack.remove(&key);
-        self.memoized_scripts.lock().unwrap().insert(name.to_string(), result.clone());
+
+        // 4. Memoize the result and return.
+        self.memoized_scripts
+            .lock()
+            .unwrap()
+            .insert(name.to_string(), result.clone());
         Ok(result)
     }
 
@@ -279,19 +289,20 @@ impl ResolvedConfig {
         &self,
         name: &str,
         index: &mut GlobalIndex,
-        call_stack: &mut HashSet<String>,
+        depth: u32, // Add depth parameter
     ) -> Result<Option<Arc<Task>>> {
-        if let Some(cached) = self.memoized_vars.lock().unwrap().get(name) {
-            return Ok(cached.clone());
+        if depth > MAX_RECURSION_DEPTH {
+            return Err(anyhow!(
+                "Maximum recursion depth exceeded while resolving var '{}'. Check for circular dependencies.",
+                name
+            ));
         }
-        let key = format!("var::{}", name);
-        if !call_stack.insert(key.clone()) {
-            let mut stack_path = call_stack.iter().cloned().collect::<Vec<_>>();
-            stack_path.push(key);
 
-            return Err(anyhow!("Circular dependency detected: {}", stack_path.join(" -> ")));
+        if let Some(cached_result) = self.memoized_vars.lock().unwrap().get(name) {
+            return Ok(cached_result.clone());
         }
-        let mut result = None;
+
+        let mut result: Option<Arc<Task>> = None;
         for uuid in self.hierarchy.iter() {
             let layer = self.get_layer(*uuid, index)?;
             if let Some(task) = layer.vars.get(name) {
@@ -299,8 +310,11 @@ impl ResolvedConfig {
                 break;
             }
         }
-        call_stack.remove(&key);
-        self.memoized_vars.lock().unwrap().insert(name.to_string(), result.clone());
+
+        self.memoized_vars
+            .lock()
+            .unwrap()
+            .insert(name.to_string(), result.clone());
         Ok(result)
     }
 
@@ -341,12 +355,13 @@ impl ResolvedConfig {
         if let Some(options) = self.memoized_options.lock().unwrap().as_ref() {
             return Ok(options.clone());
         }
-        
+
         // This requires the same compilation logic as in the old `merge_configs`.
         let mut final_options = ResolvedOptionsConfig::default();
-        for uuid in self.hierarchy.iter().rev() { // Parent to child
+        for uuid in self.hierarchy.iter().rev() {
+            // Parent to child
             let layer = self.get_layer(*uuid, index)?;
-            
+
             final_options.shell = layer.options.shell.clone().or(final_options.shell);
             final_options.cache_dir = layer.options.cache_dir.clone().or(final_options.cache_dir);
 
@@ -356,7 +371,8 @@ impl ResolvedConfig {
             if let Some(cmd) = layer.options.at_exit.clone() {
                 final_options.at_exit = Some(config_resolver::compile_command_to_task(cmd.0)?);
             }
-            let compiled_open_with = config_resolver::compile_command_map(layer.options.open_with.clone())?;
+            let compiled_open_with =
+                config_resolver::compile_command_map(layer.options.open_with.clone())?;
             final_options.open_with.extend(compiled_open_with);
         }
 
@@ -370,7 +386,10 @@ impl ResolvedConfig {
             return Ok(layer.clone());
         }
         let layer = config_resolver::load_layer_for_uuid(uuid, index)?;
-        self.memoized_layers.lock().unwrap().insert(uuid, layer.clone());
+        self.memoized_layers
+            .lock()
+            .unwrap()
+            .insert(uuid, layer.clone());
         Ok(layer)
     }
 
@@ -389,7 +408,7 @@ impl ResolvedConfig {
         *self.memoized_description.lock().unwrap() = Some(final_desc.clone());
         Ok(final_desc)
     }
-    
+
     // Helper to get all scripts for `info`
     pub fn get_all_scripts(&self, index: &mut GlobalIndex) -> Result<HashMap<String, Arc<Task>>> {
         let mut final_scripts = HashMap::new();
@@ -401,7 +420,7 @@ impl ResolvedConfig {
         }
         Ok(final_scripts)
     }
-    
+
     // Helper to get all vars for `info`
     pub fn get_all_vars(&self, index: &mut GlobalIndex) -> Result<HashMap<String, Arc<Task>>> {
         let mut final_vars = HashMap::new();
@@ -426,15 +445,15 @@ pub struct IndexEntry {
     pub name: String,
     pub path: PathBuf,
     pub parent: Option<Uuid>,
-    
+
     // The hash of the project's own axes.toml file content.
     // Used to validate the single-layer cache.
     pub config_hash: Option<String>,
-    
+
     // The resolved, absolute path to the directory where this project's
     // cache objects are stored. Inherited and resolved.
     pub cache_dir: Option<PathBuf>,
-    
+
     // UUID of the most recently used direct child of this project.
     pub last_used_child: Option<Uuid>,
 }

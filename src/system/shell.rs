@@ -7,13 +7,7 @@ use crate::{
 };
 use anyhow::Result;
 use colored::Colorize;
-use std::{
-    collections::{HashMap, HashSet},
-    env, fs,
-    path::PathBuf,
-    process::Command,
-    sync::Arc,
-};
+use std::{collections::HashMap, env, fs, path::PathBuf, process::Command, sync::Arc};
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
@@ -61,10 +55,10 @@ pub fn launch_session(
 ) -> Result<(), ShellError> {
     // 1. Determine which shell to use by lazily resolving the project's options.
     let shells_config = load_shells_config()?;
-    let options = config.get_options(index)?; // Lazy call
+    let options = config.get_options(index)?;
     let shell_name = options
         .shell
-        .clone() // Clone the Option<String>
+        .clone()
         .unwrap_or_else(|| get_default_shell_name().to_string());
     let shell_config = shells_config
         .shells
@@ -74,7 +68,8 @@ pub fn launch_session(
     // 2. If an `at_start` task exists, render its commands.
     let at_start_final_commands = if let Some(task) = &task_start {
         println!("\n{}", "Preparing `at_start` hook...".dimmed());
-        let mut call_stack = HashSet::new(); // Fresh call stack for rendering
+        // FIX: Start depth count at 0 for rendering.
+        let initial_depth = 0;
         task.commands
             .iter()
             .map(|cmd| match &cmd.action {
@@ -83,9 +78,9 @@ pub fn launch_session(
                     config,
                     resolver,
                     index,
-                    &mut call_stack,
+                    initial_depth, // Pass depth
                 ),
-                CommandAction::Print(_) => Ok(String::new()), // Ignored in init scripts
+                CommandAction::Print(_) => Ok(String::new()),
             })
             .collect::<Result<Vec<String>>>()?
     } else {
@@ -98,7 +93,6 @@ pub fn launch_session(
     let temp_script_file = NamedTempFile::with_prefix("axes-init-")?.into_temp_path();
     let temp_script_path = temp_script_file.with_extension(script_extension);
 
-    // This function now lazily gets the environment variables.
     let script_content =
         build_init_script(config, &at_start_final_commands, is_windows_shell, index)?;
     fs::write(&temp_script_path, &script_content)?;
@@ -121,7 +115,6 @@ pub fn launch_session(
     cmd.env("AXES_PROJECT_NAME", &config.qualified_name);
     cmd.env("AXES_PROJECT_UUID", config.uuid.to_string());
 
-    // Lazily resolve and inject the fully merged environment variables.
     let env_vars = config.get_env(index)?;
     cmd.envs(&env_vars);
 
@@ -135,12 +128,12 @@ pub fn launch_session(
         log::warn!("Interactive shell exited with code: {:?}", status.code());
     }
 
-    // Cleanup the temporary script.
     let _ = fs::remove_file(&temp_script_path);
 
     // 5. Execute the `at_exit` task if it exists.
     if let Some(task) = &task_exit {
         println!("\n{}", "\nExecuting `at_exit` hook...".dimmed());
+        // FIX: Pass the index to `execute_task`.
         task_executor::execute_task(task, config, resolver, index)?;
     }
 

@@ -337,7 +337,7 @@ mod tests {
     use super::*;
     use crate::core::index_manager::GLOBAL_PROJECT_UUID;
     use crate::models::{GlobalIndex, TemplateComponent};
-    use std::{collections::HashSet, fs};
+    use std::fs;
     use tempfile::tempdir;
 
     fn setup_test_index() -> GlobalIndex {
@@ -417,7 +417,6 @@ mod tests {
         )
         .unwrap();
 
-        let mut call_stack = HashSet::new();
         assert_eq!(
             config.get_version(&mut index).unwrap(),
             Some("2.0.0".to_string())
@@ -428,22 +427,23 @@ mod tests {
         );
         assert!(
             config
-                .get_script("child_script", &mut index, &mut call_stack)
+                .get_script("child_script", &mut index, 0)
                 .unwrap()
                 .is_some()
         );
         assert!(
             config
-                .get_script("common", &mut index, &mut call_stack)
+                .get_script("common", &mut index, 0)
                 .unwrap()
                 .is_some()
         );
         assert!(
             config
-                .get_var("theme", &mut index, &mut call_stack)
+                .get_script("non_existent", &mut index, 0)
                 .unwrap()
-                .is_some()
+                .is_none()
         );
+        assert!(config.get_var("theme", &mut index, 0).unwrap().is_some());
         let env = config.get_env(&mut index).unwrap();
         assert_eq!(env.get("SHARED_VAR"), Some(&"from_child".to_string()));
     }
@@ -468,6 +468,10 @@ mod tests {
         assert!(layer.scripts.contains_key("hello"));
     }
 
+    // --- TEST 3: Circular Dependency Detection via Depth Limit ---
+    /// Ensures that the lazy resolver correctly stops and reports an error
+    /// when a circular dependency would lead to infinite recursion.
+    // --- TEST 3: Circular Dependency Detection via Depth Limit ---
     #[test]
     fn test_circular_dependency_detection() {
         let mut index = setup_test_index();
@@ -476,72 +480,50 @@ mod tests {
             a = "<axes::scripts::b>"
             b = "<axes::scripts::a>"
         "#;
-        // FIX: Use the returned UUID to avoid unused_variable warning
-        let _uuid = setup_test_project(&mut index, Some(GLOBAL_PROJECT_UUID), "cycle", toml);
+        setup_test_project(&mut index, Some(GLOBAL_PROJECT_UUID), "cycle", toml);
 
+        // FIX: Use the project's name as context, not its UUID.
         let config = crate::cli::handlers::commons::resolve_config_for_context(
             Some("cycle".to_string()),
             &mut index,
         )
         .unwrap();
 
-        // --- Execute & Assert ---
-        // This simulates the task executor trying to resolve script `a`.
-        let mut call_stack = HashSet::new();
-        let result = config.get_script("a", &mut index, &mut call_stack);
+        fn resolve_step(
+            script_name: &str,
+            config: &ResolvedConfig,
+            index: &mut GlobalIndex,
+            depth: u32,
+        ) -> Result<String> {
+            let task = config
+                .get_script(script_name, index, depth)?
+                .ok_or_else(|| anyhow!("Script not found"))?;
 
-        // In our new model, get_script for 'a' should succeed, returning a Task with a symbolic reference.
-        // The cycle is detected when the executor tries to resolve the *inner* references.
-        assert!(result.is_ok());
-        let task_a = result.unwrap().unwrap();
-
-        // Manually simulate the executor's recursive resolution.
-        // 1. Executor wants to run task 'a', it sees a symbolic ref to 'b'.
-        if let TemplateComponent::Script(name_b) = &task_a.commands[0]
-            .action
-            .clone()
-            .try_into_execute()
-            .unwrap()[0]
-        {
-            assert_eq!(name_b, "b");
-            // 2. It calls get_script for 'b'. The call_stack now contains "script::a".
-            let result_b = config.get_script(name_b, &mut index, &mut call_stack);
-            assert!(result_b.is_ok());
-            let task_b = result_b.unwrap().unwrap();
-
-            // 3. Executor sees task 'b' contains a symbolic ref to 'a'.
-            if let TemplateComponent::Script(name_a_final) = &task_b.commands[0]
-                .action
-                .clone()
-                .try_into_execute()
-                .unwrap()[0]
-            {
-                assert_eq!(name_a_final, "a");
-                // 4. It calls get_script for 'a' again. The call_stack now contains "script::a" and "script::b".
-                //    This call should fail because "script::a" is already in the stack.
-                let final_result = config.get_script(name_a_final, &mut index, &mut call_stack);
-
-                // --- THE ASSERTION ---
-                assert!(final_result.is_err());
-                let error_message = final_result.unwrap_err().to_string();
-                assert!(error_message.contains("Circular dependency detected"));
-                // Check that the error path is correct
-                assert!(error_message.contains("script::a -> script::b -> script::a"));
+            let next_script_name = if let Some(cmd) = task.commands.first() {
+                if let CommandAction::Execute(template) = &cmd.action {
+                    if let Some(TemplateComponent::Script(name)) = template.first() {
+                        name.clone()
+                    } else {
+                        return Err(anyhow!("End of chain"));
+                    }
+                } else {
+                    return Err(anyhow!("End of chain"));
+                }
             } else {
-                panic!("Expected a script component in task b");
-            }
-        } else {
-            panic!("Expected a script component in task a");
-        }
-    }
+                return Err(anyhow!("End of chain"));
+            };
 
-    // Helper impl remains the same
-    impl CommandAction {
-        fn try_into_execute(self) -> Result<Vec<TemplateComponent>> {
-            match self {
-                CommandAction::Execute(t) => Ok(t),
-                _ => Err(anyhow!("Expected Execute action")),
-            }
+            resolve_step(&next_script_name, config, index, depth + 1)
         }
+
+        let result = resolve_step("a", &config, &mut index, 0);
+
+        assert!(result.is_err());
+        let error_message = result.unwrap_err().to_string();
+        assert!(
+            error_message.contains("Maximum recursion depth exceeded"),
+            "Error message was: {}",
+            error_message
+        );
     }
 }
