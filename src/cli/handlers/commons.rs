@@ -34,21 +34,22 @@ pub fn resolve_config_for_context(
     context_str: Option<String>,
     index: &mut GlobalIndex,
 ) -> Result<ResolvedConfig> {
-    // 1. Resolve context string to a canonical UUID. This also updates `last_used` caches.
+    // 1. Resolve context to get the target UUID.
     let final_context_str = context_str.unwrap_or_else(|| ".".to_string());
-    let (uuid, _qualified_name) = context_resolver::resolve_context(&final_context_str, index)?;
-
-    // 2. Call the new top-level resolver.
-    // The memoizer is created here for a single command execution lifespan.
-    let mut memoizer = HashMap::new();
-    let resolved_config_arc = config_resolver::resolve_config(uuid, index, &mut memoizer)?;
-
-    // 3. Convert from Arc to an owned value for the handler to use.
-    // This is efficient as it will move the value if it's the last strong reference.
-    let resolved_config = Arc::try_unwrap(resolved_config_arc)
-        .unwrap_or_else(|arc| (*arc).clone());
+    let (uuid, qualified_name) = context_resolver::resolve_context(&final_context_str, index)?;
     
-    Ok(resolved_config)
+    // 2. Build the inheritance hierarchy (child-to-parent).
+    let mut hierarchy = Vec::new();
+    let mut current_uuid = Some(uuid);
+    while let Some(id) = current_uuid {
+        hierarchy.push(id);
+        let entry = index.projects.get(&id).ok_or_else(|| anyhow!("Broken parent link for UUID {}", id))?;
+        current_uuid = entry.parent;
+    }
+
+    // 3. Create and return the lazy facade.
+    let project_root = index.projects.get(&uuid).unwrap().path.clone();
+    Ok(ResolvedConfig::new(uuid, qualified_name, project_root, hierarchy))
 }
 
 /// Prepares a plan for unregistering projects. This function is a "dry run"

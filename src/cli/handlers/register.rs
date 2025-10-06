@@ -7,7 +7,6 @@ use std::{env, path::PathBuf};
 use crate::{
     core::{
         graph_display::{self, DisplayOptions},
-        index_manager,
         onboarding_manager::{self, OnboardingOptions},
     },
     models::GlobalIndex,

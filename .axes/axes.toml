@@ -10,6 +10,7 @@ description = "The development workflow configuration for the `axes` project its
 # === Development Scripts ===
 # Defines workflows for building, testing, and managing the tool.
 [scripts]
+
 # --- Core Development Workflows ---
 build = { desc = "Builds the project in debug mode with fast compilation.", run = "cargo build <axes::params>" }
 build_release = { desc = "Builds the project in release mode for distribution.", run = "cargo build --release" }

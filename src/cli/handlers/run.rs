@@ -1,12 +1,13 @@
+// EN: src/cli/handlers/run.rs (FINALIZED FOR LAZY ARCHITECTURE)
+
 use crate::{
     cli::handlers::commons,
     core::{parameters::ArgResolver, task_executor},
-    // FIX: Removed unused `index_manager` and `config_resolver` imports
-    // FIX: Added `ParameterDef` for collecting definitions
     models::{CommandAction, GlobalIndex, ParameterDef, TemplateComponent},
 };
 use anyhow::{Result, anyhow};
 use colored::*;
+use std::collections::HashSet; // Import HashSet for the call_stack
 
 /// Parses a script path string like "my-app/api/build" into its context and script name.
 /// This is a helper function used internally by the main dispatcher (`bin/axes.rs`).
@@ -20,21 +21,26 @@ pub fn parse_script_path(full_path: &str) -> (Option<&str>, &str) {
 
 ///
 /// Main entry point for the 'run' command.
-/// It receives a normalized context and the script name as the first argument.
+/// It receives a normalized context and the script name as the first argument,
+/// then orchestrates the lazy execution of the corresponding task.
 ///
 pub fn handle(context: Option<String>, mut args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
     // 1. The dispatcher guarantees that the script name is the first argument.
     if args.is_empty() {
-        return Err(anyhow!("Internal error: 'run' handler called without a script name."));
+        return Err(anyhow!(
+            "Internal error: 'run' handler called without a script name."
+        ));
     }
     let script_name = args.remove(0);
     let params = args; // The rest of the arguments are parameters for the script.
 
-    // 2. Resolve the configuration for the given context.
+    // 2. Get the LAZY `ResolvedConfig` facade for the given context.
     let config = commons::resolve_config_for_context(context, index)?;
 
-    // 3. Get the pre-compiled Task for the requested script from the resolved config.
-    let task = config.scripts.get(&script_name).ok_or_else(|| {
+    // 3. Lazily get the top-level task for the requested script.
+    //    We initialize a fresh call_stack here for the execution flow.
+    let mut call_stack = HashSet::new();
+    let task = config.get_script(&script_name, index, &mut call_stack)?.ok_or_else(|| {
         anyhow!(
             "Script '{}' not found in project '{}'.",
             script_name.cyan(),
@@ -52,6 +58,7 @@ pub fn handle(context: Option<String>, mut args: Vec<String>, index: &mut Global
         .commands
         .iter()
         .flat_map(|cmd| match &cmd.action {
+            // Cloned is needed as we need to own the ParameterDef
             CommandAction::Execute(t) | CommandAction::Print(t) => t.iter().cloned().collect::<Vec<_>>(),
         })
         .filter_map(|component| match component {
@@ -71,8 +78,9 @@ pub fn handle(context: Option<String>, mut args: Vec<String>, index: &mut Global
     // 5. Create a single `ArgResolver` for the entire task.
     let resolver = ArgResolver::new(&all_definitions, &params, has_generic_params)?;
 
-    // 6. Execute the task using the shared task executor.
-    task_executor::execute_task(task, &config, &resolver)?;
+    // 6. Execute the task, passing the config facade, resolver, and the mutable index.
+    //    The task_executor will handle the recursive, lazy resolution of any sub-tasks.
+    task_executor::execute_task(&task, &config, &resolver, index)?;
 
     Ok(())
 }

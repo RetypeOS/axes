@@ -1,12 +1,19 @@
-// src/system/shell.rs
+// EN: src/system/shell.rs (REBUILT FOR LAZY ARCHITECTURE)
 
 use crate::{
     core::{parameters::ArgResolver, task_executor},
-    models::{CommandAction, ResolvedConfig, ShellConfig, ShellsConfig, Task},
+    // FIX: `Task` is now passed as `Arc<Task>`, `GlobalIndex` is needed for lazy resolution.
+    models::{CommandAction, GlobalIndex, ResolvedConfig, ShellConfig, ShellsConfig, Task},
 };
 use anyhow::Result;
 use colored::Colorize;
-use std::{collections::HashMap, env, fs, path::PathBuf, process::Command};
+use std::{
+    collections::{HashMap, HashSet},
+    env, fs,
+    path::PathBuf,
+    process::Command,
+    sync::Arc,
+};
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
@@ -30,58 +37,69 @@ pub enum ShellError {
     TaskExecution(#[from] anyhow::Error),
 }
 
+/// Launches an interactive shell session for a project.
 ///
-/// Launches an interactive session shell, executing `at_start` within the new shell's
-/// context and `at_exit` after the shell terminates.
+/// This function orchestrates the entire session lifecycle:
+/// 1.  It lazily resolves the project's configuration to determine the correct shell and environment.
+/// 2.  It renders the `at_start` hook commands into a temporary initialization script.
+/// 3.  It spawns a new interactive shell process, configured to run the init script upon startup.
+///     This process inherits the project's environment variables.
+/// 4.  After the user exits the shell, it executes the `at_exit` hook.
 ///
+/// # Arguments
+/// * `config` - The lazy `ResolvedConfig` facade for the project.
+/// * `task_start` - An `Option<Arc<Task>>` for the `at_start` hook, obtained lazily by the `start` handler.
+/// * `task_exit` - An `Option<Arc<Task>>` for the `at_exit` hook.
+/// * `resolver` - The `ArgResolver` for any parameters passed to the `axes start` command.
+/// * `index` - A mutable reference to the `GlobalIndex` for further lazy resolutions.
 pub fn launch_session(
     config: &ResolvedConfig,
-    task_start: Option<Task>,
-    task_exit: Option<Task>,
+    task_start: Option<Arc<Task>>,
+    task_exit: Option<Arc<Task>>,
     resolver: &ArgResolver,
+    index: &mut GlobalIndex,
 ) -> Result<(), ShellError> {
+    // 1. Determine which shell to use by lazily resolving the project's options.
     let shells_config = load_shells_config()?;
-    let shell_name = config
-        .options
+    let options = config.get_options(index)?; // Lazy call
+    let shell_name = options
         .shell
-        .as_deref()
-        .unwrap_or(get_default_shell_name());
+        .clone() // Clone the Option<String>
+        .unwrap_or_else(|| get_default_shell_name().to_string());
     let shell_config = shells_config
         .shells
-        .get(shell_name)
+        .get(&shell_name)
         .ok_or_else(|| ShellError::ShellNotDefined(shell_name.to_string()))?;
 
-    // 1. Assemble the commands for the `at_start` task. These will be written to a temporary script.
+    // 2. If an `at_start` task exists, render its commands.
     let at_start_final_commands = if let Some(task) = &task_start {
         println!("\n{}", "Preparing `at_start` hook...".dimmed());
+        let mut call_stack = HashSet::new(); // Fresh call stack for rendering
         task.commands
             .iter()
             .map(|cmd| match &cmd.action {
-                // Hooks should only contain executable commands.
                 CommandAction::Execute(template) => {
-                    task_executor::assemble_final_command(template, config, resolver)
+                    task_executor::assemble_final_command(template, config, resolver, index, &mut call_stack)
                 }
-                // Print actions are ignored in `at_start` as they have no effect in an init script.
-                CommandAction::Print(_) => Ok(String::new()),
+                CommandAction::Print(_) => Ok(String::new()), // Ignored in init scripts
             })
             .collect::<Result<Vec<String>>>()?
     } else {
         Vec::new()
     };
 
-    // 2. Build and launch the interactive shell with the temporary init script.
+    // 3. Create the temporary initialization script.
     let is_windows_shell = shell_name == "cmd" || shell_name == "powershell";
-    let script_extension = if is_windows_shell { ".bat" } else { ".sh" };
+    let script_extension = if is_windows_shell { "bat" } else { "sh" };
     let temp_script_file = NamedTempFile::with_prefix("axes-init-")?.into_temp_path();
     let temp_script_path = temp_script_file.with_extension(script_extension);
 
-    let script_content = build_init_script(config, &at_start_final_commands, is_windows_shell);
-    fs::write(&temp_script_path, script_content)?;
-    log::debug!(
-        "Temporary init script created at: {}",
-        temp_script_path.display()
-    );
+    // This function now lazily gets the environment variables.
+    let script_content = build_init_script(config, &at_start_final_commands, is_windows_shell, index)?;
+    fs::write(&temp_script_path, &script_content)?;
+    log::debug!("Temporary init script created at: {}", temp_script_path.display());
 
+    // 4. Spawn the interactive shell process.
     println!(
         "\n--- {} '{}' {}. ---",
         "axes session for".green(),
@@ -95,45 +113,53 @@ pub fn launch_session(
     cmd.env("AXES_PROJECT_NAME", &config.qualified_name);
     cmd.env("AXES_PROJECT_UUID", config.uuid.to_string());
 
-    cmd.envs(&config.env);
+    // Lazily resolve and inject the fully merged environment variables.
+    let env_vars = config.get_env(index)?;
+    cmd.envs(&env_vars);
 
     if let Some(args) = &shell_config.interactive_args {
-        for arg in args {
-            cmd.arg(arg);
-        }
+        cmd.args(args);
         cmd.arg(&temp_script_path);
     }
 
     let status = cmd.status()?;
     if !status.success() {
-        log::warn!("Interactive shell finished with code: {:?}", status.code());
+        log::warn!("Interactive shell exited with code: {:?}", status.code());
     }
 
+    // Cleanup the temporary script.
     let _ = fs::remove_file(&temp_script_path);
 
-    // 3. Execute the `at_exit` task if it exists.
+    // 5. Execute the `at_exit` task if it exists.
     if let Some(task) = &task_exit {
         println!("\n{}", "\nExecuting `at_exit` hook...".dimmed());
-        task_executor::execute_task(task, config, resolver)?;
+        task_executor::execute_task(task, config, resolver, index)?;
     }
 
     Ok(())
 }
 
+/// Builds the content of the temporary shell initialization script.
+/// This script sets environment variables and then runs the `at_start` commands.
 fn build_init_script(
     config: &ResolvedConfig,
     at_start_commands: &[String],
     is_windows: bool,
-) -> String {
+    index: &mut GlobalIndex,
+) -> Result<String> {
     let mut script = String::new();
     if is_windows {
         script.push_str("@echo off\n");
     }
 
-    for (key, value) in &config.env {
+    // Lazily resolve the fully merged environment and write export/set commands.
+    for (key, value) in config.get_env(index)? {
         if is_windows {
+            // Basic escaping for cmd.exe
+            let value = value.replace('%', "%%");
             script.push_str(&format!("set \"{}={}\"\n", key, value));
         } else {
+            // Escaping for POSIX shells
             let escaped_value = value.replace('\'', "'\\''");
             script.push_str(&format!("export {}='{}'\n", key, escaped_value));
         }
@@ -153,10 +179,10 @@ fn build_init_script(
     } else {
         script.push_str(&format!("\necho ''\necho '{}'\necho ''\n", exit_message));
     }
-    script
+    Ok(script)
 }
 
-// --- Shells.toml Management ---
+// --- Shells.toml Management (No changes needed in this section) ---
 
 fn load_shells_config() -> Result<ShellsConfig, ShellError> {
     let config_dir =
@@ -166,10 +192,11 @@ fn load_shells_config() -> Result<ShellsConfig, ShellError> {
         let default_config = generate_default_shells_config();
         let toml_string = toml::to_string_pretty(&default_config)?;
         fs::write(&shells_path, toml_string)?;
-        return Ok(default_config);
+        Ok(default_config)
+    } else {
+        let content = fs::read_to_string(shells_path)?;
+        Ok(toml::from_str(&content)?)
     }
-    let content = fs::read_to_string(shells_path)?;
-    Ok(toml::from_str(&content)?)
 }
 
 fn generate_default_shells_config() -> ShellsConfig {
@@ -192,11 +219,7 @@ fn generate_default_shells_config() -> ShellsConfig {
             );
         }
     }
-    let bash_path_str = if cfg!(target_os = "windows") {
-        "bash.exe"
-    } else {
-        "bash"
-    };
+    let bash_path_str = if cfg!(target_os = "windows") { "bash.exe" } else { "bash" };
     if is_executable_in_path(bash_path_str) {
         shells.insert(
             "bash".to_string(),
@@ -221,9 +244,5 @@ fn is_executable_in_path(executable_name: &str) -> bool {
 }
 
 fn get_default_shell_name() -> &'static str {
-    if cfg!(target_os = "windows") {
-        "cmd"
-    } else {
-        "bash"
-    }
+    if cfg!(target_os = "windows") { "cmd" } else { "bash" }
 }
