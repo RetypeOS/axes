@@ -1,9 +1,6 @@
 // src/core/paths.rs
 
-use crate::{
-    constants::GLOBAL_INDEX_FILENAME,
-    models::{GlobalIndex, ResolvedConfig},
-};
+use crate::{constants::GLOBAL_INDEX_FILENAME, models::ResolvedConfig};
 use anyhow::{Result, anyhow};
 use lazy_static::lazy_static;
 use std::fs;
@@ -109,9 +106,9 @@ pub fn expand_path_template(template: &str, project_uuid: Uuid) -> Result<PathBu
 /// The absolute, resolved path to the cache directory for this project.
 pub fn get_cache_dir_for_project(
     config: &ResolvedConfig,
-    index: &mut GlobalIndex,
+    //index: &mut GlobalIndex,
 ) -> Result<PathBuf> {
-    let options = config.get_options(index)?;
+    let options = config.get_options()?;
     let template = match &options.cache_dir {
         Some(template_str) => template_str.clone(),
         None => {

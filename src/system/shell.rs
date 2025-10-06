@@ -55,7 +55,7 @@ pub fn launch_session(
 ) -> Result<(), ShellError> {
     // 1. Determine which shell to use by lazily resolving the project's options.
     let shells_config = load_shells_config()?;
-    let options = config.get_options(index)?;
+    let options = config.get_options()?;
     let shell_name = options
         .shell
         .clone()
@@ -93,8 +93,7 @@ pub fn launch_session(
     let temp_script_file = NamedTempFile::with_prefix("axes-init-")?.into_temp_path();
     let temp_script_path = temp_script_file.with_extension(script_extension);
 
-    let script_content =
-        build_init_script(config, &at_start_final_commands, is_windows_shell, index)?;
+    let script_content = build_init_script(config, &at_start_final_commands, is_windows_shell)?;
     fs::write(&temp_script_path, &script_content)?;
     log::debug!(
         "Temporary init script created at: {}",
@@ -115,7 +114,7 @@ pub fn launch_session(
     cmd.env("AXES_PROJECT_NAME", &config.qualified_name);
     cmd.env("AXES_PROJECT_UUID", config.uuid.to_string());
 
-    let env_vars = config.get_env(index)?;
+    let env_vars = config.get_env()?;
     cmd.envs(&env_vars);
 
     if let Some(args) = &shell_config.interactive_args {
@@ -146,7 +145,7 @@ fn build_init_script(
     config: &ResolvedConfig,
     at_start_commands: &[String],
     is_windows: bool,
-    index: &mut GlobalIndex,
+    //index: &mut GlobalIndex,
 ) -> Result<String> {
     let mut script = String::new();
     if is_windows {
@@ -154,7 +153,7 @@ fn build_init_script(
     }
 
     // Lazily resolve the fully merged environment and write export/set commands.
-    for (key, value) in config.get_env(index)? {
+    for (key, value) in config.get_env()? {
         if is_windows {
             // Basic escaping for cmd.exe
             let value = value.replace('%', "%%");

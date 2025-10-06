@@ -42,7 +42,7 @@ pub fn handle(
 
     // 3. Lazily get the top-level task for the requested script.
     //    FIX: Start the recursion depth count at 0.
-    let task = config.get_script(&script_name, index, 0)?.ok_or_else(|| {
+    let task = config.get_script(&script_name, 0)?.ok_or_else(|| {
         anyhow!(
             "Script '{}' not found in project '{}'.",
             script_name.cyan(),
@@ -60,9 +60,7 @@ pub fn handle(
         .commands
         .iter()
         .flat_map(|cmd| match &cmd.action {
-            CommandAction::Execute(t) | CommandAction::Print(t) => {
-                t.iter().cloned().collect::<Vec<_>>()
-            }
+            CommandAction::Execute(t) | CommandAction::Print(t) => t.to_vec(),
         })
         .filter_map(|component| match component {
             TemplateComponent::Parameter(def) => Some(def),

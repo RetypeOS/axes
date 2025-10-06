@@ -4,8 +4,8 @@ use crate::{
     core::{cache, parameters, paths},
     models::{
         CachedProjectConfig, CanonicalCommand, Command, CommandAction, CommandExecution,
-        GlobalIndex, IndexEntry, OptionsConfig, ProjectConfig, ResolvedConfig, RunSpec, Runnable,
-        Task, TemplateComponent,
+        GlobalIndex, IndexEntry, IndexUpdate, OptionsConfig, ProjectConfig, ResolvedConfig,
+        RunSpec, Runnable, Task, TemplateComponent,
     },
 };
 use anyhow::{Context, Result, anyhow};
@@ -82,7 +82,7 @@ fn load_and_compile_layer(entry: &IndexEntry) -> Result<CachedProjectConfig> {
 /// It will be fully implemented in the next iterations.
 pub fn resolve_config(
     _uuid: Uuid,
-    _index: &mut GlobalIndex,
+    //_index: &mut GlobalIndex,
     _memoizer: &mut HashMap<Uuid, Arc<ResolvedConfig>>,
 ) -> Result<Arc<ResolvedConfig>> {
     unimplemented!("Phase 2: Main recursive resolver logic to be built here.");
@@ -110,13 +110,13 @@ pub fn load_layer_for_uuid(
         "empty".to_string()
     };
 
-    if let (Some(saved_hash), Some(cache_dir)) = (&entry.config_hash, &entry.cache_dir) {
-        if *saved_hash == current_toml_hash {
-            let cache_file_path = cache_dir.join(saved_hash);
-            if let Ok(cached_layer) = read_cached_layer(&cache_file_path) {
-                log::debug!("Cache HIT for layer '{}'.", entry.name);
-                return Ok(Arc::new(cached_layer));
-            }
+    if let (Some(saved_hash), Some(cache_dir)) = (&entry.config_hash, &entry.cache_dir)
+        && *saved_hash == current_toml_hash
+    {
+        let cache_file_path = cache_dir.join(saved_hash);
+        if let Ok(cached_layer) = read_cached_layer(&cache_file_path) {
+            log::debug!("Cache HIT for layer '{}'.", entry.name);
+            return Ok(Arc::new(cached_layer));
         }
     }
 
@@ -330,6 +330,70 @@ fn write_cached_layer(path: &Path, layer: &CachedProjectConfig) -> Result<()> {
     Ok(())
 }
 
+// --- REFACTOR: `load_layer_for_uuid` becomes `load_layer_task` ---
+// This function is the "body" of each parallel task. It is pure and thread-safe.
+pub fn load_layer_task(
+    uuid: Uuid,
+    index: &GlobalIndex, // Now receives an IMMUTABLE reference
+) -> Result<(Arc<CachedProjectConfig>, Option<IndexUpdate>)> {
+    log::debug!("Executing load task for UUID: {}", uuid);
+
+    // We get a read-only view of the entry.
+    let entry = index
+        .projects
+        .get(&uuid)
+        .ok_or_else(|| anyhow!("Project UUID {} not found in index.", uuid))?
+        .clone();
+
+    let config_path = entry.path.join(".axes").join("axes.toml");
+    let current_toml_hash = if config_path.exists() {
+        cache::calculate_validation_data(&config_path)?.content_hash
+    } else {
+        "empty".to_string()
+    };
+
+    // --- Cache Hit Logic ---
+    if let (Some(saved_hash), Some(cache_dir)) = (&entry.config_hash, &entry.cache_dir)
+        && *saved_hash == current_toml_hash
+    {
+        let cache_file_path = cache_dir.join(saved_hash);
+        if let Ok(cached_layer) = read_cached_layer(&cache_file_path) {
+            log::debug!(
+                "Cache HIT for layer '{}'. No index update needed.",
+                entry.name
+            );
+            // Return the layer and `None` for the update.
+            return Ok((Arc::new(cached_layer), None));
+        }
+    }
+
+    // --- Cache Miss Logic ---
+    log::debug!("Cache MISS for layer '{}'. Recompiling.", entry.name);
+    let new_layer = load_and_compile_layer(&entry)?;
+
+    // Temporarily, we resolve the cache_dir here. This logic will be improved.
+    // For now, it's either what's in the index, or a default.
+    let cache_dir = entry.cache_dir.clone().unwrap_or_else(|| {
+        paths::get_axes_config_dir()
+            .unwrap()
+            .join("cache")
+            .join("projects")
+    });
+
+    let new_cache_file_path = cache_dir.join(&current_toml_hash);
+    write_cached_layer(&new_cache_file_path, &new_layer)?;
+
+    // Create an `IndexUpdate` object instead of mutating the index directly.
+    let update = IndexUpdate {
+        uuid,
+        new_hash: current_toml_hash,
+        new_cache_dir: cache_dir,
+    };
+
+    // Return the new layer and `Some` update packet.
+    Ok((Arc::new(new_layer), Some(update)))
+}
+
 // --- MARK: TESTS
 
 #[cfg(test)]
@@ -417,34 +481,16 @@ mod tests {
         )
         .unwrap();
 
+        assert_eq!(config.get_version().unwrap(), Some("2.0.0".to_string()));
         assert_eq!(
-            config.get_version(&mut index).unwrap(),
-            Some("2.0.0".to_string())
-        );
-        assert_eq!(
-            config.get_description(&mut index).unwrap(),
+            config.get_description().unwrap(),
             Some("Parent description".to_string())
         );
-        assert!(
-            config
-                .get_script("child_script", &mut index, 0)
-                .unwrap()
-                .is_some()
-        );
-        assert!(
-            config
-                .get_script("common", &mut index, 0)
-                .unwrap()
-                .is_some()
-        );
-        assert!(
-            config
-                .get_script("non_existent", &mut index, 0)
-                .unwrap()
-                .is_none()
-        );
-        assert!(config.get_var("theme", &mut index, 0).unwrap().is_some());
-        let env = config.get_env(&mut index).unwrap();
+        assert!(config.get_script("child_script", 0).unwrap().is_some());
+        assert!(config.get_script("common", 0).unwrap().is_some());
+        assert!(config.get_script("non_existent", 0).unwrap().is_none());
+        assert!(config.get_var("theme", 0).unwrap().is_some());
+        let env = config.get_env().unwrap();
         assert_eq!(env.get("SHARED_VAR"), Some(&"from_child".to_string()));
     }
 
@@ -496,7 +542,7 @@ mod tests {
             depth: u32,
         ) -> Result<String> {
             let task = config
-                .get_script(script_name, index, depth)?
+                .get_script(script_name, depth)?
                 .ok_or_else(|| anyhow!("Script not found"))?;
 
             let next_script_name = if let Some(cmd) = task.commands.first() {

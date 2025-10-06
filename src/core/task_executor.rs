@@ -39,25 +39,23 @@ fn execute_task_inner(
     for command_exec in &task.commands {
         // If the current command is sequential, execute any pending parallel batch first.
         if !command_exec.run_in_parallel && !parallel_batch.is_empty() {
-            execute_parallel_batch(&parallel_batch, config, index)?;
+            execute_parallel_batch(&parallel_batch, config)?;
             parallel_batch.clear();
         }
 
         match &command_exec.action {
             CommandAction::Execute(template) => {
-                if template.len() == 1 {
-                    if let TemplateComponent::Script(script_name) = &template[0] {
-                        // FIX: Pass incremented depth to the recursive call.
-                        let sub_task = config
-                            .get_script(script_name, index, depth + 1)?
-                            .ok_or_else(|| {
-                                anyhow!("Script '{}' not found for composition.", script_name)
-                            })?;
+                if template.len() == 1
+                    && let TemplateComponent::Script(script_name) = &template[0]
+                {
+                    // FIX: Pass incremented depth to the recursive call.
+                    let sub_task = config.get_script(script_name, depth + 1)?.ok_or_else(|| {
+                        anyhow!("Script '{}' not found for composition.", script_name)
+                    })?;
 
-                        // Recursive call to execute the sub-task.
-                        execute_task_inner(&sub_task, config, resolver, index, depth + 1)?;
-                        continue; // Skip to the next command in the outer task.
-                    }
+                    // Recursive call to execute the sub-task.
+                    execute_task_inner(&sub_task, config, resolver, index, depth + 1)?;
+                    continue; // Skip to the next command in the outer task.
                 }
 
                 // Not a pure composition, so assemble the command string.
@@ -81,7 +79,6 @@ fn execute_task_inner(
                         command_exec.ignore_errors,
                         command_exec.silent_mode,
                         config,
-                        index,
                     )?;
                 }
             }
@@ -96,7 +93,7 @@ fn execute_task_inner(
 
     // Execute the final parallel batch if it exists.
     if !parallel_batch.is_empty() {
-        execute_parallel_batch(&parallel_batch, config, index)?;
+        execute_parallel_batch(&parallel_batch, config)?;
     }
 
     Ok(())
@@ -106,6 +103,7 @@ fn execute_task_inner(
 
 /// "Renders" a template of components into a final, executable string.
 /// It recursively resolves all dynamic and static tokens, including symbolic references.
+#[allow(clippy::only_used_in_recursion)]
 pub fn assemble_final_command(
     template: &[TemplateComponent],
     config: &ResolvedConfig,
@@ -139,7 +137,7 @@ pub fn assemble_final_command(
                         assemble_final_command(&temp_template, config, resolver, index, depth + 1)?
                     }
                 };
-                let env = config.get_env(index)?;
+                let env = config.get_env()?;
                 let output = executor::execute_and_capture_output(
                     &command_to_run,
                     &config.project_root,
@@ -154,14 +152,14 @@ pub fn assemble_final_command(
             TemplateComponent::Uuid => final_command.push_str(&config.uuid.to_string()),
             TemplateComponent::Version => {
                 // Lazily get the version by searching up the hierarchy.
-                final_command.push_str(config.get_version(index)?.as_deref().unwrap_or(""));
+                final_command.push_str(config.get_version()?.as_deref().unwrap_or(""));
             }
 
             // --- LAZY RESOLUTION OF SYMBOLIC REFERENCES ---
             TemplateComponent::Script(script_name) => {
                 log::debug!("Resolving inline script reference: '{}'", script_name);
                 let script_task = config
-                    .get_script(script_name, index, depth + 1)?
+                    .get_script(script_name, depth + 1)?
                     .ok_or_else(|| anyhow!("Referenced script '{}' not found.", script_name))?;
                 if script_task.commands.len() > 1 {
                     return Err(anyhow!(
@@ -185,7 +183,7 @@ pub fn assemble_final_command(
             TemplateComponent::Var(var_name) => {
                 log::debug!("Resolving var reference: '{}'", var_name);
                 let var_task = config
-                    .get_var(var_name, index, depth + 1)?
+                    .get_var(var_name, depth + 1)?
                     .ok_or_else(|| anyhow!("Referenced variable '{}' not found.", var_name))?;
                 if var_task.commands.len() > 1 {
                     return Err(anyhow!(
@@ -219,12 +217,12 @@ fn execute_single_command(
     ignore_errors: bool,
     silent: bool,
     config: &ResolvedConfig,
-    index: &mut GlobalIndex,
+    //index: &mut GlobalIndex,
 ) -> Result<()> {
     if !silent {
         println!("\n→ {}", command_str.green());
     }
-    let env = config.get_env(index)?;
+    let env = config.get_env()?;
     executor::execute_command(command_str, ignore_errors, &config.project_root, &env)?;
     Ok(())
 }
@@ -233,7 +231,7 @@ fn execute_single_command(
 fn execute_parallel_batch(
     batch: &[(String, bool, bool)],
     config: &ResolvedConfig,
-    index: &mut GlobalIndex,
+    //index: &mut GlobalIndex,
 ) -> Result<()> {
     let is_globally_silent = batch.iter().all(|(_, _, silent)| *silent);
     if !is_globally_silent {
@@ -253,7 +251,7 @@ fn execute_parallel_batch(
         print!("{}", header_block);
     }
 
-    let env = config.get_env(index)?;
+    let env = config.get_env()?;
     let results: Result<Vec<()>> = batch
         .par_iter()
         .map(|(command_str, ignore_errors, _)| {

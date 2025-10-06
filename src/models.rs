@@ -4,12 +4,27 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex, OnceLock};
 use uuid::Uuid;
 
 use crate::constants::MAX_RECURSION_DEPTH;
 use crate::core::config_resolver;
+
+/// The result of loading a single configuration layer.
+pub type LayerResult = Result<Arc<CachedProjectConfig>>;
+
+/// A thread-safe container for a future `LayerResult`.
+/// Consumers can wait on this promise until the layer is loaded by a worker thread.
+pub type LayerPromise = Arc<OnceLock<LayerResult>>;
+
+/// A data structure to securely pass updates for the GlobalIndex from worker threads
+/// back to the main thread for sequential application.
+#[derive(Debug, Clone)]
+pub struct IndexUpdate {
+    pub uuid: Uuid,
+    pub new_hash: String,
+    pub new_cache_dir: PathBuf,
+}
 
 // =========================================================================
 // === 1. TOML CONFIGURATION MODELS (User-Facing)
@@ -194,11 +209,11 @@ pub struct Task {
 
 #[derive(Debug, Clone, Default)]
 pub struct ResolvedOptionsConfig {
-    pub at_start: Option<Task>,
-    pub at_exit: Option<Task>,
+    pub at_start: Option<Arc<Task>>,
+    pub at_exit: Option<Arc<Task>>,
     pub shell: Option<String>,
-    pub open_with: HashMap<String, Task>,
-    pub cache_dir: Option<String>, // This is the template string
+    pub open_with: HashMap<String, Arc<Task>>,
+    pub cache_dir: Option<String>,
 }
 
 /// An intelligent facade that provides access to the project's configuration.
@@ -209,7 +224,7 @@ pub struct ResolvedConfig {
     pub qualified_name: String,
     pub project_root: PathBuf,
     pub(crate) hierarchy: Arc<Vec<Uuid>>,
-    memoized_layers: Arc<Mutex<HashMap<Uuid, Arc<CachedProjectConfig>>>>,
+    pub(crate) layers: Arc<HashMap<Uuid, LayerPromise>>,
     memoized_scripts: Arc<Mutex<HashMap<String, Option<Arc<Task>>>>>,
     memoized_vars: Arc<Mutex<HashMap<String, Option<Arc<Task>>>>>,
     memoized_env: Arc<Mutex<Option<HashMap<String, String>>>>,
@@ -219,20 +234,20 @@ pub struct ResolvedConfig {
 }
 
 impl ResolvedConfig {
-    /// Creates a new, empty facade ready for lazy resolution.
-    /// This is the entry point called by the main config_resolver.
+    /// Creates a new lazy facade, ready to resolve data from the provided layer promises.
     pub fn new(
         uuid: Uuid,
         qualified_name: String,
         project_root: PathBuf,
         hierarchy: Vec<Uuid>,
+        layers: HashMap<Uuid, LayerPromise>,
     ) -> Self {
         Self {
             uuid,
             qualified_name,
             project_root,
             hierarchy: Arc::new(hierarchy),
-            memoized_layers: Arc::new(Mutex::new(HashMap::new())),
+            layers: Arc::new(layers),
             memoized_scripts: Arc::new(Mutex::new(HashMap::new())),
             memoized_vars: Arc::new(Mutex::new(HashMap::new())),
             memoized_env: Arc::new(Mutex::new(None)),
@@ -243,40 +258,30 @@ impl ResolvedConfig {
     }
 
     // --- LAZY ACCESSOR METHODS ---
+    // The public methods now only need `&mut GlobalIndex` because all layer
+    // loading is channeled through the private `get_layer` method.
 
     /// Lazily finds and returns a script by name, searching up the inheritance chain.
-    /// Manages circular dependency detection.
-    pub fn get_script(
-        &self,
-        name: &str,
-        index: &mut GlobalIndex,
-        depth: u32, // Add depth parameter
-    ) -> Result<Option<Arc<Task>>> {
-        // 1. Check recursion depth limit.
-        println!("{}", depth);
+    pub fn get_script(&self, name: &str, depth: u32) -> Result<Option<Arc<Task>>> {
         if depth > MAX_RECURSION_DEPTH {
             return Err(anyhow!(
-                "Maximum recursion depth exceeded while resolving script '{}'. Check for circular dependencies.",
+                "Maximum recursion depth exceeded while resolving script '{}'.",
                 name
             ));
         }
-
-        // 2. Check in-session memoizer.
         if let Some(cached_result) = self.memoized_scripts.lock().unwrap().get(name) {
             return Ok(cached_result.clone());
         }
 
-        // 3. Iterate through hierarchy to find the script.
-        let mut result: Option<Arc<Task>> = None;
-        for uuid in self.hierarchy.iter() {
-            let layer = self.get_layer(*uuid, index)?;
+        let mut result = None;
+        for &uuid in self.hierarchy.iter() {
+            let layer = self.get_layer(uuid)?;
             if let Some(task) = layer.scripts.get(name) {
                 result = Some(Arc::new(task.clone()));
-                break; // Stop searching up the chain.
+                break;
             }
         }
 
-        // 4. Memoize the result and return.
         self.memoized_scripts
             .lock()
             .unwrap()
@@ -285,26 +290,20 @@ impl ResolvedConfig {
     }
 
     /// Lazily finds and returns a variable by name.
-    pub fn get_var(
-        &self,
-        name: &str,
-        index: &mut GlobalIndex,
-        depth: u32, // Add depth parameter
-    ) -> Result<Option<Arc<Task>>> {
+    pub fn get_var(&self, name: &str, depth: u32) -> Result<Option<Arc<Task>>> {
         if depth > MAX_RECURSION_DEPTH {
             return Err(anyhow!(
-                "Maximum recursion depth exceeded while resolving var '{}'. Check for circular dependencies.",
+                "Maximum recursion depth exceeded while resolving var '{}'.",
                 name
             ));
         }
-
         if let Some(cached_result) = self.memoized_vars.lock().unwrap().get(name) {
             return Ok(cached_result.clone());
         }
 
-        let mut result: Option<Arc<Task>> = None;
-        for uuid in self.hierarchy.iter() {
-            let layer = self.get_layer(*uuid, index)?;
+        let mut result = None;
+        for &uuid in self.hierarchy.iter() {
+            let layer = self.get_layer(uuid)?;
             if let Some(task) = layer.vars.get(name) {
                 result = Some(Arc::new(task.clone()));
                 break;
@@ -319,14 +318,13 @@ impl ResolvedConfig {
     }
 
     /// Lazily merges and returns all environment variables from the entire hierarchy.
-    pub fn get_env(&self, index: &mut GlobalIndex) -> Result<HashMap<String, String>> {
+    pub fn get_env(&self) -> Result<HashMap<String, String>> {
         if let Some(env) = self.memoized_env.lock().unwrap().as_ref() {
             return Ok(env.clone());
         }
         let mut final_env = HashMap::new();
-        // Iterate in reverse to merge from parent to child (child overrides).
-        for uuid in self.hierarchy.iter().rev() {
-            let layer = self.get_layer(*uuid, index)?;
+        for &uuid in self.hierarchy.iter().rev() {
+            let layer = self.get_layer(uuid)?;
             final_env.extend(layer.env.clone());
         }
         *self.memoized_env.lock().unwrap() = Some(final_env.clone());
@@ -334,15 +332,15 @@ impl ResolvedConfig {
     }
 
     /// Lazily finds and returns the project's version by searching up the hierarchy.
-    pub fn get_version(&self, index: &mut GlobalIndex) -> Result<Option<String>> {
+    pub fn get_version(&self) -> Result<Option<String>> {
         if let Some(version) = self.memoized_version.lock().unwrap().as_ref() {
             return Ok(version.clone());
         }
         let mut final_version = None;
-        for uuid in self.hierarchy.iter() {
-            let layer = self.get_layer(*uuid, index)?;
-            if layer.version.is_some() {
-                final_version = layer.version.clone();
+        for &uuid in self.hierarchy.iter() {
+            let layer = self.get_layer(uuid)?;
+            if let Some(version) = &layer.version {
+                final_version = Some(version.clone());
                 break;
             }
         }
@@ -350,58 +348,16 @@ impl ResolvedConfig {
         Ok(final_version)
     }
 
-    /// Lazily merges and returns the final `ResolvedOptionsConfig` from the entire hierarchy.
-    pub fn get_options(&self, index: &mut GlobalIndex) -> Result<ResolvedOptionsConfig> {
-        if let Some(options) = self.memoized_options.lock().unwrap().as_ref() {
-            return Ok(options.clone());
-        }
-
-        // This requires the same compilation logic as in the old `merge_configs`.
-        let mut final_options = ResolvedOptionsConfig::default();
-        for uuid in self.hierarchy.iter().rev() {
-            // Parent to child
-            let layer = self.get_layer(*uuid, index)?;
-
-            final_options.shell = layer.options.shell.clone().or(final_options.shell);
-            final_options.cache_dir = layer.options.cache_dir.clone().or(final_options.cache_dir);
-
-            if let Some(cmd) = layer.options.at_start.clone() {
-                final_options.at_start = Some(config_resolver::compile_command_to_task(cmd.0)?);
-            }
-            if let Some(cmd) = layer.options.at_exit.clone() {
-                final_options.at_exit = Some(config_resolver::compile_command_to_task(cmd.0)?);
-            }
-            let compiled_open_with =
-                config_resolver::compile_command_map(layer.options.open_with.clone())?;
-            final_options.open_with.extend(compiled_open_with);
-        }
-
-        *self.memoized_options.lock().unwrap() = Some(final_options.clone());
-        Ok(final_options)
-    }
-
-    /// Core helper to lazily load a single configuration layer.
-    fn get_layer(&self, uuid: Uuid, index: &mut GlobalIndex) -> Result<Arc<CachedProjectConfig>> {
-        if let Some(layer) = self.memoized_layers.lock().unwrap().get(&uuid) {
-            return Ok(layer.clone());
-        }
-        let layer = config_resolver::load_layer_for_uuid(uuid, index)?;
-        self.memoized_layers
-            .lock()
-            .unwrap()
-            .insert(uuid, layer.clone());
-        Ok(layer)
-    }
-
-    pub fn get_description(&self, index: &mut GlobalIndex) -> Result<Option<String>> {
+    /// Lazily finds and returns the project's description by searching up the hierarchy.
+    pub fn get_description(&self) -> Result<Option<String>> {
         if let Some(desc) = self.memoized_description.lock().unwrap().as_ref() {
             return Ok(desc.clone());
         }
         let mut final_desc = None;
-        for uuid in self.hierarchy.iter() {
-            let layer = self.get_layer(*uuid, index)?;
-            if let Some(desc) = layer.description.clone() {
-                final_desc = Some(desc);
+        for &uuid in self.hierarchy.iter() {
+            let layer = self.get_layer(uuid)?;
+            if let Some(desc) = &layer.description {
+                final_desc = Some(desc.clone());
                 break;
             }
         }
@@ -409,11 +365,43 @@ impl ResolvedConfig {
         Ok(final_desc)
     }
 
-    // Helper to get all scripts for `info`
-    pub fn get_all_scripts(&self, index: &mut GlobalIndex) -> Result<HashMap<String, Arc<Task>>> {
+    /// Lazily merges and returns the final `ResolvedOptionsConfig` from the entire hierarchy.
+    pub fn get_options(&self) -> Result<ResolvedOptionsConfig> {
+        if let Some(options) = self.memoized_options.lock().unwrap().as_ref() {
+            return Ok(options.clone());
+        }
+        let mut final_options = ResolvedOptionsConfig::default();
+        for &uuid in self.hierarchy.iter().rev() {
+            let layer = self.get_layer(uuid)?;
+            final_options.shell = layer.options.shell.clone().or(final_options.shell);
+            final_options.cache_dir = layer.options.cache_dir.clone().or(final_options.cache_dir);
+            if let Some(cmd) = layer.options.at_start.clone() {
+                final_options.at_start =
+                    Some(config_resolver::compile_command_to_task(cmd.0)?.into());
+            }
+            if let Some(cmd) = layer.options.at_exit.clone() {
+                final_options.at_exit =
+                    Some(config_resolver::compile_command_to_task(cmd.0)?.into());
+            }
+            let compiled_open_with =
+                config_resolver::compile_command_map(layer.options.open_with.clone())?;
+            final_options.open_with.extend(
+                compiled_open_with
+                    .into_iter()
+                    .map(|(k, v)| (k, Arc::new(v))),
+            );
+        }
+        *self.memoized_options.lock().unwrap() = Some(final_options.clone());
+        Ok(final_options)
+    }
+
+    // --- Helpers for `info` command ---
+
+    /// Lazily merges and returns all scripts from the entire hierarchy.
+    pub fn get_all_scripts(&self) -> Result<HashMap<String, Arc<Task>>> {
         let mut final_scripts = HashMap::new();
-        for uuid in self.hierarchy.iter().rev() {
-            let layer = self.get_layer(*uuid, index)?;
+        for &uuid in self.hierarchy.iter().rev() {
+            let layer = self.get_layer(uuid)?;
             for (name, task) in layer.scripts.iter() {
                 final_scripts.insert(name.clone(), Arc::new(task.clone()));
             }
@@ -421,16 +409,47 @@ impl ResolvedConfig {
         Ok(final_scripts)
     }
 
-    // Helper to get all vars for `info`
-    pub fn get_all_vars(&self, index: &mut GlobalIndex) -> Result<HashMap<String, Arc<Task>>> {
+    /// Lazily merges and returns all vars from the entire hierarchy.
+    pub fn get_all_vars(&self) -> Result<HashMap<String, Arc<Task>>> {
         let mut final_vars = HashMap::new();
-        for uuid in self.hierarchy.iter().rev() {
-            let layer = self.get_layer(*uuid, index)?;
+        for &uuid in self.hierarchy.iter().rev() {
+            let layer = self.get_layer(uuid)?;
             for (name, task) in layer.vars.iter() {
                 final_vars.insert(name.clone(), Arc::new(task.clone()));
             }
         }
         Ok(final_vars)
+    }
+
+    // --- Private Core Helper ---
+
+    /// Core helper to get a layer. It waits on the promise to be resolved by the `ConfigLoader`.
+    /// This is the only method that needs to be aware of the underlying `layers` map.
+    pub(crate) fn get_layer(&self, uuid: Uuid) -> Result<Arc<CachedProjectConfig>> {
+        let promise = self.layers.get(&uuid).ok_or_else(|| {
+            anyhow!(
+                "Internal logic error: attempt to get a layer for UUID {} not in the hierarchy.",
+                uuid
+            )
+        })?;
+
+        // `get()` on an `OnceLock` will block if the value is not yet set.
+        // This is where the main thread waits for a parallel worker thread to finish.
+        let layer_result = promise.get().ok_or_else(|| {
+            anyhow!(
+                "Internal logic error: LayerPromise for UUID {} was never set.",
+                uuid
+            )
+        })?;
+
+        match layer_result {
+            Ok(layer_arc) => Ok(layer_arc.clone()),
+            Err(e) => Err(anyhow!(
+                "Failed to load configuration layer for UUID {}: {}",
+                uuid,
+                e
+            )),
+        }
     }
 }
 
@@ -508,9 +527,6 @@ pub struct ShellsConfig {
 }
 
 // --- Binary Cache Serialization Substitutes ---
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
-pub(crate) struct SerializableSystemTime(Duration);
 
 // =========================================================================
 // === 4. CONVERSIONS & IMPLEMENTATIONS
@@ -691,15 +707,3 @@ impl ProjectConfig {
 }
 
 // --- Conversions for Serialization ---
-
-impl From<SystemTime> for SerializableSystemTime {
-    fn from(time: SystemTime) -> Self {
-        Self(time.duration_since(UNIX_EPOCH).unwrap_or_default())
-    }
-}
-
-impl From<SerializableSystemTime> for SystemTime {
-    fn from(time: SerializableSystemTime) -> Self {
-        UNIX_EPOCH + time.0
-    }
-}

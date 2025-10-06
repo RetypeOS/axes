@@ -23,17 +23,17 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
     let config = commons::resolve_config_for_context(context, index)?;
 
     // Print all sections, passing the index for lazy resolution.
-    print_metadata(&config, index)?;
-    print_scripts(&config, index)?;
-    print_variables(&config, "vars", t!("info.label.vars"), index)?;
-    print_variables(&config, "env", t!("info.label.env"), index)?;
+    print_metadata(&config)?;
+    print_scripts(&config)?;
+    print_variables(&config, "vars", t!("info.label.vars"))?;
+    print_variables(&config, "env", t!("info.label.env"))?;
 
     println!("\n---------------------------------");
     Ok(())
 }
 
 /// Prints the core metadata of the project.
-fn print_metadata(config: &ResolvedConfig, index: &mut GlobalIndex) -> Result<()> {
+fn print_metadata(config: &ResolvedConfig /*index: &mut GlobalIndex*/) -> Result<()> {
     let config_file_path = config
         .project_root
         .join(AXES_DIR)
@@ -58,19 +58,19 @@ fn print_metadata(config: &ResolvedConfig, index: &mut GlobalIndex) -> Result<()
     );
 
     // Use accessor methods to get lazily resolved data.
-    if let Some(v) = config.get_version(index)? {
+    if let Some(v) = config.get_version()? {
         println!("  {:<15} {}", t!("info.label.version").blue(), v);
     }
-    if let Some(d) = config.get_description(index)? {
+    if let Some(d) = config.get_description()? {
         println!("  {:<15} {}", t!("info.label.description").blue(), d);
     }
     Ok(())
 }
 
 /// Prints the list of available scripts, including their descriptions.
-fn print_scripts(config: &ResolvedConfig, index: &mut GlobalIndex) -> Result<()> {
+fn print_scripts(config: &ResolvedConfig /*index: &mut GlobalIndex*/) -> Result<()> {
     // To get all available scripts, we merge them from all layers.
-    let scripts = config.get_all_scripts(index)?;
+    let scripts = config.get_all_scripts()?;
 
     if scripts.is_empty() {
         println!("\n  {}", t!("info.label.no_scripts").dimmed());
@@ -87,10 +87,10 @@ fn print_scripts(config: &ResolvedConfig, index: &mut GlobalIndex) -> Result<()>
 
         print!("    - {}", cmd_name.cyan());
 
-        if let Some(d) = &task.desc {
-            if !d.trim().is_empty() {
-                print!(": {}", d.dimmed());
-            }
+        if let Some(d) = &task.desc
+            && !d.trim().is_empty()
+        {
+            print!(": {}", d.dimmed());
         }
         println!();
     }
@@ -123,11 +123,11 @@ fn print_variables(
     config: &ResolvedConfig,
     key: &str,
     title: &str,
-    index: &mut GlobalIndex,
+    //index: &mut GlobalIndex,
 ) -> Result<()> {
     if key == "vars" {
         // Merge all vars from all layers to display a complete view.
-        let vars = config.get_all_vars(index)?;
+        let vars = config.get_all_vars()?;
         if vars.is_empty() {
             return Ok(());
         }
@@ -159,7 +159,7 @@ fn print_variables(
         }
     } else if key == "env" {
         // Use the accessor method for the fully merged env.
-        let env = config.get_env(index)?;
+        let env = config.get_env()?;
         if env.is_empty() {
             return Ok(());
         }

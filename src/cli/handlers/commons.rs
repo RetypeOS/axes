@@ -3,15 +3,12 @@
 // This module contains shared functions used by multiple handlers.
 
 use anyhow::{Result, anyhow};
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::{
     core::{
-        config_resolver::{self},
+        config_loader::ConfigLoader,
         context_resolver,
         index_manager::{self},
     },
@@ -31,37 +28,14 @@ pub struct UnregisterPlan {
     pub summary_lines: Vec<String>,
 }
 
-/// The new main helper to resolve configuration for a project.
-/// It orchestrates the entire recursive, cache-aware resolution and ensures
-/// the index is updated if necessary.
 pub fn resolve_config_for_context(
     context_str: Option<String>,
     index: &mut GlobalIndex,
 ) -> Result<ResolvedConfig> {
-    // 1. Resolve context to get the target UUID.
     let final_context_str = context_str.unwrap_or_else(|| ".".to_string());
-    let (uuid, qualified_name) = context_resolver::resolve_context(&final_context_str, index)?;
-
-    // 2. Build the inheritance hierarchy (child-to-parent).
-    let mut hierarchy = Vec::new();
-    let mut current_uuid = Some(uuid);
-    while let Some(id) = current_uuid {
-        hierarchy.push(id);
-        let entry = index
-            .projects
-            .get(&id)
-            .ok_or_else(|| anyhow!("Broken parent link for UUID {}", id))?;
-        current_uuid = entry.parent;
-    }
-
-    // 3. Create and return the lazy facade.
-    let project_root = index.projects.get(&uuid).unwrap().path.clone();
-    Ok(ResolvedConfig::new(
-        uuid,
-        qualified_name,
-        project_root,
-        hierarchy,
-    ))
+    let (uuid, _qualified_name) = context_resolver::resolve_context(&final_context_str, index)?;
+    let mut loader = ConfigLoader::new(index);
+    loader.resolve(uuid)
 }
 
 /// Prepares a plan for unregistering projects. This function is a "dry run"
@@ -177,53 +151,6 @@ fn check_reparent_collisions(
     }
 
     Ok((warnings, conflicts))
-}
-
-/// Helper function to resolve a project's configuration.
-/// It normalizes the context input before passing it to the main context_resolver.
-//pub fn resolve_config_from_context_or_session(
-//    context_str: Option<String>,
-//    index: &GlobalIndex,
-//) -> Result<ResolvedConfig> {
-//    // This function now acts as a clean bridge to the powerful context_resolver.
-//
-//    // If no context is provided (e.g., from `axes build`), we default to `.`
-//    // which means "find project in current dir or parents". The session-awareness
-//    // logic is now correctly handled inside `context_resolver`.
-//    let final_context_str = context_str.unwrap_or_else(|| ".".to_string());
-//
-//    // Delegate the complex resolution logic to the expert module.
-//    let (uuid, qualified_name) = context_resolver::resolve_context(&final_context_str, index)?;
-//
-//    // Once we have the canonical UUID, we can resolve its config.
-//    config_resolver::resolve_config_for_uuid(uuid, qualified_name, index).with_context(|| {
-//        format!(
-//            "Failed to resolve configuration for context '{}'",
-//            final_context_str
-//        )
-//    })
-//}
-
-pub fn resolve_config_and_update_index_if_needed(
-    context_str: Option<String>,
-    index: &mut GlobalIndex,
-) -> Result<ResolvedConfig> {
-    // 1. Resolve context to a canonical UUID.
-    let final_context_str = context_str.unwrap_or_else(|| ".".to_string());
-    // The `resolve_context` call now needs a mutable index.
-    let (uuid, _qualified_name) = context_resolver::resolve_context(&final_context_str, index)?;
-
-    // --- NEW FLOW ---
-    // For Phase 1, we create the memoizer here. In the future, this might live higher up.
-    let mut memoizer = HashMap::new();
-
-    // Call the new top-level resolver.
-    let resolved_config_arc = config_resolver::resolve_config(uuid, index, &mut memoizer)?;
-
-    // The logic of saving the index if it's dirty will be handled by a higher-level caller (e.g., `main`).
-    // This function's responsibility is just to resolve.
-
-    Ok(Arc::try_unwrap(resolved_config_arc).unwrap_or_else(|arc| (*arc).clone()))
 }
 
 /// Interactive, multi-modal parent selector.
