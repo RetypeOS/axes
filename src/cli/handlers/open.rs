@@ -1,8 +1,8 @@
-// src/cli/handlers/open.rs
+// src/cli/handlers/open.rs (CORRECTO Y FUNCIONAL)
 
 use crate::{
     cli::handlers::commons,
-    core::{config_resolver, index_manager, parameters::ArgResolver, task_executor},
+    core::{parameters::ArgResolver, task_executor},
     models::{CommandAction, GlobalIndex, ParameterDef, TemplateComponent},
 };
 use anyhow::{Result, anyhow};
@@ -12,7 +12,7 @@ use colored::*;
 #[derive(Parser, Debug, Default)]
 #[command(no_binary_name = true)]
 struct OpenArgs {
-    /// The application key from [options.open_with] to use. If omitted, uses 'default'.
+    /// The application key from [options.open_with] to use. If omitted, uses the configured default.
     app_key: Option<String>,
     /// Parameters to pass to the open command.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -20,29 +20,36 @@ struct OpenArgs {
 }
 
 pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
-    // 1. Parse args and resolve config.
+    // 1. Parse args and resolve config (lazy).
     let open_args = OpenArgs::try_parse_from(&args)?;
-    let context_str = context.unwrap_or_else(|| ".".to_string());
-    let mut index = index_manager::load_and_ensure_global_project()?;
-    let mut config = commons::resolve_config_and_update_index_if_needed(Some(context_str), &mut index)?;
+    let config = commons::resolve_config_for_context(context, index)?;
+    // `get_options` now correctly returns a `ResolvedOptionsConfig`.
+    let options = config.get_options()?;
 
-    // 2. Determine which `open_with` command to use, correctly handling the 'default' key.
-    let app_key_from_user = open_args.app_key.as_deref().unwrap_or("default");
+    // 2. Determine which `open_with` command to use. This now compiles successfully.
+    let app_key_to_use = open_args
+        .app_key
+        .or(options.open_with.default)
+        .ok_or_else(|| {
+            anyhow!(
+                "No application key provided and no 'default' is configured in [options.open_with]."
+            )
+        })?;
 
-    let final_key = if app_key_from_user == "default" {
-        app_key_from_user.to_string()
-    } else {
-        app_key_from_user.to_string()
-    };
+    // 3. Get the compiled Task from the `commands` map. This also compiles successfully.
+    let task = options
+        .open_with
+        .commands
+        .get(&app_key_to_use)
+        .ok_or_else(|| {
+            anyhow!(
+                "Application key '{}' not found in [options.open_with] definitions.",
+                app_key_to_use.cyan()
+            )
+        })?
+        .clone(); // Clone the Arc<Task>
 
-    let task = config.options.open_with.get(&final_key)
-        .ok_or_else(|| anyhow!("Application key '{}' not found in [options.open_with].", final_key))?
-        .clone(); // Clone to own the task
-
-    // 3. Resolve the command into a Task.
-    //let task = config_resolver::resolve_open_with_task(&mut config, &final_key, &index)?;
-
-    // 4. Collect definitions and resolve arguments for the task.
+    // 4. Collect parameter definitions and resolve arguments for the task.
     let definitions: Vec<ParameterDef> = task
         .commands
         .iter()
@@ -66,8 +73,8 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
     let resolver = ArgResolver::new(&definitions, &open_args.params, has_generic_params)?;
 
     // 5. Execute the task.
-    println!("\n🚀 Opening with '{}'...", final_key.cyan());
-    task_executor::execute_task(&task, &config, &resolver)?;
+    println!("\n🚀 Opening with '{}'...", app_key_to_use.cyan());
+    task_executor::execute_task(&task, &config, &resolver, index)?;
 
     Ok(())
 }

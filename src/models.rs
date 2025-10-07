@@ -106,12 +106,19 @@ impl<'de> Deserialize<'de> for Command {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct TomlOpenWithConfig {
+    pub default: Option<String>,
+    #[serde(flatten)]
+    pub commands: HashMap<String, Command>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct OptionsConfig {
     pub at_start: Option<Command>,
     pub at_exit: Option<Command>,
     pub shell: Option<String>,
     #[serde(default)]
-    pub open_with: HashMap<String, Command>,
+    pub open_with: TomlOpenWithConfig,
     #[serde(default)]
     pub cache_dir: Option<String>,
 }
@@ -192,12 +199,12 @@ pub enum CommandAction {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[non_exhaustive]
 pub struct CommandExecution {
     pub action: CommandAction,
     pub ignore_errors: bool,
     pub run_in_parallel: bool,
     pub silent_mode: bool,
-    pub(crate) parameter_defs: (),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -208,12 +215,38 @@ pub struct Task {
 
 // --- Cache & Resolved Config Models ---
 
+/// [NEW] A simple, bincode-compatible representation for open_with options.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct CachedOpenWithConfig {
+    pub default: Option<String>,
+    pub commands: HashMap<String, Command>,
+}
+
+/// [NEW] A bincode-compatible representation of all options.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct CachedOptionsConfig {
+    pub at_start: Option<Command>,
+    pub at_exit: Option<Command>,
+    pub shell: Option<String>,
+    #[serde(default)]
+    pub open_with: CachedOpenWithConfig,
+    #[serde(default)]
+    pub cache_dir: Option<String>,
+}
+
+/// but with compiled Tasks instead of raw Commands.
+#[derive(Debug, Clone, Default)]
+pub struct ResolvedOpenWithConfig {
+    pub default: Option<String>,
+    pub commands: HashMap<String, Arc<Task>>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ResolvedOptionsConfig {
     pub at_start: Option<Arc<Task>>,
     pub at_exit: Option<Arc<Task>>,
     pub shell: Option<String>,
-    pub open_with: HashMap<String, Arc<Task>>,
+    pub open_with: ResolvedOpenWithConfig,
     pub cache_dir: Option<String>,
 }
 
@@ -371,11 +404,31 @@ impl ResolvedConfig {
         if let Some(options) = self.memoized_options.lock().unwrap().as_ref() {
             return Ok(options.clone());
         }
+
         let mut final_options = ResolvedOptionsConfig::default();
+
         for &uuid in self.hierarchy.iter().rev() {
             let layer = self.get_layer(uuid)?;
+
             final_options.shell = layer.options.shell.clone().or(final_options.shell);
             final_options.cache_dir = layer.options.cache_dir.clone().or(final_options.cache_dir);
+
+            // Merge `open_with` options
+            final_options.open_with.default = layer
+                .options
+                .open_with
+                .default
+                .clone()
+                .or(final_options.open_with.default);
+            let compiled_open_with =
+                config_resolver::compile_command_map(layer.options.open_with.commands.clone())?;
+            final_options.open_with.commands.extend(
+                compiled_open_with
+                    .into_iter()
+                    .map(|(k, v)| (k, Arc::new(v))),
+            );
+
+            // Compile hooks
             if let Some(cmd) = layer.options.at_start.clone() {
                 final_options.at_start =
                     Some(config_resolver::compile_command_to_task(cmd.0)?.into());
@@ -384,14 +437,8 @@ impl ResolvedConfig {
                 final_options.at_exit =
                     Some(config_resolver::compile_command_to_task(cmd.0)?.into());
             }
-            let compiled_open_with =
-                config_resolver::compile_command_map(layer.options.open_with.clone())?;
-            final_options.open_with.extend(
-                compiled_open_with
-                    .into_iter()
-                    .map(|(k, v)| (k, Arc::new(v))),
-            );
         }
+
         *self.memoized_options.lock().unwrap() = Some(final_options.clone());
         Ok(final_options)
     }
@@ -465,9 +512,9 @@ impl ResolvedConfig {
     //    let mut definitions = HashSet::new();
     //    // The call stack is crucial to prevent infinite recursion on circular dependencies.
     //    let mut call_stack = HashSet::new();
-    //    
+    //
     //    self.collect_defs_recursive(top_level_task, &mut definitions, &mut call_stack)?;
-    //    
+    //
     //    Ok(definitions.into_iter().collect())
     //}
 
@@ -483,8 +530,12 @@ impl ResolvedConfig {
     ) -> Result<Arc<Task>> {
         // We only need to process tasks that contain symbolic references.
         let has_refs = task.commands.iter().any(|cmd| {
-            let template = match &cmd.action { CommandAction::Execute(t) | CommandAction::Print(t) => t };
-            template.iter().any(|c| matches!(c, TemplateComponent::Script(_) | TemplateComponent::Var(_)))
+            let template = match &cmd.action {
+                CommandAction::Execute(t) | CommandAction::Print(t) => t,
+            };
+            template
+                .iter()
+                .any(|c| matches!(c, TemplateComponent::Script(_) | TemplateComponent::Var(_)))
         });
 
         if !has_refs {
@@ -497,37 +548,34 @@ impl ResolvedConfig {
                 CommandAction::Execute(t) | CommandAction::Print(t) => t,
             };
 
-            // This is the crucial part: flatten each template (line).
-            let flattened_template = self.flatten_template_recursive(template, call_stack)?;
-            
-            // Check for pure script composition AFTER flattening.
-            // If a line becomes a series of commands from a sub-task, extend.
-            // This is complex. Let's simplify, inspired by the old `expand_line`.
-            // Let's stick to a single, powerful `flatten_template` function.
+            // [FIX for warning] The unused variable `flattened_template` was here.
+            // The logic below correctly handles both pure and inline composition without needing it.
 
-            // The logic from the old `expand_and_get_task_internal` is what we need.
-            if template.len() == 1 {
-                if let TemplateComponent::Script(name) = &template[0] {
-                    let key = format!("script::{}", name);
-                    if !call_stack.insert(key.clone()) {
-                        return Err(anyhow!("Circular dependency: {}", name));
-                    }
-                    if let Some(sub_task) = self.get_script(name, 0)? {
-                        let flattened_sub_task = self.flatten_task_recursive(&sub_task, call_stack)?;
-                        // Apply prefixes from the call site (`cmd_exec`) to the sub-commands
-                        let mut inherited_commands = flattened_sub_task.commands.clone();
-                        for sub_cmd in &mut inherited_commands {
-                             sub_cmd.ignore_errors |= cmd_exec.ignore_errors;
-                             sub_cmd.run_in_parallel |= cmd_exec.run_in_parallel;
-                             sub_cmd.silent_mode |= cmd_exec.silent_mode;
-                        }
-                        new_commands.extend(inherited_commands);
-                    }
-                    call_stack.remove(&key);
-                    continue; // Continue to the next command in the outer task
+            // This is the crucial part: flatten each template (line).
+            // let flattened_template = self.flatten_template_recursive(template, call_stack)?; // <- LINEA ELIMINADA
+
+            if template.len() == 1
+                && let TemplateComponent::Script(name) = &template[0]
+            {
+                let key = format!("script::{}", name);
+                if !call_stack.insert(key.clone()) {
+                    return Err(anyhow!("Circular dependency: {}", name));
                 }
+                if let Some(sub_task) = self.get_script(name, 0)? {
+                    let flattened_sub_task = self.flatten_task_recursive(&sub_task, call_stack)?;
+                    // Apply prefixes from the call site (`cmd_exec`) to the sub-commands
+                    let mut inherited_commands = flattened_sub_task.commands.clone();
+                    for sub_cmd in &mut inherited_commands {
+                        sub_cmd.ignore_errors |= cmd_exec.ignore_errors;
+                        sub_cmd.run_in_parallel |= cmd_exec.run_in_parallel;
+                        sub_cmd.silent_mode |= cmd_exec.silent_mode;
+                    }
+                    new_commands.extend(inherited_commands);
+                }
+                call_stack.remove(&key);
+                continue; // Continue to the next command in the outer task
             }
-            
+
             // If it's not a pure composition, it's an inline composition.
             let mut new_cmd_exec = cmd_exec.clone();
             let new_template = self.flatten_template_recursive(template, call_stack)?;
@@ -543,7 +591,7 @@ impl ResolvedConfig {
             desc: task.desc.clone(),
         }))
     }
-    
+
     // This function is the equivalent of the old `expand_line`.
     fn flatten_template_recursive(
         &self,
@@ -555,24 +603,36 @@ impl ResolvedConfig {
             match component {
                 TemplateComponent::Script(name) | TemplateComponent::Var(name) => {
                     let is_var = matches!(component, TemplateComponent::Var(_));
-                    let key = if is_var { format!("var::{}", name) } else { format!("script::{}", name) };
+                    let key = if is_var {
+                        format!("var::{}", name)
+                    } else {
+                        format!("script::{}", name)
+                    };
 
                     if !call_stack.insert(key.clone()) {
                         return Err(anyhow!("Circular dependency: {}", name));
                     }
 
-                    let sub_task = if is_var { self.get_var(name, 0)? } else { self.get_script(name, 0)? };
+                    let sub_task = if is_var {
+                        self.get_var(name, 0)?
+                    } else {
+                        self.get_script(name, 0)?
+                    };
 
                     if let Some(task) = sub_task {
                         if task.commands.len() > 1 {
-                            return Err(anyhow!("Inline composition of multi-line script/var '{}' is not supported.", name));
+                            return Err(anyhow!(
+                                "Inline composition of multi-line script/var '{}' is not supported.",
+                                name
+                            ));
                         }
                         if let Some(cmd) = task.commands.first() {
                             let sub_template = match &cmd.action {
                                 CommandAction::Execute(t) | CommandAction::Print(t) => t,
                             };
                             // Recurse into the sub-template
-                            final_components.extend(self.flatten_template_recursive(sub_template, call_stack)?);
+                            final_components
+                                .extend(self.flatten_template_recursive(sub_template, call_stack)?);
                         }
                     }
                     call_stack.remove(&key);
@@ -584,57 +644,6 @@ impl ResolvedConfig {
         }
         Ok(final_components)
     }
-
-    //// --- Private recursive helper ---
-    //fn collect_defs_recursive(
-    //    &self,
-    //    task: &Arc<Task>,
-    //    definitions: &mut HashSet<ParameterDef>,
-    //    call_stack: &mut HashSet<String>,
-    //) -> Result<()> {
-    //    for command_exec in &task.commands {
-    //        let template = match &command_exec.action {
-    //            CommandAction::Execute(t) | CommandAction::Print(t) => t,
-    //        };
-//
-    //        for component in template {
-    //            match component {
-    //                // 1. If it's a parameter, collect it.
-    //                TemplateComponent::Parameter(def) => {
-    //                    definitions.insert(def.clone());
-    //                }
-    //                // 2. If it's a script reference, recurse.
-    //                TemplateComponent::Script(script_name) => {
-    //                    let key = format!("script::{}", script_name);
-    //                    
-    //                    // Cycle detection
-    //                    if !call_stack.insert(key.clone()) {
-    //                        // We found a cycle, but for parameter collection, we can just stop
-    //                        // traversing this path instead of erroring out. The real error
-    //                        // will be caught during execution.
-    //                        log::warn!("Circular dependency detected during parameter collection for '{}'. Ignoring this path.", script_name);
-    //                        continue;
-    //                    }
-//
-    //                    // Get the sub-task (note: depth is 0 as this is a new logical "lookup")
-    //                    if let Some(sub_task) = self.get_script(script_name, 0)? {
-    //                        // Recursive call
-    //                        self.collect_defs_recursive(&sub_task, definitions, call_stack)?;
-    //                    }
-    //                    
-    //                    // Backtrack from the call stack for this path
-    //                    call_stack.remove(&key);
-    //                }
-    //                // We can ignore other components (`Literal`, `Var`, `Run`, etc.) as they
-    //                // don't contain parameter definitions themselves. `Var`s are handled
-    //                // when they are resolved during execution, but for `ArgResolver`'s
-    //                // contract, we only need the top-level parameter tokens.
-    //                _ => {}
-    //            }
-    //        }
-    //    }
-    //    Ok(())
-    //}
 }
 
 // =========================================================================
@@ -665,19 +674,12 @@ pub struct IndexEntry {
 /// This is the unit that will be stored in the single-layer cache.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct CachedProjectConfig {
-    /// The project's own version, if defined.
     pub version: Option<String>,
-    /// The project's own description, if defined.
     pub description: Option<String>,
-    /// Scripts defined directly in this project's `axes.toml`, already expanded to AST.
     pub scripts: HashMap<String, Task>,
-    /// Variables defined directly in this project's `axes.toml`, already expanded to AST.
     pub vars: HashMap<String, Task>,
-    /// Environment variables defined directly in this project's `axes.toml`.
     pub env: HashMap<String, String>,
-    /// Options defined directly in this project's `axes.toml`.
-    /// Note: `cache_dir` is stored as a template string here.
-    pub options: OptionsConfig,
+    pub options: CachedOptionsConfig,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Default)]
@@ -719,11 +721,17 @@ pub struct ShellsConfig {
 impl ProjectConfig {
     /// Creates a new, default ProjectConfig. This is used to generate
     /// the initial `axes.toml` for the global project.
+    /// Creates a new, default ProjectConfig.
+    ///
+    /// This function is used to generate the initial `axes.toml` for the `global` project
+    /// when it's first created. It provides a set of sensible, platform-aware defaults
+    /// for common actions like opening a file explorer or an editor, making `axes`
+    /// useful out-of-the-box.
     pub fn new() -> Self {
-        let mut open_with_defaults = HashMap::new();
+        let mut open_with_commands = HashMap::new();
 
         // --- Editor scripts ---
-        open_with_defaults.insert(
+        open_with_commands.insert(
             "editor".to_string(),
             Command(CanonicalCommand {
                 default: Some(Runnable::Single(
@@ -732,7 +740,7 @@ impl ProjectConfig {
                 ..Default::default()
             }),
         );
-        open_with_defaults.insert(
+        open_with_commands.insert(
             "idea".to_string(),
             Command(CanonicalCommand {
                 default: Some(Runnable::Single(
@@ -744,48 +752,27 @@ impl ProjectConfig {
 
         // --- OS-Specific File Explorer scripts ---
         if cfg!(target_os = "windows") {
-            open_with_defaults.insert(
+            open_with_commands.insert(
                 "explorer".to_string(),
                 Command(CanonicalCommand {
                     default: Some(Runnable::Single("-explorer \"<axes::path>\"".to_string())),
                     ..Default::default()
                 }),
             );
-            open_with_defaults.insert(
-                "default".to_string(),
-                Command(CanonicalCommand {
-                    default: Some(Runnable::Single("explorer".to_string())),
-                    ..Default::default()
-                }),
-            );
         } else if cfg!(target_os = "macos") {
-            open_with_defaults.insert(
+            open_with_commands.insert(
                 "finder".to_string(),
                 Command(CanonicalCommand {
                     default: Some(Runnable::Single("open \"<axes::path>\"".to_string())),
                     ..Default::default()
                 }),
             );
-            open_with_defaults.insert(
-                "default".to_string(),
-                Command(CanonicalCommand {
-                    default: Some(Runnable::Single("finder".to_string())),
-                    ..Default::default()
-                }),
-            );
         } else {
             // Linux and others
-            open_with_defaults.insert(
+            open_with_commands.insert(
                 "files".to_string(),
                 Command(CanonicalCommand {
                     default: Some(Runnable::Single("xdg-open \"<axes::path>\"".to_string())),
-                    ..Default::default()
-                }),
-            );
-            open_with_defaults.insert(
-                "default".to_string(),
-                Command(CanonicalCommand {
-                    default: Some(Runnable::Single("files".to_string())),
                     ..Default::default()
                 }),
             );
@@ -793,7 +780,7 @@ impl ProjectConfig {
 
         // --- Terminal/Shell Command ---
         if cfg!(target_os = "windows") {
-            open_with_defaults.insert(
+            open_with_commands.insert(
                 "shell".to_string(),
                 Command(CanonicalCommand {
                     default: Some(Runnable::Single(
@@ -803,7 +790,7 @@ impl ProjectConfig {
                 }),
             );
         } else {
-            open_with_defaults.insert(
+            open_with_commands.insert(
                 "shell".to_string(),
                 Command(CanonicalCommand {
                     default: Some(Runnable::Single("<axes::vars::terminal_cmd>".to_string())),
@@ -811,6 +798,18 @@ impl ProjectConfig {
                 }),
             );
         }
+
+        // --- [FIX] Construct the `OpenWithConfig` struct correctly ---
+        let open_with_config = TomlOpenWithConfig {
+            default: Some(if cfg!(target_os = "windows") {
+                "explorer".to_string()
+            } else if cfg!(target_os = "macos") {
+                "finder".to_string()
+            } else {
+                "files".to_string()
+            }),
+            commands: open_with_commands,
+        };
 
         // --- Default Variables ---
         let mut vars_defaults = HashMap::new();
@@ -827,7 +826,7 @@ impl ProjectConfig {
             description: Some("The global axes project configuration.".to_string()),
             scripts: HashMap::new(),
             options: OptionsConfig {
-                open_with: open_with_defaults,
+                open_with: open_with_config,
                 at_start: None,
                 at_exit: None,
                 shell: None,

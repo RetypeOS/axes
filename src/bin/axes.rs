@@ -68,11 +68,11 @@ static COMMAND_REGISTRY: &[CommandDefinition] = &[
     //    aliases: &[],
     //    handler: handlers::link::handle,
     //},
-    //CommandDefinition {
-    //    name: "open",
-    //    aliases: &[],
-    //    handler: handlers::open::handle,
-    //},
+    CommandDefinition {
+        name: "open",
+        aliases: &[],
+        handler: handlers::open::handle,
+    },
     CommandDefinition {
         name: "register",
         aliases: &["reg"],

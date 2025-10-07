@@ -3,8 +3,8 @@
 use crate::{
     core::{cache, parameters, paths},
     models::{
-        CachedProjectConfig, CanonicalCommand, Command, CommandAction, CommandExecution,
-        GlobalIndex, IndexEntry, IndexUpdate, OptionsConfig, ProjectConfig,
+        CachedOpenWithConfig, CachedOptionsConfig, CachedProjectConfig, CanonicalCommand, Command,
+        CommandAction, CommandExecution, GlobalIndex, IndexEntry, IndexUpdate, ProjectConfig,
         RunSpec, Runnable, Task, TemplateComponent,
     },
 };
@@ -42,24 +42,19 @@ pub enum ResolverError {
 fn load_and_compile_layer(entry: &IndexEntry) -> Result<CachedProjectConfig> {
     let config_path = entry.path.join(".axes").join("axes.toml");
     if !config_path.exists() {
-        // If a project has no axes.toml, it's an empty layer.
-        return Ok(CachedProjectConfig {
-            version: None,
-            description: None,
-            scripts: HashMap::new(),
-            vars: HashMap::new(),
-            env: HashMap::new(),
-            options: OptionsConfig::default(),
-        });
+        // For an empty layer, return a default CachedProjectConfig.
+        return Ok(CachedProjectConfig::default());
     }
 
     let content = fs::read_to_string(&config_path)?;
+    // 1. Deserialize from TOML using the user-friendly `ProjectConfig` struct.
     let project_config: ProjectConfig =
         toml::from_str(&content).map_err(|e| ResolverError::TomlParse {
             path: config_path,
             source: e,
         })?;
 
+    // 2. Compile scripts and vars as before.
     let scripts = compile_command_map(project_config.scripts)?;
     let vars_as_commands: HashMap<String, Command> = project_config
         .vars
@@ -68,13 +63,26 @@ fn load_and_compile_layer(entry: &IndexEntry) -> Result<CachedProjectConfig> {
         .collect();
     let vars = compile_command_map(vars_as_commands)?;
 
+    // 3. Convert from the TOML-specific `OptionsConfig` to the bincode-safe `CachedOptionsConfig`.
+    let cached_options = CachedOptionsConfig {
+        at_start: project_config.options.at_start,
+        at_exit: project_config.options.at_exit,
+        shell: project_config.options.shell,
+        cache_dir: project_config.options.cache_dir,
+        open_with: CachedOpenWithConfig {
+            default: project_config.options.open_with.default,
+            commands: project_config.options.open_with.commands,
+        },
+    };
+
+    // 4. Construct the final `CachedProjectConfig` to be returned and stored.
     Ok(CachedProjectConfig {
         version: project_config.version,
         description: project_config.description,
         scripts,
         vars,
         env: project_config.env,
-        options: project_config.options,
+        options: cached_options, // Use the converted, bincode-safe options.
     })
 }
 
@@ -128,7 +136,6 @@ fn expand_line_to_execution(line: &str) -> Result<CommandExecution> {
         ignore_errors: prefixes.ignore_errors,
         run_in_parallel: prefixes.run_in_parallel,
         silent_mode: prefixes.silent_mode,
-        parameter_defs: (),
     })
 }
 
@@ -242,10 +249,12 @@ fn read_cached_layer(path: &Path) -> Result<CachedProjectConfig> {
     let (cached_layer, _): (CachedProjectConfig, usize) =
         bincode::serde::decode_from_slice(&bytes, bincode::config::standard()).with_context(
             || {
-                format!(
+                let a = format!(
                     "Failed to deserialize cache file '{}'. It might be corrupt.",
                     path.display()
-                )
+                );
+                log::trace!("{}", a);
+                a
             },
         )?;
     Ok(cached_layer)
@@ -285,31 +294,45 @@ pub fn load_layer_task(
     } else {
         "empty".to_string()
     };
-    
+
     // --- CACHE HIT ATTEMPT ---
-    if let (Some(saved_hash), Some(cache_dir)) = (&entry.config_hash, &entry.cache_dir) {
-        if *saved_hash == current_toml_hash {
-            let cache_file_path = cache_dir.join(saved_hash);
-            log::trace!("Attempting cache hit for layer '{}' at '{}'", entry.name, cache_file_path.display());
-            if let Ok(cached_layer) = read_cached_layer(&cache_file_path) {
-                log::debug!("Cache HIT for layer '{}'. No index update needed.", entry.name);
-                return Ok((Arc::new(cached_layer), None));
-            }
-            log::warn!("Cache file for '{}' not found or corrupt at indexed path. Forcing recompile.", entry.name);
+    if let (Some(saved_hash), Some(cache_dir)) = (&entry.config_hash, &entry.cache_dir)
+        && *saved_hash == current_toml_hash
+    {
+        let cache_file_path = cache_dir.join(saved_hash);
+        log::debug!(
+            "Attempting cache hit for layer '{}' at '{}'",
+            entry.name,
+            cache_file_path.display()
+        );
+        if let Ok(cached_layer) = read_cached_layer(&cache_file_path) {
+            log::debug!(
+                "Cache HIT for layer '{}'. No index update needed.",
+                entry.name
+            );
+            return Ok((Arc::new(cached_layer), None));
         }
+        log::warn!(
+            "Cache file for '{}' not found or corrupt at indexed path. Forcing recompile.",
+            entry.name
+        );
     }
 
     // --- CACHE MISS LOGIC ---
     log::debug!("Cache MISS for layer '{}'. Recompiling.", entry.name);
-    
+
     let new_layer = load_and_compile_layer(&entry)?;
 
     // --- FIX: USE THE NEW ROBUST PATH RESOLUTION LOGIC ---
     let final_cache_dir = paths::resolve_cache_dir_for_project(uuid, index, &new_layer.options)?;
-    
+
     let new_cache_file_path = final_cache_dir.join(&current_toml_hash);
     write_cached_layer(&new_cache_file_path, &new_layer)?;
-    log::debug!("New cache for '{}' written to '{}'", entry.name, new_cache_file_path.display());
+    log::debug!(
+        "New cache for '{}' written to '{}'",
+        entry.name,
+        new_cache_file_path.display()
+    );
 
     let update = IndexUpdate {
         uuid,
@@ -326,7 +349,7 @@ pub fn load_layer_task(
 mod tests {
     use super::*;
     use crate::core::index_manager::GLOBAL_PROJECT_UUID;
-    use crate::models::{GlobalIndex};
+    use crate::models::GlobalIndex;
     use std::fs;
     use tempfile::tempdir;
 

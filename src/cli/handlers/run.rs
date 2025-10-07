@@ -58,7 +58,6 @@ pub fn handle(
         return Ok(());
     }
 
-
     // 4. Collect all parameter definitions from every command in the task.
     let all_definitions: Vec<ParameterDef> = flattened_task
         .commands

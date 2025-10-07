@@ -1,7 +1,7 @@
 // src/core/paths.rs
 
+use crate::constants::GLOBAL_INDEX_FILENAME;
 use crate::models::GlobalIndex;
-use crate::{constants::GLOBAL_INDEX_FILENAME, models::ResolvedConfig};
 use anyhow::{Result, anyhow};
 use lazy_static::lazy_static;
 use std::fs;
@@ -113,7 +113,7 @@ pub fn get_default_cache_dir_for_project(uuid: Uuid) -> Result<PathBuf> {
 pub fn resolve_cache_dir_for_project(
     uuid: Uuid,
     index: &GlobalIndex,
-    compiled_layer_options: &crate::models::OptionsConfig,
+    compiled_layer_options: &crate::models::CachedOptionsConfig,
 ) -> Result<PathBuf> {
     // 1. Determine the Cache Root Path.
     let cache_root = if let Some(template) = &compiled_layer_options.cache_dir {
@@ -127,12 +127,13 @@ pub fn resolve_cache_dir_for_project(
             if let Some(entry) = index.projects.get(&id) {
                 // We need to look at the parent's *resolved* cache dir and go one level up
                 // to find its root. This assumes the parent's dir is already in the index.
-                if let Some(parent_cache_dir) = &entry.cache_dir {
-                    if let Some(parent_root) = parent_cache_dir.parent().and_then(|p| p.parent()) {
-                        inherited_root = Some(parent_root.to_path_buf());
-                        break;
-                    }
+                if let Some(parent_cache_dir) = &entry.cache_dir
+                    && let Some(parent_root) = parent_cache_dir.parent().and_then(|p| p.parent())
+                {
+                    inherited_root = Some(parent_root.to_path_buf());
+                    break;
                 }
+
                 current_uuid = entry.parent;
             } else {
                 break; // Broken link

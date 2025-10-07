@@ -8,7 +8,7 @@ pub mod commons;
 pub mod info;
 pub mod init;
 //pub mod link;
-//pub mod open;
+pub mod open;
 pub mod register;
 //pub mod rename;
 pub mod run;
