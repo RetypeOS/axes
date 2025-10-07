@@ -2,7 +2,7 @@
 
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use uuid::Uuid;
@@ -197,6 +197,7 @@ pub struct CommandExecution {
     pub ignore_errors: bool,
     pub run_in_parallel: bool,
     pub silent_mode: bool,
+    pub(crate) parameter_defs: (),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -451,6 +452,189 @@ impl ResolvedConfig {
             )),
         }
     }
+
+    ///// Collects all unique `ParameterDef`s from a given top-level task and all of its
+    ///// composed sub-tasks by performing a recursive dry-run traversal.
+    ///// This is crucial for the `ArgResolver` to get a complete contract of the execution graph.
+    //pub fn collect_all_parameter_defs(
+    //    &self,
+    //    top_level_task: &Arc<Task>,
+    //) -> Result<Vec<ParameterDef>> {
+    //    // We use a HashSet internally to automatically handle duplicates.
+    //    // A `ParameterDef` derives `PartialEq` and `Hash`, so this works perfectly.
+    //    let mut definitions = HashSet::new();
+    //    // The call stack is crucial to prevent infinite recursion on circular dependencies.
+    //    let mut call_stack = HashSet::new();
+    //    
+    //    self.collect_defs_recursive(top_level_task, &mut definitions, &mut call_stack)?;
+    //    
+    //    Ok(definitions.into_iter().collect())
+    //}
+
+    pub fn flatten_task(&self, top_level_task: &Arc<Task>) -> Result<Arc<Task>> {
+        let mut call_stack = HashSet::new();
+        self.flatten_task_recursive(top_level_task, &mut call_stack)
+    }
+
+    fn flatten_task_recursive(
+        &self,
+        task: &Arc<Task>,
+        call_stack: &mut HashSet<String>,
+    ) -> Result<Arc<Task>> {
+        // We only need to process tasks that contain symbolic references.
+        let has_refs = task.commands.iter().any(|cmd| {
+            let template = match &cmd.action { CommandAction::Execute(t) | CommandAction::Print(t) => t };
+            template.iter().any(|c| matches!(c, TemplateComponent::Script(_) | TemplateComponent::Var(_)))
+        });
+
+        if !has_refs {
+            return Ok(task.clone());
+        }
+
+        let mut new_commands = Vec::new();
+        for cmd_exec in &task.commands {
+            let template = match &cmd_exec.action {
+                CommandAction::Execute(t) | CommandAction::Print(t) => t,
+            };
+
+            // This is the crucial part: flatten each template (line).
+            let flattened_template = self.flatten_template_recursive(template, call_stack)?;
+            
+            // Check for pure script composition AFTER flattening.
+            // If a line becomes a series of commands from a sub-task, extend.
+            // This is complex. Let's simplify, inspired by the old `expand_line`.
+            // Let's stick to a single, powerful `flatten_template` function.
+
+            // The logic from the old `expand_and_get_task_internal` is what we need.
+            if template.len() == 1 {
+                if let TemplateComponent::Script(name) = &template[0] {
+                    let key = format!("script::{}", name);
+                    if !call_stack.insert(key.clone()) {
+                        return Err(anyhow!("Circular dependency: {}", name));
+                    }
+                    if let Some(sub_task) = self.get_script(name, 0)? {
+                        let flattened_sub_task = self.flatten_task_recursive(&sub_task, call_stack)?;
+                        // Apply prefixes from the call site (`cmd_exec`) to the sub-commands
+                        let mut inherited_commands = flattened_sub_task.commands.clone();
+                        for sub_cmd in &mut inherited_commands {
+                             sub_cmd.ignore_errors |= cmd_exec.ignore_errors;
+                             sub_cmd.run_in_parallel |= cmd_exec.run_in_parallel;
+                             sub_cmd.silent_mode |= cmd_exec.silent_mode;
+                        }
+                        new_commands.extend(inherited_commands);
+                    }
+                    call_stack.remove(&key);
+                    continue; // Continue to the next command in the outer task
+                }
+            }
+            
+            // If it's not a pure composition, it's an inline composition.
+            let mut new_cmd_exec = cmd_exec.clone();
+            let new_template = self.flatten_template_recursive(template, call_stack)?;
+            new_cmd_exec.action = match cmd_exec.action {
+                CommandAction::Execute(_) => CommandAction::Execute(new_template),
+                CommandAction::Print(_) => CommandAction::Print(new_template),
+            };
+            new_commands.push(new_cmd_exec);
+        }
+
+        Ok(Arc::new(Task {
+            commands: new_commands,
+            desc: task.desc.clone(),
+        }))
+    }
+    
+    // This function is the equivalent of the old `expand_line`.
+    fn flatten_template_recursive(
+        &self,
+        template: &[TemplateComponent],
+        call_stack: &mut HashSet<String>,
+    ) -> Result<Vec<TemplateComponent>> {
+        let mut final_components = Vec::new();
+        for component in template {
+            match component {
+                TemplateComponent::Script(name) | TemplateComponent::Var(name) => {
+                    let is_var = matches!(component, TemplateComponent::Var(_));
+                    let key = if is_var { format!("var::{}", name) } else { format!("script::{}", name) };
+
+                    if !call_stack.insert(key.clone()) {
+                        return Err(anyhow!("Circular dependency: {}", name));
+                    }
+
+                    let sub_task = if is_var { self.get_var(name, 0)? } else { self.get_script(name, 0)? };
+
+                    if let Some(task) = sub_task {
+                        if task.commands.len() > 1 {
+                            return Err(anyhow!("Inline composition of multi-line script/var '{}' is not supported.", name));
+                        }
+                        if let Some(cmd) = task.commands.first() {
+                            let sub_template = match &cmd.action {
+                                CommandAction::Execute(t) | CommandAction::Print(t) => t,
+                            };
+                            // Recurse into the sub-template
+                            final_components.extend(self.flatten_template_recursive(sub_template, call_stack)?);
+                        }
+                    }
+                    call_stack.remove(&key);
+                }
+                _ => {
+                    final_components.push(component.clone());
+                }
+            }
+        }
+        Ok(final_components)
+    }
+
+    //// --- Private recursive helper ---
+    //fn collect_defs_recursive(
+    //    &self,
+    //    task: &Arc<Task>,
+    //    definitions: &mut HashSet<ParameterDef>,
+    //    call_stack: &mut HashSet<String>,
+    //) -> Result<()> {
+    //    for command_exec in &task.commands {
+    //        let template = match &command_exec.action {
+    //            CommandAction::Execute(t) | CommandAction::Print(t) => t,
+    //        };
+//
+    //        for component in template {
+    //            match component {
+    //                // 1. If it's a parameter, collect it.
+    //                TemplateComponent::Parameter(def) => {
+    //                    definitions.insert(def.clone());
+    //                }
+    //                // 2. If it's a script reference, recurse.
+    //                TemplateComponent::Script(script_name) => {
+    //                    let key = format!("script::{}", script_name);
+    //                    
+    //                    // Cycle detection
+    //                    if !call_stack.insert(key.clone()) {
+    //                        // We found a cycle, but for parameter collection, we can just stop
+    //                        // traversing this path instead of erroring out. The real error
+    //                        // will be caught during execution.
+    //                        log::warn!("Circular dependency detected during parameter collection for '{}'. Ignoring this path.", script_name);
+    //                        continue;
+    //                    }
+//
+    //                    // Get the sub-task (note: depth is 0 as this is a new logical "lookup")
+    //                    if let Some(sub_task) = self.get_script(script_name, 0)? {
+    //                        // Recursive call
+    //                        self.collect_defs_recursive(&sub_task, definitions, call_stack)?;
+    //                    }
+    //                    
+    //                    // Backtrack from the call stack for this path
+    //                    call_stack.remove(&key);
+    //                }
+    //                // We can ignore other components (`Literal`, `Var`, `Run`, etc.) as they
+    //                // don't contain parameter definitions themselves. `Var`s are handled
+    //                // when they are resolved during execution, but for `ArgResolver`'s
+    //                // contract, we only need the top-level parameter tokens.
+    //                _ => {}
+    //            }
+    //        }
+    //    }
+    //    Ok(())
+    //}
 }
 
 // =========================================================================

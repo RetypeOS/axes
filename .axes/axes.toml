@@ -4,12 +4,14 @@
 
 # === Project Metadata ===
 # Version is synchronized with Cargo.toml and the application's version output.
-version = "0.2.0-beta"
+version = "0.2.3-beta"
 description = "The development workflow configuration for the `axes` project itself."
 
 # === Development Scripts ===
 # Defines workflows for building, testing, and managing the tool.
 [scripts]
+hello = "echo 'Hola, <axes::scripts::hello_2>'"
+hello_2 = "echo 'Hola, <axes::params::0()>'"
 
 # --- Core Development Workflows ---
 build = { desc = "Builds the project in debug mode with fast compilation.", run = "cargo build <axes::params>" }
@@ -43,8 +45,8 @@ desc = "Builds in release and copies the artifact to a local installation path."
 windows = [
     "# <axes::vars::install_welcome>",
     "<axes::scripts::build_release>",
-    # Use PowerShell for robust path handling and directory creation.
-    "powershell -Command \"New-Item -ItemType File -Path '<axes::vars::install_path_win>' -Force | Out-Null; Copy-Item -Path '.\\target\\release\\axes.exe' -Destination '<axes::vars::install_path_win>'\""
+    "powershell -Command \"New-Item -ItemType File -Path '<axes::vars::install_path_win>' -Force | Out-Null; Copy-Item -Path '.\\target\\release\\axes.exe' -Destination '<axes::vars::install_path_win>'\"",
+    "# Completed.!"
 ]
 linux = [
     "<axes::scripts::build_release>",

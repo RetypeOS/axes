@@ -50,13 +50,17 @@ pub fn handle(
         )
     })?;
 
-    if task.commands.is_empty() {
+    // 4. --- NEW: Flatten the entire execution graph ---
+    let flattened_task = config.flatten_task(&task)?;
+
+    if flattened_task.commands.is_empty() {
         println!("{}", "Script is empty. Nothing to execute.".yellow());
         return Ok(());
     }
 
+
     // 4. Collect all parameter definitions from every command in the task.
-    let all_definitions: Vec<ParameterDef> = task
+    let all_definitions: Vec<ParameterDef> = flattened_task
         .commands
         .iter()
         .flat_map(|cmd| match &cmd.action {
@@ -68,7 +72,7 @@ pub fn handle(
         })
         .collect();
 
-    let has_generic_params = task
+    let has_generic_params = flattened_task
         .commands
         .iter()
         .flat_map(|cmd| match &cmd.action {
@@ -80,7 +84,7 @@ pub fn handle(
     let resolver = ArgResolver::new(&all_definitions, &params, has_generic_params)?;
 
     // 6. Execute the task.
-    task_executor::execute_task(&task, &config, &resolver, index)?;
+    task_executor::execute_task(&flattened_task, &config, &resolver, index)?;
 
     Ok(())
 }

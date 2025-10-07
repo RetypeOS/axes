@@ -1,5 +1,6 @@
 // src/core/paths.rs
 
+use crate::models::GlobalIndex;
 use crate::{constants::GLOBAL_INDEX_FILENAME, models::ResolvedConfig};
 use anyhow::{Result, anyhow};
 use lazy_static::lazy_static;
@@ -26,38 +27,22 @@ pub enum PathError {
 }
 
 /// Returns the path to the Axes configuration directory (`~/.config/axes`).
-/// Creates it if it doesn't exist.
-///
-/// This function is memoized: the first call computes and caches the path,
-/// subsequent calls return the cached value instantly.
+/// This function is memoized for high performance.
 pub fn get_axes_config_dir() -> Result<PathBuf, PathError> {
-    // Acquire a lock on the cached path. This is a fast operation if not contended.
     let mut cached_path_guard = AXES_CONFIG_DIR.lock().unwrap();
-
-    // If the path is already cached, clone it and return immediately.
     if let Some(path) = &*cached_path_guard {
         return Ok(path.clone());
     }
-
-    // --- Cache miss: compute the path for the first time ---
-
-    // 1. Find the system's generic config directory. This is the expensive part.
     let config_path = dirs::config_dir()
         .ok_or(PathError::ConfigDirNotFound)?
         .join("axes");
-
-    // 2. Ensure the directory exists on the filesystem.
     if !config_path.exists() {
         fs::create_dir_all(&config_path).map_err(|e| PathError::ConfigDirCreation {
             path: config_path.display().to_string(),
             source: e,
         })?;
     }
-
-    // 3. Store the computed path in the cache for future calls.
     *cached_path_guard = Some(config_path.clone());
-
-    // 4. Return the computed path.
     Ok(config_path)
 }
 
@@ -77,63 +62,87 @@ pub fn get_global_index_path() -> Result<PathBuf, PathError> {
 /// # Errors
 /// Returns an error if the template contains unsupported dynamic tokens like
 /// `<axes::params...>` or `<axes::run...>`, or if path expansion fails.
-pub fn expand_path_template(template: &str, project_uuid: Uuid) -> Result<PathBuf> {
-    // 1. Validate against dynamic, runtime-only tokens.
-    if template.contains("<axes::params") || template.contains("<axes::run") {
+/// Expands a path template string, resolving home directory and environment variables.
+fn expand_path_template(template: &str) -> Result<PathBuf> {
+    // We remove the project-specific tokens here as the root path should be generic.
+    if template.contains("<axes::") {
         return Err(anyhow!(
-            "The 'cache_dir' path template cannot contain dynamic tokens like <axes::params...> or <axes::run...>. Invalid template: '{}'",
+            "The 'cache_dir' path template should only define a root directory and must not contain dynamic axes tokens like <axes::uuid>. Invalid template: '{}'",
             template
         ));
     }
-
-    // 2. Expand `axes` tokens.
-    let with_axes_tokens = template.replace("<axes::uuid>", &project_uuid.to_string());
-
-    // 3. Expand home directory (`~`) and environment variables (`$VAR` or `%VAR%`).
-    // `shellexpand::full` handles both home dir and env vars across platforms.
-    let expanded_path_str = shellexpand::full(&with_axes_tokens)
+    let expanded_path_str = shellexpand::full(template)
         .map_err(|e| anyhow!("Failed to expand cache path template '{}': {}", template, e))?;
-
     Ok(PathBuf::from(expanded_path_str.into_owned()))
 }
 
-/// Determines the cache directory for a project based on its configuration or system defaults.
+/// Returns the platform-specific default root directory for all axes caches.
+/// This is the single source of truth for the default cache location.
+/// - Windows: `%LOCALAPPDATA%\axes\cache`
+/// - Linux/macOS: `~/.cache/axes`
+fn get_default_cache_root() -> Result<PathBuf> {
+    if cfg!(windows) {
+        let local_app_data = std::env::var("LOCALAPPDATA")
+            .map(PathBuf::from)
+            // Fallback to a subdir in the config dir if LOCALAPPDATA is not set
+            .unwrap_or_else(|_| get_axes_config_dir().unwrap().join("cache_fallback"));
+        Ok(local_app_data.join("axes").join("cache"))
+    } else {
+        let home_dir = dirs::home_dir().ok_or_else(|| anyhow!("Could not find home directory"))?;
+        Ok(home_dir.join(".cache").join("axes"))
+    }
+}
+
+/// Returns the platform-specific default absolute path for a project's cache directory.
+pub fn get_default_cache_dir_for_project(uuid: Uuid) -> Result<PathBuf> {
+    // All projects, including 'global', will now have their cache in a subdirectory
+    // named after their UUID inside `.../cache/projects`. This is consistent.
+    let cache_root = get_default_cache_root()?;
+    Ok(cache_root.join("projects").join(uuid.to_string()))
+}
+
+///
+/// It determines the cache root by searching the hierarchy for a `cache_dir` option,
+/// falling back to the system default, and then ALWAYS appends `/projects/<uuid>`.
 ///
 /// # Arguments
-/// * `config` - The fully resolved configuration of the project.
-///
-/// # Returns
-/// The absolute, resolved path to the cache directory for this project.
-pub fn get_cache_dir_for_project(
-    config: &ResolvedConfig,
-    //index: &mut GlobalIndex,
+/// * `uuid` - The UUID of the project for which to resolve the cache directory.
+/// * `index` - The global index, used for traversing the project hierarchy.
+/// * `compiled_layer_options` - The compiled `OptionsConfig` from the project's own `axes.toml`.
+///   This is passed in to give priority to the project's own definition before starting inheritance search.
+pub fn resolve_cache_dir_for_project(
+    uuid: Uuid,
+    index: &GlobalIndex,
+    compiled_layer_options: &crate::models::OptionsConfig,
 ) -> Result<PathBuf> {
-    let options = config.get_options()?;
-    let template = match &options.cache_dir {
-        Some(template_str) => template_str.clone(),
-        None => {
-            // Determine platform-specific default cache location.
-            if cfg!(target_os = "windows") {
-                // %LOCALAPPDATA%\axes\cache\<axes::uuid>
-                let local_app_data = std::env::var("LOCALAPPDATA")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|_| get_axes_config_dir().unwrap().join("cache")); // Fallback
-                return Ok(local_app_data
-                    .join("axes")
-                    .join("cache")
-                    .join(config.uuid.to_string()));
+    // 1. Determine the Cache Root Path.
+    let cache_root = if let Some(template) = &compiled_layer_options.cache_dir {
+        // Priority 1: The project defines its own cache root.
+        expand_path_template(template)?
+    } else {
+        // Priority 2: Search ancestors for an inherited cache root.
+        let mut inherited_root = None;
+        let mut current_uuid = index.projects.get(&uuid).and_then(|e| e.parent);
+        while let Some(id) = current_uuid {
+            if let Some(entry) = index.projects.get(&id) {
+                // We need to look at the parent's *resolved* cache dir and go one level up
+                // to find its root. This assumes the parent's dir is already in the index.
+                if let Some(parent_cache_dir) = &entry.cache_dir {
+                    if let Some(parent_root) = parent_cache_dir.parent().and_then(|p| p.parent()) {
+                        inherited_root = Some(parent_root.to_path_buf());
+                        break;
+                    }
+                }
+                current_uuid = entry.parent;
             } else {
-                // ~/.cache/axes/<axes::uuid> (XDG Base Directory Specification)
-                let home_dir =
-                    dirs::home_dir().ok_or_else(|| anyhow!("Could not find home directory"))?;
-                return Ok(home_dir
-                    .join(".cache")
-                    .join("axes")
-                    .join(config.uuid.to_string()));
+                break; // Broken link
             }
         }
+
+        // Use the inherited root or fall back to the system default.
+        inherited_root.unwrap_or(get_default_cache_root()?)
     };
 
-    // Expand the user-defined template.
-    expand_path_template(&template, config.uuid)
+    // 2. Append the standard project-specific path. This is now universal.
+    Ok(cache_root.join("projects").join(uuid.to_string()))
 }
