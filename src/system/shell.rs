@@ -120,7 +120,7 @@ pub fn launch_session(
     cmd.env("AXES_PROJECT_UUID", config.uuid.to_string());
 
     let env_vars = config.get_env()?;
-    cmd.envs(&env_vars);
+    cmd.envs(&*env_vars);
 
     if let Some(args) = &shell_config.interactive_args {
         cmd.args(args);
@@ -160,7 +160,7 @@ fn build_init_script(
     }
 
     // Lazily resolve the fully merged environment and write export/set commands.
-    for (key, value) in config.get_env()? {
+    for (key, value) in &*config.get_env()? {
         if is_windows {
             // Basic escaping for cmd.exe
             let value = value.replace('%', "%%");

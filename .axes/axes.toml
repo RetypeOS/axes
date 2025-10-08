@@ -65,6 +65,9 @@ run = [
     "cargo flamegraph --bin axes -- <axes::params>",
     "<axes::scripts::_flamgraph_exec>"
 ]
+[scripts.Hyperfine]
+desc = ""
+run = "hyperfine 'axes hello' 'just hola' 'task hello' --warmup 5 --runs 50 --export-markdown benchmark_results.md"
 
 
 # === Interpolation Variables ===

@@ -260,7 +260,7 @@ pub struct ResolvedConfig {
     pub(crate) layers: Arc<HashMap<Uuid, LayerPromise>>,
     memoized_scripts: Arc<Mutex<HashMap<String, Option<Arc<Task>>>>>,
     memoized_vars: Arc<Mutex<HashMap<String, Option<Arc<Task>>>>>,
-    memoized_env: Arc<Mutex<Option<HashMap<String, String>>>>,
+    memoized_env: Arc<Mutex<Option<Arc<HashMap<String, String>>>>>,
     memoized_version: Arc<Mutex<Option<Option<String>>>>,
     memoized_description: Arc<Mutex<Option<Option<String>>>>,
     memoized_options: Arc<Mutex<Option<ResolvedOptionsConfig>>>,
@@ -351,17 +351,29 @@ impl ResolvedConfig {
     }
 
     /// Lazily merges and returns all environment variables from the entire hierarchy.
-    pub fn get_env(&self) -> Result<HashMap<String, String>> {
-        if let Some(env) = self.memoized_env.lock().unwrap().as_ref() {
-            return Ok(env.clone());
+    /// [REBUILT] Lazily merges and returns all environment variables from the entire hierarchy.
+    /// The result is cached in an Arc for extremely fast subsequent calls.
+    pub fn get_env(&self) -> Result<Arc<HashMap<String, String>>> {
+        let mut guard = self.memoized_env.lock().unwrap();
+
+        // If the value is already computed, clone the Arc and return.
+        if let Some(env_arc) = &*guard {
+            return Ok(env_arc.clone());
         }
+
+        // --- Value is not computed, so calculate it for the first time ---
         let mut final_env = HashMap::new();
+        // Iterate from parent to child so child env vars overwrite parent ones.
         for &uuid in self.hierarchy.iter().rev() {
             let layer = self.get_layer(uuid)?;
             final_env.extend(layer.env.clone());
         }
-        *self.memoized_env.lock().unwrap() = Some(final_env.clone());
-        Ok(final_env)
+
+        let result_arc = Arc::new(final_env);
+        // Store the computed Arc in the memoized field.
+        *guard = Some(result_arc.clone());
+
+        Ok(result_arc)
     }
 
     /// Lazily finds and returns the project's version by searching up the hierarchy.
