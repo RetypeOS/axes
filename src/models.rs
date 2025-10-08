@@ -691,7 +691,7 @@ pub struct GlobalIndex {
     pub last_used: Option<Uuid>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct ProjectRef {
     pub self_uuid: Uuid,
     pub parent_uuid: Option<Uuid>,
@@ -889,5 +889,3 @@ impl ProjectConfig {
         }
     }
 }
-
-// --- Conversions for Serialization ---

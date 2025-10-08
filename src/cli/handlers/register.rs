@@ -1,121 +1,68 @@
-// src/cli/handlers/rename.rs
+// EN: src/cli/handlers/register.rs
 
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use colored::*;
-use dialoguer::{Confirm, theme::ColorfulTheme};
+use std::{env, path::PathBuf};
 
 use crate::{
-    core::{context_resolver, index_manager},
+    core::onboarding_manager::{self, OnboardingOptions},
     models::GlobalIndex,
 };
 
 // --- Command Argument Parsing ---
-
+// The struct now only defines flags, as the positional path is handled manually.
 #[derive(Parser, Debug, Default)]
-#[command(no_binary_name = true, about = "Renames a registered project.")]
-struct RenameArgs {
-    /// The new name for the project.
-    new_name: String,
+#[command(
+    no_binary_name = true,
+    about = "Registers an existing axes project (and its children) into the global index."
+)]
+pub struct RegisterArgs {
+    /// The path to the project to register. Defaults to the current directory.
+    pub path: Option<String>,
+
+    /// The context of the project that should become the parent of the new project.
+    #[arg(long)]
+    pub parent: Option<String>,
+
+    /// Do not ask for user input; fail on any conflict.
+    #[arg(long)]
+    pub autosolve: bool,
 }
 
 // --- Main Handler ---
 
 pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
-    // 1. Parse arguments and validate the new name.
-    let rename_args = RenameArgs::try_parse_from(&args)?;
-    let new_name = crate::cli::handlers::commons::validate_project_name(&rename_args.new_name)?;
-
-    // 2. Resolve the target project's UUID and current name directly from the index.
-    // This is much faster as it avoids any filesystem I/O for config files.
-    let context_str =
-        context.ok_or_else(|| anyhow!(t!("error.context_required"), command = "rename"))?;
-
-    let (uuid_to_rename, old_qualified_name) =
-        context_resolver::resolve_context(&context_str, index)?;
-    let old_simple_name = old_qualified_name
-        .split('/')
-        .last()
-        .unwrap_or(&old_qualified_name);
-
-    // 3. Handle the special case of renaming the 'global' project.
-    if uuid_to_rename == index_manager::GLOBAL_PROJECT_UUID {
-        if !confirm_global_rename()? {
-            return Ok(());
-        }
+    if env::var("AXES_PROJECT_UUID").is_ok() {
+        return Err(anyhow!(t!("register.error.in_session")));
     }
 
-    println!(
-        "\n{}",
-        format_args!(
-            t!("rename.info.renaming"),
-            old_name = old_simple_name.yellow(),
-            new_name = new_name.cyan()
-        )
-    );
+    // Now, parse the REMAINING arguments for flags like --parent.
+    let register_args = RegisterArgs::try_parse_from(&args)?;
 
-    // 4. Perform the rename operation directly on the index.
-    index_manager::rename_project(index, uuid_to_rename, &new_name)
-        .with_context(|| anyhow!(t!("rename.error.rename_failed"), name = old_qualified_name))?;
+    // Priority: 1. `register_args.path` | 2. `dispatcher_context` | 3. CWD
+    let initial_path = match register_args.path.or(context) {
+        Some(p) => PathBuf::from(p),
+        None => env::current_dir()?,
+    };
 
-    // 5. Update the local project reference file (`project_ref.bin`).
-    // We need to get the project's root path from the index entry.
-    let project_entry = index.projects.get(&uuid_to_rename).unwrap(); // Safe
-    let mut project_ref =
-        index_manager::get_or_create_project_ref(&project_entry.path, uuid_to_rename, index)?;
+    // 2. Resolve parent and options (no change from previous correct version).
+    let suggested_parent_uuid = if let Some(parent_context) = &register_args.parent {
+        let (uuid, name) = crate::core::context_resolver::resolve_context(parent_context, index)?;
+        println!("Using '{}' as the suggested parent.", name.cyan());
+        Some(uuid)
+    } else {
+        None
+    };
 
-    project_ref.name = new_name.clone();
-    if let Err(e) = index_manager::write_project_ref(&project_entry.path, &project_ref) {
-        eprintln!(
-            "\n{}",
-            format!(
-                t!("rename.warning.local_ref_update_failed"),
-                path = project_entry.path.display(),
-                error = e
-            )
-            .yellow()
-        );
-    }
+    let options = OnboardingOptions {
+        autosolve: register_args.autosolve,
+        suggested_parent_uuid,
+    };
 
-    // CRITICAL: `main` will handle saving the updated global index.
-
-    // 6. Provide clear feedback, including the new qualified name.
-    let new_qualified_name =
-        index_manager::build_qualified_name(uuid_to_rename, index).unwrap_or_default();
-
-    println!("\n{}", t!("common.success").green().bold());
-    println!("  {:<18} {}", "Old Full Path:".blue(), old_qualified_name);
-    println!(
-        "  {:<18} {}",
-        "New Full Path:".blue(),
-        new_qualified_name.cyan()
-    );
-
-    // [OPTIMIZATION] Acknowledge that caches remain valid.
-    println!("\n  {}", t!("rename.info.caches_remain_valid").dimmed());
+    // 3. Run the onboarding manager.
+    onboarding_manager::register_project(&initial_path, index, &options)
+        .with_context(|| format!(t!("register.error.failed"), path = initial_path.display()))?;
 
     Ok(())
-}
-
-// --- Helper Functions ---
-
-/// [DRY] Handles the warning and confirmation flow for renaming the 'global' project.
-/// Returns `Ok(false)` if the user cancels the operation.
-fn confirm_global_rename() -> Result<bool> {
-    println!(
-        "{}",
-        t!("rename.warning.renaming_global_header").yellow().bold()
-    );
-    println!("  - {}", t!("rename.warning.renaming_global_docs"));
-    println!("  - {}", t!("rename.warning.renaming_global_community"));
-
-    if !Confirm::with_theme(&ColorfulTheme::default())
-        .with_prompt(t!("common.prompt.are_you_sure"))
-        .default(false)
-        .interact()?
-    {
-        println!("\n{}", t!("common.info.operation_cancelled"));
-        return Ok(false);
-    }
-    Ok(true)
 }

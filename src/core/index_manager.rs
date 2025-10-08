@@ -515,8 +515,6 @@ pub fn is_sibling_name_taken(
     self_uuid: Option<Uuid>,
 ) -> bool {
     index.projects.iter().any(|(uuid, entry)| {
-        entry.parent == Some(parent_uuid)
-            && entry.name == name
-            && self_uuid.map_or(true, |id| id != *uuid)
+        entry.parent == Some(parent_uuid) && entry.name == name && (self_uuid != Some(*uuid))
     })
 }

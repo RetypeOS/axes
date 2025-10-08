@@ -1,6 +1,6 @@
 [package]
 name = "axes"
-version = "0.2.3-Beta-EXPERIMENTAL"
+version = "0.2.4-Beta"
 edition = "2024"
 license = "MIT"
 
@@ -51,16 +51,16 @@ serde = { version = "1.0.219", features = ["derive"] }
 [profile.release]
 # This profile is optimized for maximum performance and minimum binary size for distribution.
 
-# Link-Time Optimization: Optimizes across crate boundaries. Slower to compile, faster to run.
-lto = true
-
-# No Debug Info: Ensures the compiler can perform all possible optimizations.
-debug = false
-
-# Strip Symbols: Removes function names and other metadata to drastically reduce binary size.
-# This makes panic stack traces unreadable, but is very useful.
-strip = "symbols"
-
-# Abort on Panic: Immediately terminates the process on panic instead of unwinding the stack.
-# Reduces binary size slightly and is suitable for CLI tools.
-panic = "abort"
+## Link-Time Optimization: Optimizes across crate boundaries. Slower to compile, faster to run.
+#lto = true
+#
+## No Debug Info: Ensures the compiler can perform all possible optimizations.
+debug = true
+#
+## Strip Symbols: Removes function names and other metadata to drastically reduce binary size.
+## This makes panic stack traces unreadable, but is very useful.
+#strip = "symbols"
+#
+## Abort on Panic: Immediately terminates the process on panic instead of unwinding the stack.
+## Reduces binary size slightly and is suitable for CLI tools.
+#panic = "abort"

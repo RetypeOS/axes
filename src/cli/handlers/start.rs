@@ -19,7 +19,10 @@ use std::sync::Arc;
     about = "Starts an interactive project session, running `at_start` and `at_exit` hooks."
 )]
 struct StartArgs {
-    /// [NEW] Display the `at_start` and `at_exit` hooks without executing them.
+    /// The context of the project to start a session in. Defaults to the current project.
+    context: Option<String>,
+
+    /// Display the `at_start` and `at_exit` hooks without executing them.
     #[arg(long, name = "dry-run")]
     dry_run: bool,
 
@@ -33,12 +36,18 @@ struct StartArgs {
 pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
     // 1. Parse args and perform pre-flight checks.
     let start_args = StartArgs::try_parse_from(&args)?;
+
+    let final_context = start_args
+        .context
+        .or(context)
+        .unwrap_or_else(|| ".".to_string());
+
     if std::env::var("AXES_PROJECT_UUID").is_ok() {
         return Err(anyhow!(t!("start.error.nested_session")));
     }
 
     // 2. Lazily resolve project configuration and session hooks.
-    let config = commons::resolve_config_for_context(context, index)?;
+    let config = commons::resolve_config_for_context(Some(final_context), index)?;
     let options = config.get_options()?;
     let task_start = options.at_start;
     let task_exit = options.at_exit;

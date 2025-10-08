@@ -65,7 +65,7 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
 
     // 4. Get confirmation. Add an EXTRA layer of safety for recursive deletes.
     if delete_args.recursive {
-        let project_name = config.qualified_name.split('/').last().unwrap_or("");
+        let project_name = config.qualified_name.split('/').next_back().unwrap_or("");
         let prompt = format!(t!("delete.prompt.recursive_confirm"), name = project_name);
 
         let confirmation: String = Input::with_theme(&ColorfulTheme::default())

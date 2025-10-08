@@ -32,7 +32,7 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
         context_resolver::resolve_context(&context_str, index)?;
     let old_simple_name = old_qualified_name
         .split('/')
-        .last()
+        .next_back()
         .unwrap_or(&old_qualified_name);
 
     // 3. [NEW] Add a check to handle no-op renames gracefully.
@@ -45,10 +45,8 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
     }
 
     // 4. Handle the special case of renaming the 'global' project.
-    if uuid_to_rename == index_manager::GLOBAL_PROJECT_UUID {
-        if !confirm_global_rename()? {
-            return Ok(());
-        }
+    if uuid_to_rename == index_manager::GLOBAL_PROJECT_UUID && !confirm_global_rename()? {
+        return Ok(());
     }
 
     println!(

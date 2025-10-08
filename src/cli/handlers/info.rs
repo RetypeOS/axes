@@ -16,13 +16,32 @@ use std::sync::Arc;
     no_binary_name = true,
     about = "Displays detailed information about a project's configuration."
 )]
-struct InfoArgs {}
+struct InfoArgs {
+    /// The project context to display information about. Defaults to the current project.
+    context: Option<String>,
+}
 
 /// The main handler for the `info` command.
 /// Displays detailed, lazily-resolved information about a project, including its inheritance.
-pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
-    let _info_args = InfoArgs::try_parse_from(&args)?;
-    let config = commons::resolve_config_for_context(context, index)?;
+pub fn handle(
+    dispatcher_context: Option<String>,
+    args: Vec<String>,
+    index: &mut GlobalIndex,
+) -> Result<()> {
+    // 1. Parse all handler-specific arguments using clap.
+    let info_args = InfoArgs::try_parse_from(&args)?;
+
+    // 2. Determine the definitive context with clear priority.
+    //    - Priority 1: An explicit context argument passed to `info` (e.g., `axes info my-app`).
+    //    - Priority 2: A context from the main dispatcher (e.g., `axes my-app info`).
+    //    - Priority 3: Default to the current project context (`.`).
+    let final_context = info_args
+        .context
+        .or(dispatcher_context)
+        .unwrap_or_else(|| ".".to_string());
+
+    // 3. Proceed with the handler's logic.
+    let config = commons::resolve_config_for_context(Some(final_context), index)?;
 
     print_metadata(&config, index)?;
     print_options(&config)?;
@@ -172,7 +191,7 @@ fn print_task_map(
         // For `vars`, we also display the rendered value.
         if key == "vars" {
             let display_val = render_task_to_string(task);
-            print!(" = {}", format!("\"{}\"", display_val));
+            print!(" = {}", format_args!("\"{}\"", display_val));
         }
         println!();
     }
@@ -192,7 +211,7 @@ fn print_env(config: &ResolvedConfig) -> Result<()> {
 
     for k in sorted_keys {
         if let Some(val) = env.get(&k) {
-            println!("    - {} = {}", k.cyan(), format!("\"{}\"", val));
+            println!("    - {} = {}", k.cyan(), format_args!("\"{}\"", val));
         }
     }
     Ok(())

@@ -4,7 +4,7 @@ use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use colored::*;
 use dialoguer::{Error as DialoguerError, Input, theme::ColorfulTheme};
-use std::{collections::HashMap, env, fs, io, path::Path, path::PathBuf};
+use std::{collections::HashMap, env, fs, io, path::Path};
 use uuid::Uuid;
 
 use super::commons;
@@ -125,7 +125,7 @@ pub fn handle(_context: Option<String>, args: Vec<String>, index: &mut GlobalInd
 /// Orchestrates the collection of all project details, handling interactive and non-interactive modes.
 fn gather_project_details(
     args: InitArgs,
-    target_dir: &PathBuf,
+    target_dir: &Path,
     index: &mut GlobalIndex,
 ) -> Result<ProjectDetails> {
     let is_interactive = !args.autosolve;
@@ -209,9 +209,8 @@ fn resolve_parent_project(
     }
 
     println!(
-        "  {} {} {}",
+        "  {} global {}",
         "Parent Project:".dimmed(),
-        "global",
         t!("common.label.default").dimmed()
     );
     Ok(index_manager::GLOBAL_PROJECT_UUID)
@@ -230,9 +229,8 @@ fn resolve_project_version(version_arg: &Option<String>, is_interactive: bool) -
             .map_err(|e| anyhow!(e))
     } else {
         println!(
-            "  {} {} {}",
+            "  {} 0.1.0 {}",
             "Version:".dimmed(),
-            "0.1.0",
             t!("common.label.default").dimmed()
         );
         Ok("0.1.0".to_string())

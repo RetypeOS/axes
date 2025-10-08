@@ -19,6 +19,9 @@ use crate::{
     about = "Removes a project and its descendants from the axes index without deleting files."
 )]
 struct UnregisterArgs {
+    /// The context of the project to unregister.
+    context: Option<String>,
+
     /// Unregisters the project and ALL its descendants recursively.
     #[arg(long)]
     recursive: bool,
@@ -33,12 +36,13 @@ struct UnregisterArgs {
 pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
     // 1. Parse arguments and resolve the target project lazily.
     let unregister_args = UnregisterArgs::try_parse_from(&args)?;
-    let context_str =
-        context.ok_or_else(|| anyhow!(t!("error.context_required"), command = "unregister"))?;
 
-    // Use the architecturally correct lazy resolver.
-    let config = commons::resolve_config_for_context(Some(context_str), index)?;
+    let final_context = unregister_args
+        .context
+        .or(context)
+        .ok_or_else(|| anyhow!(t!("error.context_required"), command = "unregister"))?;
 
+    let config = commons::resolve_config_for_context(Some(final_context), index)?;
     // Safety check: prevent unregistering the global project.
     if config.uuid == index_manager::GLOBAL_PROJECT_UUID {
         return Err(anyhow!(t!("unregister.error.cannot_unregister_global")));

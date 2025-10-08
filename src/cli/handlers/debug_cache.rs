@@ -12,6 +12,9 @@ use std::fs;
 #[derive(Parser, Debug)]
 #[command(no_binary_name = true, hide = true)]
 struct CacheArgs {
+    /// The project context to inspect the cache for.
+    context: Option<String>,
+
     #[command(subcommand)]
     command: CacheSubcommand,
 }
@@ -30,14 +33,15 @@ enum CacheSubcommand {
 /// The main handler for the `_cache` command.
 /// Provides tools to debug the single-layer configuration caching system.
 pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
-    // This debug command requires a specific project context to operate on.
-    let context_str = context.ok_or_else(|| anyhow!("The '_cache' command requires an explicit project context (e.g., 'axes . _cache inspect')."))?;
-
     let cache_args = CacheArgs::try_parse_from(&args)?;
 
-    // Resolve the context string to a UUID to find the project in the index.
+    let final_context = cache_args
+        .context
+        .or(context)
+        .ok_or_else(|| anyhow!("The '_cache' command requires an explicit project context."))?;
+
     let (uuid, qualified_name) =
-        crate::core::context_resolver::resolve_context(&context_str, index)?;
+        crate::core::context_resolver::resolve_context(&final_context, index)?;
 
     match cache_args.command {
         CacheSubcommand::Inspect => inspect_cache(uuid, &qualified_name, index),

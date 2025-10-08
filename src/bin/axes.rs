@@ -116,7 +116,7 @@ fn find_command(name: &str) -> Option<&'static CommandDefinition> {
 fn main() {
     #[cfg(debug_assertions)]
     {
-        env_logger::init(); // This is often too verbose, let's keep it commented for now.
+        //env_logger::init(); // This is often too verbose, let's keep it commented for now.
     }
 
     // 1. Load the index and clone its initial state.
@@ -139,7 +139,7 @@ fn main() {
                 std::process::exit(0);
             }
         }
-        
+
         // --- Existing error handling for all other application errors ---
         if let Some(exec_err) = e.downcast_ref::<executor::ExecutionError>()
             && matches!(exec_err, executor::ExecutionError::Interrupted { .. })

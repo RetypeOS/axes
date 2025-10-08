@@ -17,6 +17,9 @@ use crate::{
     about = "Displays the project hierarchy as a tree."
 )]
 struct TreeArgs {
+    /// The project context to use as the root of the tree. Defaults to the full tree.
+    context: Option<String>,
+
     /// Show the full absolute paths for each project.
     #[arg(long, short)]
     paths: bool,
@@ -42,15 +45,16 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
     // 1. Parse this handler's specific arguments.
     let tree_args = TreeArgs::try_parse_from(&args)?;
 
-    // 2. Determine the starting node and header for the tree display.
-    let (start_node_uuid, header) = if let Some(context_str) = context {
+    let final_context = tree_args.context.or(context);
+
+    // [MODIFIED] Logic to determine start node and header.
+    let (start_node_uuid, header) = if let Some(context_str) = final_context {
         let (uuid, qualified_name) = context_resolver::resolve_context(&context_str, index)?;
         (
             Some(uuid),
             format!(t!("tree.header.from_project"), name = qualified_name).to_string(),
         )
     } else {
-        // If no context is given, display the full tree from the root.
         (None, t!("tree.header.full_tree").to_string())
     };
 
