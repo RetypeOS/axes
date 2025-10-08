@@ -42,19 +42,17 @@ pub enum ResolverError {
 fn load_and_compile_layer(entry: &IndexEntry) -> Result<CachedProjectConfig> {
     let config_path = entry.path.join(".axes").join("axes.toml");
     if !config_path.exists() {
-        // For an empty layer, return a default CachedProjectConfig.
         return Ok(CachedProjectConfig::default());
     }
 
     let content = fs::read_to_string(&config_path)?;
-    // 1. Deserialize from TOML using the user-friendly `ProjectConfig` struct.
     let project_config: ProjectConfig =
         toml::from_str(&content).map_err(|e| ResolverError::TomlParse {
             path: config_path,
             source: e,
         })?;
 
-    // 2. Compile scripts and vars as before.
+    // Compile scripts and vars (no change here).
     let scripts = compile_command_map(project_config.scripts)?;
     let vars_as_commands: HashMap<String, Command> = project_config
         .vars
@@ -63,26 +61,34 @@ fn load_and_compile_layer(entry: &IndexEntry) -> Result<CachedProjectConfig> {
         .collect();
     let vars = compile_command_map(vars_as_commands)?;
 
-    // 3. Convert from the TOML-specific `OptionsConfig` to the bincode-safe `CachedOptionsConfig`.
+    // [NEW] Compile ALL options from Command to Task before caching.
     let cached_options = CachedOptionsConfig {
-        at_start: project_config.options.at_start,
-        at_exit: project_config.options.at_exit,
+        at_start: project_config
+            .options
+            .at_start
+            .map(|cmd| compile_command_to_task(cmd.0))
+            .transpose()?,
+        at_exit: project_config
+            .options
+            .at_exit
+            .map(|cmd| compile_command_to_task(cmd.0))
+            .transpose()?,
         shell: project_config.options.shell,
         cache_dir: project_config.options.cache_dir,
         open_with: CachedOpenWithConfig {
             default: project_config.options.open_with.default,
-            commands: project_config.options.open_with.commands,
+            commands: compile_command_map(project_config.options.open_with.commands)?,
         },
     };
 
-    // 4. Construct the final `CachedProjectConfig` to be returned and stored.
+    // Construct the final, bincode-safe cache object.
     Ok(CachedProjectConfig {
         version: project_config.version,
         description: project_config.description,
         scripts,
         vars,
         env: project_config.env,
-        options: cached_options, // Use the converted, bincode-safe options.
+        options: cached_options,
     })
 }
 

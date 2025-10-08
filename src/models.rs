@@ -8,7 +8,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 use uuid::Uuid;
 
 use crate::constants::MAX_RECURSION_DEPTH;
-use crate::core::config_resolver;
 
 /// The result of loading a single configuration layer.
 pub type LayerResult = Result<Arc<CachedProjectConfig>>;
@@ -219,14 +218,14 @@ pub struct Task {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct CachedOpenWithConfig {
     pub default: Option<String>,
-    pub commands: HashMap<String, Command>,
+    pub commands: HashMap<String, Task>,
 }
 
 /// [NEW] A bincode-compatible representation of all options.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct CachedOptionsConfig {
-    pub at_start: Option<Command>,
-    pub at_exit: Option<Command>,
+    pub at_start: Option<Task>,
+    pub at_exit: Option<Task>,
     pub shell: Option<String>,
     #[serde(default)]
     pub open_with: CachedOpenWithConfig,
@@ -410,32 +409,33 @@ impl ResolvedConfig {
         for &uuid in self.hierarchy.iter().rev() {
             let layer = self.get_layer(uuid)?;
 
+            // Simple options are overwritten by child layers.
             final_options.shell = layer.options.shell.clone().or(final_options.shell);
             final_options.cache_dir = layer.options.cache_dir.clone().or(final_options.cache_dir);
-
-            // Merge `open_with` options
             final_options.open_with.default = layer
                 .options
                 .open_with
                 .default
                 .clone()
                 .or(final_options.open_with.default);
-            let compiled_open_with =
-                config_resolver::compile_command_map(layer.options.open_with.commands.clone())?;
+
+            // Merge maps of already compiled Tasks.
             final_options.open_with.commands.extend(
-                compiled_open_with
+                layer
+                    .options
+                    .open_with
+                    .commands
+                    .clone()
                     .into_iter()
                     .map(|(k, v)| (k, Arc::new(v))),
             );
 
-            // Compile hooks
-            if let Some(cmd) = layer.options.at_start.clone() {
-                final_options.at_start =
-                    Some(config_resolver::compile_command_to_task(cmd.0)?.into());
+            // Overwrite hooks if defined in the current layer.
+            if let Some(task) = layer.options.at_start.clone() {
+                final_options.at_start = Some(Arc::new(task));
             }
-            if let Some(cmd) = layer.options.at_exit.clone() {
-                final_options.at_exit =
-                    Some(config_resolver::compile_command_to_task(cmd.0)?.into());
+            if let Some(task) = layer.options.at_exit.clone() {
+                final_options.at_exit = Some(Arc::new(task));
             }
         }
 
@@ -843,9 +843,8 @@ impl ProjectConfig {
         let mut scripts = HashMap::new();
         let mut vars = HashMap::new();
 
-        // --- A simple, descriptive command to verify the setup ---
         let test_runnable =
-            Runnable::Single("echo \"Test for '<axes::name>' successful!\"".to_string());
+            Runnable::Single("echo \"✅ Test for '<axes::name>' successful!\"".to_string());
         let test_command = Command(CanonicalCommand {
             default: Some(test_runnable),
             desc: Some("Run a simple test echo command.".to_string()),
@@ -853,13 +852,15 @@ impl ProjectConfig {
         });
         scripts.insert("test".to_string(), test_command);
 
-        // --- A placeholder variable ---
-        vars.insert("GREETING".to_string(), "Hello from there!".to_string());
+        vars.insert(
+            "GREETING".to_string(),
+            "Hello from an axes variable!".to_string(),
+        );
 
-        // --- Placeholders for session hooks ---
         let options = OptionsConfig {
             at_start: Some(Command(CanonicalCommand {
-                default: Some(Runnable::Single("".to_string())),
+                // Add a placeholder command to show the user what to do.
+                default: Some(Runnable::Single("# echo 'Entering session...'".to_string())),
                 desc: Some(
                     "Commands to run when entering a session (e.g., `source .venv/bin/activate`)"
                         .to_string(),
@@ -867,7 +868,7 @@ impl ProjectConfig {
                 ..Default::default()
             })),
             at_exit: Some(Command(CanonicalCommand {
-                default: Some(Runnable::Single("".to_string())),
+                default: Some(Runnable::Single("# echo 'Exiting session...'".to_string())),
                 desc: Some(
                     "Commands to run when exiting a session (e.g., `docker-compose down`)"
                         .to_string(),

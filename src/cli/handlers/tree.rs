@@ -1,4 +1,4 @@
-// EN: src/cli/handlers/tree.rs
+// EN: src/cli/handlers/tree.rs (REBUILT FOR POWER AND UX)
 
 use anyhow::Result;
 use clap::Parser;
@@ -12,7 +12,10 @@ use crate::{
 };
 
 #[derive(Parser, Debug, Default)]
-#[command(no_binary_name = true)]
+#[command(
+    no_binary_name = true,
+    about = "Displays the project hierarchy as a tree."
+)]
 struct TreeArgs {
     /// Show the full absolute paths for each project.
     #[arg(long, short)]
@@ -25,32 +28,41 @@ struct TreeArgs {
     /// Show all available information (paths and UUIDs).
     #[arg(long)]
     all: bool,
+
+    /// Limit the depth of the tree display.
+    #[arg(long, short)]
+    depth: Option<usize>,
+
+    /// Check if the project paths exist on the filesystem.
+    #[arg(long)]
+    check: bool,
 }
 
 pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
     // 1. Parse this handler's specific arguments.
     let tree_args = TreeArgs::try_parse_from(&args)?;
 
-    // 2. Determine the starting node for the tree display.
-    //    If no context is given, default to '.', which `resolve_context` will
-    //    interpret correctly (either CWD or session).
-    let context_str = context.unwrap_or_else(|| ".".to_string());
-
-    // FIX: Use the passed mutable `index`. No need to load it again.
-    //      `resolve_context` will update `last_used` caches in the index.
-    let (uuid, qualified_name) = context_resolver::resolve_context(&context_str, index)?;
-
-    let header = format!(t!("tree.header.from_project"), name = qualified_name);
-    let start_node_uuid = Some(uuid);
+    // 2. Determine the starting node and header for the tree display.
+    let (start_node_uuid, header) = if let Some(context_str) = context {
+        let (uuid, qualified_name) = context_resolver::resolve_context(&context_str, index)?;
+        (
+            Some(uuid),
+            format!(t!("tree.header.from_project"), name = qualified_name).to_string(),
+        )
+    } else {
+        // If no context is given, display the full tree from the root.
+        (None, t!("tree.header.full_tree").to_string())
+    };
 
     // 3. Set display options based on flags.
     let display_options = DisplayOptions {
         show_paths: tree_args.paths || tree_args.all,
         show_uuids: tree_args.uuids || tree_args.all,
+        max_depth: tree_args.depth,
+        show_health: tree_args.check,
     };
 
-    // 4. Delegate to the graph display module.
-    //    The index is now up-to-date with any `last_used` changes.
+    // 4. Delegate to the graph display module to do all the rendering work.
     println!("\n{}", header);
     graph_display::display_project_tree(index, start_node_uuid, &display_options);
 

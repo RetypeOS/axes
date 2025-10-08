@@ -12,9 +12,11 @@ use uuid::Uuid;
 pub struct DisplayOptions {
     pub show_paths: bool,
     pub show_uuids: bool,
+    pub max_depth: Option<usize>,
+    pub show_health: bool,
 }
 
-/// Displays an ASCII tree of all registered projects.
+/// Displays an ASCII tree of all registered projects with enhanced diagnostic info.
 pub fn display_project_tree(
     index: &GlobalIndex,
     start_node_uuid: Option<Uuid>,
@@ -25,6 +27,8 @@ pub fn display_project_tree(
         return;
     }
 
+    // --- Pre-computation for performance ---
+    // 1. Build a map of parent -> children.
     let mut children_map: HashMap<Option<Uuid>, Vec<(Uuid, &IndexEntry)>> = HashMap::new();
     for (uuid, entry) in &index.projects {
         children_map
@@ -36,60 +40,19 @@ pub fn display_project_tree(
         children.sort_by_key(|(_, entry)| &entry.name);
     }
 
-    if let Some(start_uuid) = start_node_uuid {
-        if start_uuid == index_manager::GLOBAL_PROJECT_UUID {
-            // If the start node is the root, render the full tree from the top.
-            render_from_root(index, &children_map, options);
-        } else if let Some(start_entry) = index.projects.get(&start_uuid) {
-            // Render a subtree starting from a specific node.
-            let root_name = index
-                .projects
-                .get(&index_manager::GLOBAL_PROJECT_UUID)
-                .unwrap()
-                .name
-                .clone();
-            let qualified_name = index_manager::build_qualified_name(start_uuid, index)
-                .unwrap_or_else(|| start_entry.name.clone());
-
-            // Adjust name to not show the root project name if it's a direct child.
-            let display_name = qualified_name
-                .strip_prefix(&format!("{}/", root_name))
-                .unwrap_or(&qualified_name);
-
-            print_node_info(start_uuid, start_entry, index, options, display_name);
-            println!(); // Start with a newline
-
-            if let Some(children) = children_map.get(&Some(start_uuid)) {
-                for (i, (child_uuid, child_entry)) in children.iter().enumerate() {
-                    let is_last = i == children.len() - 1;
-                    print_node_recursive(
-                        *child_uuid,
-                        child_entry,
-                        index,
-                        &children_map,
-                        "",
-                        is_last,
-                        options,
-                    );
-                }
-            }
-        } else {
-            println!("\n{}", t!("tree.error.project_not_found").red());
-        }
-    } else {
-        render_from_root(index, &children_map, options);
+    // 2. Build a reverse map of project UUID -> list of aliases pointing to it.
+    let mut alias_map: HashMap<Uuid, Vec<String>> = HashMap::new();
+    for (alias_name, uuid) in &index.aliases {
+        alias_map
+            .entry(*uuid)
+            .or_default()
+            .push(format!("@{}", alias_name));
     }
-}
 
-/// Renders the entire tree starting from the project root.
-fn render_from_root(
-    index: &GlobalIndex,
-    children_map: &HashMap<Option<Uuid>, Vec<(Uuid, &IndexEntry)>>,
-    options: &DisplayOptions,
-) {
-    let root_uuid = index_manager::GLOBAL_PROJECT_UUID;
+    // --- Rendering ---
+    let root_uuid = start_node_uuid.unwrap_or(index_manager::GLOBAL_PROJECT_UUID);
     if let Some(root_entry) = index.projects.get(&root_uuid) {
-        print_node_info(root_uuid, root_entry, index, options, &root_entry.name);
+        print_node_info(root_uuid, root_entry, index, &alias_map, options);
         println!();
         if let Some(children) = children_map.get(&Some(root_uuid)) {
             for (i, (child_uuid, child_entry)) in children.iter().enumerate() {
@@ -98,16 +61,21 @@ fn render_from_root(
                     *child_uuid,
                     child_entry,
                     index,
-                    children_map,
+                    &children_map,
+                    &alias_map,
                     "",
                     is_last,
                     options,
+                    1, // Start at depth 1
                 );
             }
         }
     } else {
-        println!("\n{}", t!("tree.error.root_project_missing").yellow());
+        println!("\n{}", t!("tree.error.project_not_found").red());
     }
+
+    // --- [NEW] Show legend for clarity ---
+    print_legend(options);
 }
 
 /// Prints the formatted information for a single node in the tree.
@@ -115,27 +83,38 @@ fn print_node_info(
     uuid: Uuid,
     entry: &IndexEntry,
     index: &GlobalIndex,
+    alias_map: &HashMap<Uuid, Vec<String>>,
     options: &DisplayOptions,
-    name: &str,
 ) {
     // Print the main project name.
-    print!("{}", name.cyan());
+    print!("{}", entry.name.cyan());
 
     let mut info_parts = Vec::new();
 
+    // [NEW] Health Check
+    if options.show_health && !entry.path.exists() {
+        info_parts.push(t!("tree.label.broken_path").yellow().to_string());
+    }
+
+    // `last_used` marker
+    if index.last_used == Some(uuid) {
+        info_parts.push(t!("tree.label.last_used").yellow().to_string());
+    }
+
+    // [NEW] Alias markers
+    if let Some(aliases) = alias_map.get(&uuid) {
+        info_parts.push(aliases.join(", ").bright_blue().to_string());
+    }
+
     if options.show_paths {
-        info_parts.push(format!("[{}]", entry.path.display()).dimmed());
+        info_parts.push(format!("[{}]", entry.path.display()).dimmed().to_string());
     }
     if options.show_uuids {
-        info_parts.push(format!("({})", uuid).dimmed());
+        info_parts.push(format!("({})", uuid).dimmed().to_string());
     }
 
-    for part in info_parts {
-        print!(" {}", part);
-    }
-
-    if index.last_used == Some(uuid) {
-        print!(" {}", "(**)".yellow());
+    if !info_parts.is_empty() {
+        print!(" {}", info_parts.join(" "));
     }
 }
 
@@ -145,13 +124,22 @@ fn print_node_recursive(
     entry: &IndexEntry,
     index: &GlobalIndex,
     children_map: &HashMap<Option<Uuid>, Vec<(Uuid, &IndexEntry)>>,
+    alias_map: &HashMap<Uuid, Vec<String>>,
     prefix: &str,
     is_last: bool,
     options: &DisplayOptions,
+    depth: usize,
 ) {
+    // [NEW] Depth check
+    if let Some(max_depth) = options.max_depth {
+        if depth > max_depth {
+            return;
+        }
+    }
+
     let connector = if is_last { "└─" } else { "├─" };
     print!("{}{}", prefix, connector);
-    print_node_info(uuid, entry, index, options, &entry.name);
+    print_node_info(uuid, entry, index, alias_map, options);
     println!();
 
     let child_prefix = format!("{}{}", prefix, if is_last { "   " } else { "│  " });
@@ -163,10 +151,32 @@ fn print_node_recursive(
                 child_entry,
                 index,
                 children_map,
+                alias_map,
                 &child_prefix,
                 is_last_child,
                 options,
+                depth + 1,
             );
         }
     }
+}
+
+/// [NEW] Prints a helpful legend explaining the symbols used in the tree.
+fn print_legend(options: &DisplayOptions) {
+    let mut legend_items = vec![
+        format!(
+            "'{}' = {}",
+            t!("tree.label.last_used").yellow(),
+            t!("tree.legend.last_used")
+        ),
+        format!("{} = {}", "@alias".bright_blue(), t!("tree.legend.alias")),
+    ];
+    if options.show_health {
+        legend_items.push(format!(
+            "{} = {}",
+            t!("tree.label.broken_path").yellow(),
+            t!("tree.legend.broken_path")
+        ));
+    }
+    println!("\nLegend: {}", legend_items.join(", ").dimmed());
 }

@@ -5,52 +5,70 @@ use clap::Parser;
 use colored::*;
 use dialoguer::{Confirm, theme::ColorfulTheme};
 
-use super::commons;
-use crate::{core::{context_resolver, index_manager}, models::GlobalIndex};
+use crate::{
+    cli::handlers::commons,
+    core::{context_resolver, index_manager},
+    models::GlobalIndex,
+};
+
+// --- Command Argument Parsing ---
 
 #[derive(Parser, Debug, Default)]
-#[command(no_binary_name = true)]
+#[command(
+    no_binary_name = true,
+    about = "Removes a project and its descendants from the axes index without deleting files."
+)]
 struct UnregisterArgs {
-    /// Unregisters the project and all its descendants.
+    /// Unregisters the project and ALL its descendants recursively.
     #[arg(long)]
     recursive: bool,
 
-    /// Reparents direct children to a new project instead of unregistering them.
-    #[arg(long)]
+    /// Instead of unregistering direct children, reparents them to a new project.
+    #[arg(long, conflicts_with = "recursive")]
     reparent_to: Option<String>,
 }
 
+// --- Main Handler ---
+
 pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
+    // 1. Parse arguments and resolve the target project lazily.
     let unregister_args = UnregisterArgs::try_parse_from(&args)?;
     let context_str =
-        context.ok_or_else(|| anyhow!(t!("error.context_required"), command = "delete"))?;
-    let mut index = index_manager::load_and_ensure_global_project()?;
-    let config = commons::resolve_config_and_update_index_if_needed(Some(context_str), &mut index)?;
+        context.ok_or_else(|| anyhow!(t!("error.context_required"), command = "unregister"))?;
 
+    // Use the architecturally correct lazy resolver.
+    let config = commons::resolve_config_for_context(Some(context_str), index)?;
+
+    // Safety check: prevent unregistering the global project.
     if config.uuid == index_manager::GLOBAL_PROJECT_UUID {
         return Err(anyhow!(t!("unregister.error.cannot_unregister_global")));
     }
 
-    // 1. Prepare the operational plan. This is a dry run.
-    let plan = commons::prepare_unregister_plan(
-        &mut index,
+    // 2. Prepare the operational plan. This is a "dry run".
+    // We use the same planning logic as `delete`, but will ignore the file paths.
+    let plan = commons::prepare_deletion_plan(
+        index,
         &config,
         unregister_args.recursive,
         unregister_args.reparent_to.clone(),
     )?;
 
-    // 2. Present the plan to the user.
+    // 3. Present the plan to the user for confirmation.
     println!("\n{}", t!("unregister.info.header").yellow().bold());
     for line in &plan.summary_lines {
         println!("  - {}", line);
     }
+
+    println!("\n{}", t!("unregister.info.projects_to_remove").dimmed());
     for uuid in &plan.uuids_to_remove {
         if let Some(entry) = index.projects.get(uuid) {
-            println!("    • {} ({})", entry.name.cyan(), entry.path.display());
+            let qualified_name = index_manager::build_qualified_name(*uuid, index)
+                .unwrap_or_else(|| entry.name.clone());
+            println!("    • {} ({})", qualified_name.cyan(), entry.path.display());
         }
     }
 
-    // 3. Get confirmation.
+    // 4. Get confirmation.
     if !Confirm::with_theme(&ColorfulTheme::default())
         .with_prompt(t!("common.prompt.continue"))
         .default(false)
@@ -60,26 +78,30 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
         return Ok(());
     }
 
-    // 4. Execute the plan.
+    // 5. EXECUTE PLAN - INDEX MUTATION (IN-MEMORY)
+    let mut all_warnings = plan.reparent_warnings;
     if !unregister_args.recursive {
         let new_parent_uuid = match unregister_args.reparent_to {
-            Some(ctx) => context_resolver::resolve_context(&ctx, &mut index)?.0,
+            Some(ctx) => context_resolver::resolve_context(&ctx, index)?.0,
             None => index_manager::GLOBAL_PROJECT_UUID,
         };
         // The real reparenting happens here, with automatic renames.
-        index_manager::reparent_children(&mut index, config.uuid, new_parent_uuid)?;
+        let reparent_op_warnings =
+            index_manager::reparent_children(index, config.uuid, new_parent_uuid)?;
+        all_warnings.extend(reparent_op_warnings);
     }
 
-    let removed_count = index_manager::remove_from_index(&mut index, &plan.uuids_to_remove);
-    index_manager::save_global_index(&index)?;
+    let removed_count = index_manager::remove_from_index(index, &plan.uuids_to_remove);
 
-    // 5. Final feedback.
+    // CRITICAL: No `save_global_index` call. `main` handles this.
+
+    // 6. Final feedback.
     println!(
         "\n{} {}",
-        t!("common.success"),
+        t!("common.success").green().bold(),
         format_args!(t!("unregister.success.header"), count = removed_count)
     );
-    for warning in plan.reparent_warnings {
+    for warning in all_warnings {
         println!("  - {}", warning.yellow());
     }
     Ok(())

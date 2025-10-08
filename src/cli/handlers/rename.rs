@@ -1,97 +1,120 @@
-// src/cli/handlers/rename.rs
+// src/cli/handlers/rename.rs (CON CORRECCIÓN PARA NO-OP)
 
 use anyhow::{Context, Result, anyhow};
+use clap::Parser;
 use colored::*;
 use dialoguer::{Confirm, theme::ColorfulTheme};
 
-use super::commons;
-use crate::{core::index_manager, models::GlobalIndex};
+use crate::{
+    core::{context_resolver, index_manager},
+    models::GlobalIndex,
+};
 
-use clap::Parser;
-
+// --- Command Argument Parsing ---
 #[derive(Parser, Debug, Default)]
-#[command(no_binary_name = true)]
+#[command(no_binary_name = true, about = "Renames a registered project.")]
 struct RenameArgs {
     /// The new name for the project.
     new_name: String,
 }
 
-/// The main handler for the `rename` command.
+// --- Main Handler ---
 pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
-    // 1. Parse args.
+    // 1. Parse arguments and validate the new name.
     let rename_args = RenameArgs::try_parse_from(&args)?;
+    let new_name = crate::cli::handlers::commons::validate_project_name(&rename_args.new_name)?;
+
+    // 2. Resolve the target project's UUID and current name directly from the index.
     let context_str =
-        context.ok_or_else(|| anyhow!(t!("error.context_required"), command = "delete"))?;
+        context.ok_or_else(|| anyhow!(t!("error.context_required"), command = "rename"))?;
 
-    // 2. Solve config.
-    let mut index = index_manager::load_and_ensure_global_project()?;
-    let config = commons::resolve_config_and_update_index_if_needed(Some(context_str), &mut index)?;
-    let old_qualified_name = config.qualified_name.clone();
-
-    let simple_name = config
-        .qualified_name
+    let (uuid_to_rename, old_qualified_name) =
+        context_resolver::resolve_context(&context_str, index)?;
+    let old_simple_name = old_qualified_name
         .split('/')
-        .next_back()
-        .unwrap_or(&config.qualified_name);
+        .last()
+        .unwrap_or(&old_qualified_name);
 
-    let new_name = commons::validate_project_name(&rename_args.new_name)?;
-
-    if config.uuid == index_manager::GLOBAL_PROJECT_UUID {
+    // 3. [NEW] Add a check to handle no-op renames gracefully.
+    if old_simple_name == new_name {
         println!(
-            "{}",
-            t!("rename.warning.renaming_global_header").yellow().bold()
+            "\n{}",
+            format!(t!("rename.info.no_change"), name = new_name).yellow()
         );
-        println!("  - {}", t!("rename.warning.renaming_global_docs"));
-        println!("  - {}", t!("rename.warning.renaming_global_community"));
+        return Ok(());
+    }
 
-        if !Confirm::with_theme(&ColorfulTheme::default())
-            .with_prompt(t!("common.prompt.are_you_sure"))
-            .default(false)
-            .interact()?
-        {
-            println!("\n{}", t!("common.info.operation_cancelled"));
+    // 4. Handle the special case of renaming the 'global' project.
+    if uuid_to_rename == index_manager::GLOBAL_PROJECT_UUID {
+        if !confirm_global_rename()? {
             return Ok(());
         }
     }
 
     println!(
-        t!("rename.info.renaming"),
-        old_name = simple_name.yellow(),
-        new_name = new_name.cyan()
+        "\n{}",
+        format_args!(
+            t!("rename.info.renaming"),
+            old_name = old_simple_name.yellow(),
+            new_name = new_name.cyan()
+        )
     );
 
-    index_manager::rename_project(&mut index, config.uuid, &new_name)
+    // 5. Perform the rename operation directly on the index.
+    index_manager::rename_project(index, uuid_to_rename, &new_name)
         .with_context(|| anyhow!(t!("rename.error.rename_failed"), name = old_qualified_name))?;
 
-    index_manager::save_global_index(&index).with_context(|| t!("error.saving_global_index"))?;
-
+    // 6. Update the local project reference file (`project_ref.bin`).
+    let project_entry = index.projects.get(&uuid_to_rename).unwrap(); // Safe
     let mut project_ref =
-        index_manager::get_or_create_project_ref(&config.project_root, config.uuid, &index)
-            .with_context(|| t!("error.local_ref_failed"))?;
+        index_manager::get_or_create_project_ref(&project_entry.path, uuid_to_rename, index)?;
 
     project_ref.name = new_name.clone();
-    if let Err(e) = index_manager::write_project_ref(&config.project_root, &project_ref) {
+    if let Err(e) = index_manager::write_project_ref(&project_entry.path, &project_ref) {
         eprintln!(
             "\n{}",
             format!(
                 t!("rename.warning.local_ref_update_failed"),
-                path = config.project_root.display(),
+                path = project_entry.path.display(),
                 error = e
             )
             .yellow()
         );
     }
 
-    println!("\n{}", t!("common.success"));
+    // 7. Provide clear feedback.
+    let new_qualified_name =
+        index_manager::build_qualified_name(uuid_to_rename, index).unwrap_or_default();
+
+    println!("\n{}", t!("common.success").green().bold());
+    println!("  {:<18} {}", "Old Full Path:".blue(), old_qualified_name);
     println!(
-        "  {}",
-        format_args!(
-            t!("rename.success.header"),
-            old_name = simple_name,
-            new_name = new_name
-        )
+        "  {:<18} {}",
+        "New Full Path:".blue(),
+        new_qualified_name.cyan()
     );
-    println!("  {}", t!("common.info.caches_will_regenerate").dimmed());
+
+    println!("\n  {}", t!("rename.info.caches_remain_valid").dimmed());
 
     Ok(())
+}
+
+// ... (El resto del archivo no cambia)
+fn confirm_global_rename() -> Result<bool> {
+    println!(
+        "{}",
+        t!("rename.warning.renaming_global_header").yellow().bold()
+    );
+    println!("  - {}", t!("rename.warning.renaming_global_docs"));
+    println!("  - {}", t!("rename.warning.renaming_global_community"));
+
+    if !Confirm::with_theme(&ColorfulTheme::default())
+        .with_prompt(t!("common.prompt.are_you_sure"))
+        .default(false)
+        .interact()?
+    {
+        println!("\n{}", t!("common.info.operation_cancelled"));
+        return Ok(false);
+    }
+    Ok(true)
 }

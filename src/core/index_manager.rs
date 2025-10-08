@@ -505,3 +505,18 @@ pub fn set_alias(index: &mut GlobalIndex, name: String, target_uuid: Uuid) {
 pub fn remove_alias(index: &mut GlobalIndex, name: &str) -> bool {
     index.aliases.remove(name).is_some()
 }
+
+/// Checks if a sibling name is already taken under a specific parent.
+/// If `self_uuid` is provided, it excludes that project from the check (used during rename).
+pub fn is_sibling_name_taken(
+    index: &GlobalIndex,
+    parent_uuid: Uuid,
+    name: &str,
+    self_uuid: Option<Uuid>,
+) -> bool {
+    index.projects.iter().any(|(uuid, entry)| {
+        entry.parent == Some(parent_uuid)
+            && entry.name == name
+            && self_uuid.map_or(true, |id| id != *uuid)
+    })
+}

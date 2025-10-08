@@ -217,10 +217,9 @@ fn execute_single_command(
     ignore_errors: bool,
     silent: bool,
     config: &ResolvedConfig,
-    //index: &mut GlobalIndex,
 ) -> Result<()> {
     if !silent {
-        println!("\n→ {}", command_str.green());
+        println!("{} {}", "→".blue(), command_str.green());
     }
     let env = config.get_env()?;
     executor::execute_command(command_str, ignore_errors, &config.project_root, &env)?;
@@ -228,24 +227,20 @@ fn execute_single_command(
 }
 
 /// Prints and executes a batch of commands in parallel.
-fn execute_parallel_batch(
-    batch: &[(String, bool, bool)],
-    config: &ResolvedConfig,
-    //index: &mut GlobalIndex,
-) -> Result<()> {
+fn execute_parallel_batch(batch: &[(String, bool, bool)], config: &ResolvedConfig) -> Result<()> {
     let is_globally_silent = batch.iter().all(|(_, _, silent)| *silent);
     if !is_globally_silent {
         let mut header_block = String::new();
         writeln!(
             header_block,
-            "\n{} {}",
-            "┌─".dimmed(),
-            format!("Running {} commands in parallel...", batch.len()).blue()
+            "{}",
+            format!("┌─ Running {} commands in parallel...", batch.len()).dimmed()
         )
         .unwrap();
+        let inter_arrow = ("├─>").dimmed();
         for (command_str, _, silent) in batch.iter() {
             if !*silent {
-                writeln!(header_block, "{} {}", "├─˃".dimmed(), command_str.green()).unwrap();
+                writeln!(header_block, "{} {}", inter_arrow, command_str.green()).unwrap();
             }
         }
         print!("{}", header_block);
@@ -263,7 +258,7 @@ fn execute_parallel_batch(
     results.with_context(|| "A command in the parallel batch failed.")?;
 
     if !is_globally_silent {
-        println!("{}{}", "└─".dimmed(), " Parallel batch completed.".blue());
+        println!("{}", "└─ End batch.".dimmed());
     }
     Ok(())
 }

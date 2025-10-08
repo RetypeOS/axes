@@ -38,21 +38,21 @@ struct CommandDefinition {
 /// The single source of truth for all system commands.
 /// The registry is updated to match the new handler signature.
 static COMMAND_REGISTRY: &[CommandDefinition] = &[
-    //CommandDefinition {
-    //    name: "alias",
-    //    aliases: &[],
-    //    handler: handlers::alias::handle,
-    //},
-    //CommandDefinition {
-    //    name: "_cache",
-    //    aliases: &[],
-    //    handler: handlers::debug_cache::handle,
-    //},
-    //CommandDefinition {
-    //    name: "delete",
-    //    aliases: &["del"],
-    //    handler: handlers::delete::handle,
-    //},
+    CommandDefinition {
+        name: "alias",
+        aliases: &[],
+        handler: handlers::alias::handle,
+    },
+    CommandDefinition {
+        name: "cache",
+        aliases: &[],
+        handler: handlers::debug_cache::handle,
+    },
+    CommandDefinition {
+        name: "delete",
+        aliases: &["del"],
+        handler: handlers::delete::handle,
+    },
     CommandDefinition {
         name: "info",
         aliases: &[],
@@ -63,11 +63,11 @@ static COMMAND_REGISTRY: &[CommandDefinition] = &[
         aliases: &["new"],
         handler: handlers::init::handle,
     },
-    //CommandDefinition {
-    //    name: "link",
-    //    aliases: &[],
-    //    handler: handlers::link::handle,
-    //},
+    CommandDefinition {
+        name: "link",
+        aliases: &[],
+        handler: handlers::link::handle,
+    },
     CommandDefinition {
         name: "open",
         aliases: &[],
@@ -78,31 +78,31 @@ static COMMAND_REGISTRY: &[CommandDefinition] = &[
         aliases: &["reg"],
         handler: handlers::register::handle,
     },
-    //CommandDefinition {
-    //    name: "rename",
-    //    aliases: &[],
-    //    handler: handlers::rename::handle,
-    //},
+    CommandDefinition {
+        name: "rename",
+        aliases: &[],
+        handler: handlers::rename::handle,
+    },
     CommandDefinition {
         name: "run",
         aliases: &[],
         handler: handlers::run::handle,
     },
-    //CommandDefinition {
-    //    name: "start",
-    //    aliases: &[],
-    //    handler: handlers::start::handle,
-    //},
+    CommandDefinition {
+        name: "start",
+        aliases: &[],
+        handler: handlers::start::handle,
+    },
     CommandDefinition {
         name: "tree",
         aliases: &["ls"],
         handler: handlers::tree::handle,
     },
-    //CommandDefinition {
-    //    name: "unregister",
-    //    aliases: &["unreg"],
-    //    handler: handlers::unregister::handle,
-    //},
+    CommandDefinition {
+        name: "unregister",
+        aliases: &["unreg"],
+        handler: handlers::unregister::handle,
+    },
 ];
 
 /// Finds a command definition in the registry by its name or alias.
@@ -116,7 +116,7 @@ fn find_command(name: &str) -> Option<&'static CommandDefinition> {
 fn main() {
     #[cfg(debug_assertions)]
     {
-        env_logger::init();
+        env_logger::init(); // This is often too verbose, let's keep it commented for now.
     }
 
     // 1. Load the index and clone its initial state.
@@ -126,11 +126,26 @@ fn main() {
     };
 
     if let Err(e) = run_cli(Cli::parse()) {
+        // --- [NEW] Graceful handling for clap's informational exits (`--help`, `--version`) ---
+        // Before treating the error as a generic failure, check if it's a special
+        // error from clap that should result in a clean exit.
+        if let Some(clap_err) = e.downcast_ref::<clap::Error>() {
+            // `use_stderr()` is clap's idiomatic way to distinguish between:
+            // - `false`: Informational exits like --help (print to stdout, exit 0).
+            // - `true`: Actual parsing errors (print to stderr, exit 1).
+            if !clap_err.use_stderr() {
+                // This is a --help or --version request.
+                clap_err.print().expect("Failed to print clap help/version");
+                std::process::exit(0);
+            }
+        }
+        
+        // --- Existing error handling for all other application errors ---
         if let Some(exec_err) = e.downcast_ref::<executor::ExecutionError>()
             && matches!(exec_err, executor::ExecutionError::Interrupted { .. })
         {
-            eprintln!();
-            std::process::exit(130);
+            eprintln!(); // Print a newline after ^C for clean terminal output.
+            std::process::exit(130); // Standard exit code for Ctrl+C.
         }
 
         eprintln!("\n{}: {}", "Error".red().bold(), e);

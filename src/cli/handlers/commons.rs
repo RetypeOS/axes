@@ -3,7 +3,11 @@
 // This module contains shared functions used by multiple handlers.
 
 use anyhow::{Result, anyhow};
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    sync::Arc,
+};
 use uuid::Uuid;
 
 use crate::{
@@ -12,7 +16,10 @@ use crate::{
         context_resolver,
         index_manager::{self},
     },
-    models::{GlobalIndex, IndexEntry, ResolvedConfig},
+    models::{
+        CommandAction, GlobalIndex, IndexEntry, ParameterDef, ResolvedConfig, Task,
+        TemplateComponent,
+    },
 };
 
 use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
@@ -100,6 +107,90 @@ pub fn prepare_unregister_plan(
         reparent_warnings,
         summary_lines,
     })
+}
+
+/// Represents a calculated plan for a delete or unregister operation.
+/// It contains all the necessary information to present to the user and execute.
+#[derive(Debug, Default)]
+pub struct DeletionPlan {
+    pub uuids_to_remove: Vec<Uuid>,
+    pub paths_to_purge: Vec<PathBuf>,
+    pub reparent_warnings: Vec<String>,
+    pub summary_lines: Vec<String>,
+}
+
+/// Prepares a comprehensive plan for deleting projects. This function is a "dry run"
+/// and does not modify the index; it only calculates the effects.
+pub fn prepare_deletion_plan(
+    index: &mut GlobalIndex,
+    config: &ResolvedConfig,
+    recursive: bool,
+    reparent_to: Option<String>,
+) -> Result<DeletionPlan> {
+    let mut plan = DeletionPlan::default();
+
+    let new_parent_uuid = if let Some(ctx) = &reparent_to {
+        let (uuid, _) = context_resolver::resolve_context(ctx, index)?;
+        Some(uuid)
+    } else {
+        None
+    };
+
+    if recursive {
+        if reparent_to.is_some() {
+            return Err(anyhow!(t!("plan.error.recursive_and_reparent")));
+        }
+        plan.uuids_to_remove.push(config.uuid);
+        plan.uuids_to_remove
+            .extend(index_manager::get_all_descendants(index, config.uuid));
+        plan.summary_lines.push(
+            format!(
+                t!("plan.summary.delete_recursive"),
+                name = config.qualified_name
+            )
+            .to_string(),
+        );
+    } else {
+        plan.uuids_to_remove.push(config.uuid);
+        plan.summary_lines.push(
+            format!(
+                t!("plan.summary.unregister_single"),
+                name = config.qualified_name
+            )
+            .to_string(),
+        );
+
+        let final_parent_uuid = new_parent_uuid.unwrap_or(index_manager::GLOBAL_PROJECT_UUID);
+        let final_parent_entry = index.projects.get(&final_parent_uuid).unwrap();
+
+        plan.summary_lines.push(
+            format!(
+                t!("plan.summary.reparent_to"), // Reusable
+                name = final_parent_entry.name
+            )
+            .to_string(),
+        );
+
+        let (warnings, conflicts) =
+            check_reparent_collisions(index, config.uuid, final_parent_uuid)?;
+        if !conflicts.is_empty() {
+            let conflict_str = conflicts.join("', '");
+            return Err(anyhow!(
+                t!("plan.error.reparent_collision"),
+                conflicts = conflict_str
+            ));
+        }
+        plan.reparent_warnings = warnings;
+    }
+
+    // Collect all paths to be physically deleted.
+    plan.paths_to_purge = plan
+        .uuids_to_remove
+        .iter()
+        .filter_map(|uuid| index.projects.get(uuid).map(|e| e.path.clone()))
+        .collect();
+
+    Ok(plan)
 }
 
 /// Checks for potential name collisions when reparenting children.
@@ -356,4 +447,28 @@ pub fn validate_project_name(raw_name: &str) -> Result<String> {
     }
 
     Ok(name.to_string())
+}
+
+/// This is a shared utility for handlers like `open`, `run`, and `start`.
+pub fn collect_parameter_defs_from_task(task: &Arc<Task>) -> Vec<ParameterDef> {
+    task.commands
+        .iter()
+        .flat_map(|cmd| match &cmd.action {
+            CommandAction::Execute(t) | CommandAction::Print(t) => t.clone(),
+        })
+        .filter_map(|component| match component {
+            TemplateComponent::Parameter(def) => Some(def),
+            _ => None,
+        })
+        // Use a fold with a HashSet to collect only unique definitions.
+        .fold(
+            (Vec::new(), std::collections::HashSet::new()),
+            |(mut acc_vec, mut acc_set), def| {
+                if acc_set.insert(def.clone()) {
+                    acc_vec.push(def);
+                }
+                (acc_vec, acc_set)
+            },
+        )
+        .0 // Return only the vector of unique definitions.
 }

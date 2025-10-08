@@ -53,34 +53,39 @@ pub fn launch_session(
     resolver: &ArgResolver,
     index: &mut GlobalIndex,
 ) -> Result<(), ShellError> {
-    // 1. Determine which shell to use by lazily resolving the project's options.
+    // 1. Determine which shell to use.
     let shells_config = load_shells_config()?;
+    // Lazily get options.
     let options = config.get_options()?;
-    let shell_name = options
+    let shell_name: String = options
         .shell
         .clone()
         .unwrap_or_else(|| get_default_shell_name().to_string());
     let shell_config = shells_config
         .shells
         .get(&shell_name)
-        .ok_or_else(|| ShellError::ShellNotDefined(shell_name.to_string()))?;
+        .ok_or_else(|| ShellError::ShellNotDefined(shell_name.clone()))?;
 
-    // 2. If an `at_start` task exists, render its commands.
+    // 2. If an `at_start` task exists, render its commands into a script.
     let at_start_final_commands = if let Some(task) = &task_start {
-        println!("\n{}", "Preparing `at_start` hook...".dimmed());
-        // FIX: Start depth count at 0 for rendering.
-        let initial_depth = 0;
+        println!(
+            "\n{}",
+            format!(t!("start.info.preparing_hook"), hook = "at_start").dimmed()
+        );
+        // Start recursion depth at 0 for rendering.
         task.commands
             .iter()
             .map(|cmd| match &cmd.action {
-                CommandAction::Execute(template) => task_executor::assemble_final_command(
-                    template,
-                    config,
-                    resolver,
-                    index,
-                    initial_depth, // Pass depth
-                ),
-                CommandAction::Print(_) => Ok(String::new()),
+                CommandAction::Execute(template) => {
+                    task_executor::assemble_final_command(template, config, resolver, index, 0)
+                }
+                // Print actions in `at_start` are rendered as `echo` commands.
+                CommandAction::Print(template) => {
+                    let text = task_executor::assemble_final_command(
+                        template, config, resolver, index, 0,
+                    )?;
+                    Ok(format!("echo \"{}\"", text.replace('"', "\\\"")))
+                }
             })
             .collect::<Result<Vec<String>>>()?
     } else {
@@ -131,8 +136,10 @@ pub fn launch_session(
 
     // 5. Execute the `at_exit` task if it exists.
     if let Some(task) = &task_exit {
-        println!("\n{}", "\nExecuting `at_exit` hook...".dimmed());
-        // FIX: Pass the index to `execute_task`.
+        println!(
+            "\n{}",
+            format!(t!("start.info.executing_hook"), hook = "at_exit").dimmed()
+        );
         task_executor::execute_task(task, config, resolver, index)?;
     }
 
