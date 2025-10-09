@@ -63,7 +63,7 @@ Our immediate goal is to evolve `axes` beyond simple command execution. We will 
         [scripts.build.cache]
         sources = ["src/**/*.js"]
         generates = ["dist/bundle.js"]
-        key = "<axes::vars::node_version>-<axes::params::profile>"
+        key = "<vars::node_version>-<params::profile>"
         ```
 
   * **Value:** Enables highly sophisticated and reliable caching strategies for complex build matrices.
@@ -91,7 +91,7 @@ These are ambitious, game-changing features that we will explore once the `v1.0`
 * `[ ]` **The `axes` Daemon:** A long-running background process that can watch the filesystem and provide near-instantaneous build caching and reactivity, similar to modern frontend tools.
 * `[ ]` **Remote Caching:** The ability to share the artifact cache across a team or CI farm, enabling massive speedups in collaborative environments.
 * `[ ]` **Templating Engine (`init 2.0`):** Transform `axes init` into a powerful scaffolding engine (`cookiecutter`-style) that can generate new projects from predefined, version-controlled templates.
-* `[ ]` **Dynamic Tokens:** Integrate with tools like Git to provide dynamic, real-time tokens like `<axes::git::branch>` or `<axes::git::is_dirty>`.
+* `[ ]` **Dynamic Tokens:** Integrate with tools like Git to provide dynamic, real-time tokens like `<git::branch>` or `<git::is_dirty>`.
 
 ---
 
@@ -100,7 +100,7 @@ These are ambitious, game-changing features that we will explore once the `v1.0`
 The most valuable contribution right now is to **use `axes` and give us feedback**. We are particularly interested in:
 
 1. **Performance:** How does `axes v0.2.0` feel in your daily workflow? Are there any commands that still feel slow?
-2. **The Parameter System:** Push `<axes::params::...>` to its limits. Create complex, parameterized scripts. Is the behavior always intuitive?
+2. **The Parameter System:** Push `<params::...>` to its limits. Create complex, parameterized scripts. Is the behavior always intuitive?
 3. **Real-World Monorepos:** Try integrating `axes` into one of your existing monorepo projects. What challenges did you face? What features were missing?
 
 **How to report feedback?**

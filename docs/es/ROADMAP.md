@@ -23,7 +23,7 @@
 `axes` se encuentra en su primera fase **Beta**. Esto significa:
 
 * **Núcleo Estable:** La arquitectura principal (dispatcher, handlers, interpolador, sistema de caché) es robusta y está bien probada.
-* **API de `axes.toml` Definida:** La sintaxis del `axes.toml`, incluyendo `[scripts]`, herencia y el sistema `<axes::params::...>`, está completa en características para la v1.0.
+* **API de `axes.toml` Definida:** La sintaxis del `axes.toml`, incluyendo `[scripts]`, herencia y el sistema `<params::...>`, está completa en características para la v1.0.
 * **Listo para Probar:** La herramienta está lista para ser usada en proyectos reales. Se esperan bugs, y el feedback de los usuarios es crucial en esta fase.
 
 ---
@@ -59,7 +59,7 @@ Estos son los hitos que nos llevarán a una versión 1.0 estable y pulida.
         ```toml
         # Sintaxis a soportar
         deploy = [
-            "<axes::scripts::build>",
+            "<scripts::build>",
             { windows = "win-deploy.ps1", linux = "./deploy.sh" },
             "echo 'Desplegado!'"
         ]
@@ -90,7 +90,7 @@ Estas son características más ambiciosas que se considerarán una vez que el n
 * `[ ]` **Motor de Plantillas (`init` 2.0):** Transformar `init` en un motor de andamiaje completo que use plantillas de `~/.config/axes/templates/`.
 * `[ ]` **Cambio de Sesión (`axes switch <contexto>`):** La capacidad de cambiar de una sesión de proyecto a otra sin necesidad de `exit` y volver a entrar.
 * `[ ]` **Centralización de Cachés:** Mover todos los archivos de caché (`.axes/*.bin`) a un directorio centralizado (`~/.config/axes/cache/`) para mantener limpios los directorios de los proyectos.
-* `[ ]` **Integración con Git:** Añadir tokens dinámicos como `<axes::git::branch>` o `<axes::git::commit_hash>`.
+* `[ ]` **Integración con Git:** Añadir tokens dinámicos como `<git::branch>` o `<git::commit_hash>`.
 
 ---
 
@@ -98,8 +98,8 @@ Estas son características más ambiciosas que se considerarán una vez que el n
 
 ¡La mejor forma de contribuir ahora mismo es probando `axes` en tus flujos de trabajo! Estamos especialmente interesados en feedback sobre las siguientes áreas:
 
-1. **El Sistema de Parámetros:** Intenta crear scripts complejos usando `<axes::params::...>` en todas sus variantes. ¿Es intuitivo? ¿Encuentras algún caso borde que no funcione?
-2. **La Composición de Scripts:** Crea scripts que se llamen unos a otros (`<axes::scripts::...>`) y que usen ejecución paralela (`>`). Intenta romper la detección de ciclos.
+1. **El Sistema de Parámetros:** Intenta crear scripts complejos usando `<params::...>` en todas sus variantes. ¿Es intuitivo? ¿Encuentras algún caso borde que no funcione?
+2. **La Composición de Scripts:** Crea scripts que se llamen unos a otros (`<scripts::...>`) y que usen ejecución paralela (`>`). Intenta romper la detección de ciclos.
 3. **Operaciones de Refactorización:** Usa `link`, `rename`, `unregister` y `delete` (con sus flags) en un monorepo de prueba. ¿Es el comportamiento siempre el esperado? ¿Son los mensajes claros?
 4. **Cancelación con `Ctrl+C`:** Lanza un script de larga duración (ej. `[scripts] wait = "sleep 30"`) e intenta cancelarlo. ¿Responde la herramienta como esperas?
 
