@@ -1,0 +1,66 @@
+name: Manual OS Test
+
+# Este es el activador mágico para ejecuciones manuales
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        description: 'Operating System to test on'
+        required: true
+        default: 'ubuntu-latest'
+        type: choice
+        options:
+        - ubuntu-latest
+        - windows-latest
+        - macos-latest
+      commands:
+        description: 'Commands to run (use ./axes)'
+        required: true
+        default: |
+          ./axes --version
+          ./axes --help
+
+jobs:
+  manual-run:
+    name: Run on ${{ github.event.inputs.os }}
+    runs-on: ${{ github.event.inputs.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/
+          key: ${{ runner.os }}-cargo-manual-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build axes (debug mode for speed)
+        run: cargo build
+
+      - name: Run custom commands
+        shell: bash
+        # Usa el binario compilado en el paso anterior
+        # Nota: La ruta es la misma para todos los SO en modo debug
+        run: |
+          # Ponemos el binario en una variable para facilitar
+          AXES_BIN=./target/debug/axes
+          
+          # En Windows, el nombre del binario es .exe
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            AXES_BIN=./target/debug/axes.exe
+          fi
+          
+          # Reemplazamos './axes' en los comandos del usuario por la ruta real
+          # Esto permite al usuario escribir comandos de forma natural
+          USER_COMMANDS="${{ github.event.inputs.commands }}"
+          echo "--- Running user commands ---"
+          eval "${USER_COMMANDS//.\/axes/$AXES_BIN}"
+          echo "--- Finished ---"
