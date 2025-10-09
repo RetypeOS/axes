@@ -32,18 +32,15 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact_name: axes-linux-amd64
-            asset_name: axes-x86_64-unknown-linux-gnu.tar.gz
+            compression_ext: tar.xz
             binary_name: axes
           - os: macos-latest
             target: x86_64-apple-darwin
-            artifact_name: axes-macos-amd64
-            asset_name: axes-x86_64-apple-darwin.tar.gz
+            compression_ext: tar.xz
             binary_name: axes
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact_name: axes-windows-amd64
-            asset_name: axes-x86_64-pc-windows-msvc.zip
+            compression_ext: zip
             binary_name: axes.exe
 
     runs-on: ${{ matrix.os }}
@@ -57,36 +54,82 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
 
+      - name: Import GPG Signing Key
+        id: import_gpg
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_BOT_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
-      
-      - name: Create package for upload
+
+      - name: Define Artifact Name and Sign Binary
         shell: bash
         run: |
-          # Define la ruta al binario
+          VERSION="${{ github.ref_name }}"
+          ASSET_NAME="axes-${{ matrix.target }}-${VERSION}.${{ matrix.compression_ext }}"
+          
+          echo "ASSET_NAME=$ASSET_NAME" >> $GITHUB_ENV
+          
           BINARY_PATH="./target/${{ matrix.target }}/release/${{ matrix.binary_name }}"
           
-          mkdir -p ${{ matrix.artifact_name }}
+          gpg --batch --pinentry-mode loopback --yes \
+              --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
+              --local-user ${{ secrets.GPG_KEY_ID }} \
+              --output "${BINARY_PATH}.sig" \
+              --detach-sign "${BINARY_PATH}"
+      
+      - name: Create package (Max Compression)
+        shell: bash
+        run: |
+          VERSION="${{ github.ref_name }}"
+          PACKAGE_DIR="axes-${{ matrix.target }}-${VERSION}"
+
+          mkdir -p "$PACKAGE_DIR"
+          BINARY_PATH="./target/${{ matrix.target }}/release/${{ matrix.binary_name }}"
+          BINARY_SIG_PATH="${BINARY_PATH}.sig"
           
-          cp "$BINARY_PATH" ./${{ matrix.artifact_name }}/
-          cp LICENSE ./${{ matrix.artifact_name }}/
-          cp README.md ./${{ matrix.artifact_name }}/
-          cp TECHNICAL.md ./${{ matrix.artifact_name }}/
-          cp GETTING_STARTED.md ./${{ matrix.artifact_name }}/
-          cp COMMAND.md ./${{ matrix.artifact_name }}/
+          cp "$BINARY_PATH" ./"$PACKAGE_DIR"/
+          cp "$BINARY_SIG_PATH" ./"$PACKAGE_DIR"/ 
+          cp LICENSE ./"$PACKAGE_DIR"/
+          cp README.md ./"$PACKAGE_DIR"/
+          cp TECHNICAL.md ./"$PACKAGE_DIR"/
+          cp GETTING_STARTED.md ./"$PACKAGE_DIR"/
+          cp COMMAND.md ./"$PACKAGE_DIR"/
 
           if [ "${{ runner.os }}" == "Windows" ]; then
-            7z a "${{ matrix.asset_name }}" "./${{ matrix.artifact_name }}/"
+            7z a -tzip -mx=9 "${{ env.ASSET_NAME }}" "./$PACKAGE_DIR/"
           else
-            tar czf "${{ matrix.asset_name }}" "./${{ matrix.artifact_name }}/"
+            # xz is used for maximum compression on Unix systems (-J)
+            tar cJf -9 "${{ env.ASSET_NAME }}" "./$PACKAGE_DIR/"
           fi
+
+      - name: Sign Compressed Artifact (Final Signature)
+        shell: bash
+        run: |
+          gpg --batch --pinentry-mode loopback --yes \
+              --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
+              --local-user ${{ secrets.GPG_KEY_ID }} \
+              --output "${{ env.ASSET_NAME }}.sig" \
+              --detach-sign "${{ env.ASSET_NAME }}"
           
-      - name: Upload Release Asset
+      - name: Upload Release Asset (Compressed)
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create_release.outputs.upload_url }}
-          asset_path: ./${{ matrix.asset_name }}
-          asset_name: ${{ matrix.asset_name }}
+          asset_path: ./${{ env.ASSET_NAME }}
+          asset_name: ${{ env.ASSET_NAME }}
+          asset_content_type: application/octet-stream
+
+      - name: Upload Release Asset (Compressed Signature)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create_release.outputs.upload_url }}
+          asset_path: ./${{ env.ASSET_NAME }}.sig
+          asset_name: ${{ env.ASSET_NAME }}.sig
           asset_content_type: application/octet-stream
