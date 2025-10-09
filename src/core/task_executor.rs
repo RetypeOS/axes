@@ -163,7 +163,7 @@ pub fn assemble_final_command(
                     .ok_or_else(|| anyhow!("Referenced script '{}' not found.", script_name))?;
                 if script_task.commands.len() > 1 {
                     return Err(anyhow!(
-                        "Inline script composition for '<axes::scripts::{}>' is not supported because it is a multi-line script.",
+                        "Inline script composition for '<scripts::{}>' is not supported because it is a multi-line script.",
                         script_name
                     ));
                 }

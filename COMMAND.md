@@ -337,12 +337,12 @@ axes [<context>] run <script_name> [parameters...]
 
 #### **Key Functionality**
 
-The `run` command is orchestrated by a powerful text expansion engine. Inside your scripts, you can use a special `<axes::...>` syntax to:
+The `run` command is orchestrated by a powerful text expansion engine. Inside your scripts, you can use a special `<...>` syntax to:
 
-* **Include variables:** `<axes::vars::my_variable>`
-* **Compose other scripts:** `<axes::scripts::other_script>`
-* **Execute commands and substitute their output:** `<axes::run::git rev-parse --short HEAD>`
-* **Pass CLI parameters in a structured way:** `<axes::params::0>`, `<axes::params::flag='--flag'>`, `<axes::params>`
+* **Include variables:** `<vars::my_variable>`
+* **Compose other scripts:** `<scripts::other_script>`
+* **Execute commands and substitute their output:** `<run::git rev-parse --short HEAD>`
+* **Pass CLI parameters in a structured way:** `<params::0>`, `<params::flag='--flag'>`, `<params>`
 
 > **Note:** The scripting and parameter system is the deepest feature of `axes`. For a complete guide with examples, see **[Mastering `axes.toml` (`AXES_TOML_GUIDE.md`)](./AXES_TOML_GUIDE.md)**.
 
@@ -356,11 +356,11 @@ axes build
 axes my-app/frontend run build
 
 # Executes the 'test' script and passes a parameter
-# (assuming `test` uses `<axes::params>` or `<axes::params::0>`)
+# (assuming `test` uses `<params>` or `<params::0>`)
 axes my-app/api test tests/unit/test_auth.py
 
 # Executes a script passing a flag
-# (assuming `deploy` uses `<axes::params::production='--prod'>`)
+# (assuming `deploy` uses `<params::production='--prod'>`)
 axes my-app deploy --production
 ```
 
@@ -389,7 +389,7 @@ axes [<context>] start [parameters...]
 
 When running `start`, `axes` does the following:
 
-1. **Resolves and Validates Parameters:** `axes` analyzes the provided `[parameters...]` and validates them against the `<axes::params::...>` definitions found in the `at_start` and `at_exit` hooks.
+1. **Resolves and Validates Parameters:** `axes` analyzes the provided `[parameters...]` and validates them against the `<params::...>` definitions found in the `at_start` and `at_exit` hooks.
 2. **Executes the `at_start` Hook:** The `at_start` script is executed, injecting the resolved parameters.
 3. **Starts the Shell:** The interactive shell is launched with all `[env]` variables injected.
 
@@ -401,7 +401,7 @@ Once inside, you can execute `axes` commands without specifying the context. Whe
 # Starts a simple session in the API service (using shortcut)
 axes my-app/api
 
-# Assuming an `at_start` like: "docker-compose up -d <axes::params::service>"
+# Assuming an `at_start` like: "docker-compose up -d <params::service>"
 # Starts a session and specifies which service to spin up
 axes my-app/api start --service web
 ```
@@ -433,10 +433,10 @@ Applications are defined in the `[options.open_with]` section of your `axes.toml
 ```toml
 [options.open_with]
 # Simple string shortcut
-edit = "code \"<axes::path>\""
+edit = "code \"<path>\""
 
 # Shortcut with description and that accepts parameters
-terminal = { desc = "Opens a terminal in a subfolder.", run = "wt -d \"<axes::path>/<axes::params::0(default='.')>\"" }
+terminal = { desc = "Opens a terminal in a subfolder.", run = "wt -d \"<path>/<params::0(default='.')>\"" }
 
 # Sets the default action
 default = "edit"

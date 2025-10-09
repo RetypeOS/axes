@@ -10,51 +10,51 @@ description = "The development workflow configuration for the `axes` project its
 # === Development Scripts ===
 # Defines workflows for building, testing, and managing the tool.
 [scripts]
-hello = "echo 'Hola, <axes::scripts::hello_2>'"
-hello_2 = "echo 'Hola, <axes::params::0()>'"
+hello = "echo 'Hola, <scripts::hello_2>'"
+hello_2 = "echo 'Hola, <params::0()>'"
 
 # --- Core Development Workflows ---
-build = { desc = "Builds the project in debug mode with fast compilation.", run = "cargo build <axes::params>" }
+build = { desc = "Builds the project in debug mode with fast compilation.", run = "cargo build <params>" }
 build_release = { desc = "Builds the project in release mode for distribution.", run = "cargo build --release" }
-run = { desc = "Runs the project, passing all arguments to the binary.", run = "cargo run -- <axes::params>" }
+run = { desc = "Runs the project, passing all arguments to the binary.", run = "cargo run -- <params>" }
 test = { desc = "Runs all unit and integration tests.", run = "cargo test" }
 
 # --- Code Quality ---
 check = { desc = "Checks the project for errors without compiling.", run = "cargo check" }
-lint = { desc = "Lints the code for style and correctness issues.", run = "cargo clippy -- -D warnings <axes::params>" }
-fmt = { desc = "Checks if the code is formatted according to project style.", run = "cargo fmt --all -- --check <axes::params>" }
-fmt_fix = { desc = "Formats the code automatically.", run = "cargo fmt --all <axes::params>" }
+lint = { desc = "Lints the code for style and correctness issues.", run = "cargo clippy -- -D warnings <params>" }
+fmt = { desc = "Checks if the code is formatted according to project style.", run = "cargo fmt --all -- --check <params>" }
+fmt_fix = { desc = "Formats the code automatically.", run = "cargo fmt --all <params>" }
 
 # This is a composite script, showcasing the power of `axes` to create complete workflows.
 quality = { desc = "Runs all quality checks in sequence (fmt, check, lint, test).", run = [
-    "<axes::scripts::fmt>",
-    "<axes::scripts::check>",
-    "<axes::scripts::lint>",
-    "<axes::scripts::test>",
+    "<scripts::fmt>",
+    "<scripts::check>",
+    "<scripts::lint>",
+    "<scripts::test>",
 ]}
 
 _flamgraph_exec = { windows = "start flamegraph.svg", macos = "open flamegraph.svg", linux = "xdg-open flamegraph.svg", default="echo 'Flamegraph generated at flamegraph.svg'" }
 
 # --- Artifacts & Distribution ---
-clean = { desc = "Removes the target directory and build artifacts.", run = "cargo clean <axes::params>" }
-doc = { desc = "Builds and opens the project documentation in the browser.", run = "cargo doc --open <axes::params>" }
+clean = { desc = "Removes the target directory and build artifacts.", run = "cargo clean <params>" }
+doc = { desc = "Builds and opens the project documentation in the browser.", run = "cargo doc --open <params>" }
 
 # Builds and installs the artifact to a local path, showcasing a cross-platform script.
 [scripts.install]
 desc = "Builds in release and copies the artifact to a local installation path."
 windows = [
-    "# <axes::vars::install_welcome>",
-    "<axes::scripts::build_release>",
-    "powershell -Command \"New-Item -ItemType File -Path '<axes::vars::install_path_win>' -Force | Out-Null; Copy-Item -Path '.\\target\\release\\axes.exe' -Destination '<axes::vars::install_path_win>'\"",
+    "# <vars::install_welcome>",
+    "<scripts::build_release>",
+    "powershell -Command \"New-Item -ItemType File -Path '<vars::install_path_win>' -Force | Out-Null; Copy-Item -Path '.\\target\\release\\axes.exe' -Destination '<vars::install_path_win>'\"",
     "# Completed.!"
 ]
 linux = [
-    "<axes::scripts::build_release>",
-    "install -m 755 -D \"<axes::path>/target/release/axes\" \"<axes::vars::install_path_nix>\""
+    "<scripts::build_release>",
+    "install -m 755 -D \"<path>/target/release/axes\" \"<vars::install_path_nix>\""
 ]
 macos = [
-    "<axes::scripts::build_release>",
-    "install -m 755 -D \"<axes::path>/target/release/axes\" \"<axes::vars::install_path_nix>\""
+    "<scripts::build_release>",
+    "install -m 755 -D \"<path>/target/release/axes\" \"<vars::install_path_nix>\""
 ]
 
 # --- Performance Analysis ---
@@ -62,8 +62,8 @@ macos = [
 [scripts.flamegraph]
 desc = "Generates a performance flamegraph for a given command and opens the result."
 run = [
-    "cargo flamegraph --bin axes -- <axes::params>",
-    "<axes::scripts::_flamgraph_exec>"
+    "cargo flamegraph --bin axes -- <params>",
+    "<scripts::_flamgraph_exec>"
 ]
 [scripts.Hyperfine]
 desc = ""
@@ -77,9 +77,9 @@ run = "hyperfine 'axes hello' 'just hola' 'task hello' --warmup 5 --runs 50 --ex
 # By default, install into a local './bin' directory. This is safe and portable.
 # A user can override this by creating a `.axes/axes.local.toml` file with:
 # [vars]
-install_welcome = "Installing 'axes' on: '<axes::vars::install_path_win>'..."
-install_path_win = "<axes::params::0(default='.\\bin\\axes.exe')>" 
-install_path_nix = "<axes::params::0(default='./bin/axes')>"
+install_welcome = "Installing 'axes' on: '<vars::install_path_win>'..."
+install_path_win = "<params::0(default='.\\bin\\axes.exe')>" 
+install_path_nix = "<params::0(default='./bin/axes')>"
 
 # === Environment Variables ===
 # Injected into every command executed by `axes`.

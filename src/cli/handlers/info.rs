@@ -243,16 +243,16 @@ fn render_component_to_string(component: &TemplateComponent) -> String {
     match component {
         TemplateComponent::Literal(s) => s.clone(),
         TemplateComponent::Parameter(p) => p.original_token.clone(),
-        TemplateComponent::GenericParams => "<axes::params>".to_string(),
+        TemplateComponent::GenericParams => "<params>".to_string(),
         TemplateComponent::Run(spec) => match spec {
-            RunSpec::Literal(cmd) => format!("<axes::run('{}')>", cmd),
+            RunSpec::Literal(cmd) => format!("<run('{}')>", cmd),
         },
-        TemplateComponent::Path => "<axes::path>".to_string(),
-        TemplateComponent::Name => "<axes::name>".to_string(),
-        TemplateComponent::Uuid => "<axes::uuid>".to_string(),
-        TemplateComponent::Version => "<axes::version>".to_string(),
-        TemplateComponent::Script(s) => format!("<axes::scripts::{}>", s),
-        TemplateComponent::Var(v) => format!("<axes::vars::{}>", v),
+        TemplateComponent::Path => "<path>".to_string(),
+        TemplateComponent::Name => "<name>".to_string(),
+        TemplateComponent::Uuid => "<uuid>".to_string(),
+        TemplateComponent::Version => "<version>".to_string(),
+        TemplateComponent::Script(s) => format!("<scripts::{}>", s),
+        TemplateComponent::Var(v) => format!("<vars::{}>", v),
     }
 }
 

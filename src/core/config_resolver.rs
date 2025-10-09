@@ -21,7 +21,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 lazy_static! {
-    static ref TOKEN_RE: Regex = Regex::new(r"<axes::([^>]+)>").unwrap();
+    // Regex to capture potential tokens, with an optional escape character.
+    static ref TOKEN_RE: Regex = Regex::new(r"\\?<([^>]+)>").unwrap();
 }
 
 #[derive(Error, Debug)]
@@ -150,56 +151,68 @@ fn tokenize_string(text: &str) -> Result<Vec<TemplateComponent>> {
     let mut last_index = 0;
     for caps in TOKEN_RE.captures_iter(text) {
         let full_match = caps.get(0).unwrap();
+
+        // Add the literal text between the last match and this one.
         if last_index < full_match.start() {
             components.push(TemplateComponent::Literal(
                 text[last_index..full_match.start()].to_string(),
             ));
         }
-        let content = caps.get(1).unwrap().as_str().trim();
-        let component = if let Some(param_spec) = content.strip_prefix("params::") {
-            TemplateComponent::Parameter(parameters::parse_parameter_token(
-                full_match.as_str(),
-                param_spec,
-            )?)
-        } else if content == "params" {
-            TemplateComponent::GenericParams
-        } else if let Some(run_spec) = content.strip_prefix("run") {
-            if let Some(cmd) = run_spec
-                .strip_prefix("('")
-                .and_then(|s| s.strip_suffix("')"))
-            {
-                TemplateComponent::Run(RunSpec::Literal(cmd.to_string()))
-            } else {
-                return Err(anyhow!(
-                    "Invalid run syntax in token: {}",
-                    full_match.as_str()
-                ));
-            }
+
+        if full_match.as_str().starts_with('\\') {
+            components.push(TemplateComponent::Literal(
+                full_match.as_str()[1..].to_string(), // Slice to remove the leading `\`
+            ));
         } else {
-            // Static tokens and NEW symbolic references
-            match content {
-                "path" => TemplateComponent::Path,
-                "name" => TemplateComponent::Name,
-                "uuid" => TemplateComponent::Uuid,
-                "version" => TemplateComponent::Version,
+            // This is a real token to be parsed.
+            let content = caps.get(1).unwrap().as_str().trim();
 
-                // FIX: Instead of erroring, create symbolic components.
-                s if s.starts_with("scripts::") => {
-                    TemplateComponent::Script(s.strip_prefix("scripts::").unwrap().to_string())
-                }
-                s if s.starts_with("vars::") => {
-                    TemplateComponent::Var(s.strip_prefix("vars::").unwrap().to_string())
-                }
-
-                _ => {
+            // The internal parsing logic remains the same, just without the `` prefix.
+            let component = if let Some(param_spec) = content.strip_prefix("params::") {
+                TemplateComponent::Parameter(parameters::parse_parameter_token(
+                    full_match.as_str(),
+                    param_spec,
+                )?)
+            } else if content == "params" {
+                TemplateComponent::GenericParams
+            } else if let Some(run_spec) = content.strip_prefix("run") {
+                if let Some(cmd) = run_spec
+                    .strip_prefix("('")
+                    .and_then(|s| s.strip_suffix("')"))
+                {
+                    TemplateComponent::Run(RunSpec::Literal(cmd.to_string()))
+                } else {
                     return Err(anyhow!(
-                        "Unknown token namespace in: '{}'",
+                        "Invalid run syntax in token: {}",
                         full_match.as_str()
                     ));
                 }
-            }
-        };
-        components.push(component);
+            } else {
+                // Static tokens and NEW symbolic references
+                match content {
+                    "path" => TemplateComponent::Path,
+                    "name" => TemplateComponent::Name,
+                    "uuid" => TemplateComponent::Uuid,
+                    "version" => TemplateComponent::Version,
+
+                    // FIX: Instead of erroring, create symbolic components.
+                    s if s.starts_with("scripts::") => {
+                        TemplateComponent::Script(s.strip_prefix("scripts::").unwrap().to_string())
+                    }
+                    s if s.starts_with("vars::") => {
+                        TemplateComponent::Var(s.strip_prefix("vars::").unwrap().to_string())
+                    }
+
+                    _ => {
+                        return Err(anyhow!(
+                            "Unknown token namespace in: '{}'",
+                            full_match.as_str()
+                        ));
+                    }
+                }
+            };
+            components.push(component);
+        }
         last_index = full_match.end();
     }
     if last_index < text.len() {
@@ -467,30 +480,44 @@ mod tests {
     }
 
     // --- TEST 3: Circular Dependency Detection via Depth Limit ---
-    /// Ensures that the lazy resolver correctly stops and reports an error
-    /// when a circular dependency would lead to infinite recursion.
-    // --- TEST 3: Circular Dependency Detection via Depth Limit ---
+    /// Ensures that the `flatten_task` method correctly detects and reports an error
+    /// when a circular dependency between scripts exists.
     #[test]
     fn test_circular_dependency_detection() {
+        // --- Setup ---
         let mut index = setup_test_index();
         let toml = r#"
             [scripts]
-            a = "<axes::scripts::b>"
-            b = "<axes::scripts::a>"
+            a = "<scripts::b>"
+            b = "<scripts::a>"
         "#;
         let uuid = setup_test_project(&mut index, Some(GLOBAL_PROJECT_UUID), "cycle", toml);
-
         let mut loader = crate::core::config_loader::ConfigLoader::new(&mut index);
         let config = loader.resolve(uuid).unwrap();
 
-        // Attempting to resolve the script should fail due to recursion depth.
-        let result = config.get_script("a", 0);
+        // --- Execute ---
+        // 1. First, get the top-level task for script 'a'. This should succeed.
+        let task = config
+            .get_script("a", 0)
+            .unwrap()
+            .expect("Script 'a' should be found successfully.");
 
-        assert!(result.is_err());
-        let error_message = result.unwrap_err().to_string();
+        // 2. Now, attempt to flatten the task. This is the step that should fail
+        //    because it recursively resolves the scripts.
+        let result = config.flatten_task(&task);
+
+        // --- Assert ---
         assert!(
-            error_message.contains("Maximum recursion depth exceeded"),
-            "Error message was: {}",
+            result.is_err(),
+            "Flattening a task with a circular dependency should fail."
+        );
+
+        let error_message = result.unwrap_err().to_string();
+        // Our new `flatten_task` logic provides a more precise error than just
+        // hitting a recursion limit. We should check for this specific error.
+        assert!(
+            error_message.contains("Circular dependency"),
+            "Error message did not indicate a circular dependency. Got: '{}'",
             error_message
         );
     }

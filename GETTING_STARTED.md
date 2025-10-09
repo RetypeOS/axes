@@ -111,7 +111,7 @@ description = "The monorepo for the Innovatech website."
 company_name = "Innovatech Inc."
 
 [scripts]
-check_copyright = "echo \"© $(date +%Y) <axes::vars::company_name>. All rights reserved.\""
+check_copyright = "echo \"© $(date +%Y) <vars::company_name>. All rights reserved.\""
 ```
 
 We have defined a variable and a script that will act as shared configuration for our entire monorepo.
@@ -165,8 +165,8 @@ build = "hugo --minify"
 # This script COMPOSES the 'check_copyright' script inherited from the parent.
 generate_footer = [
     "echo '--- Generating Blog Footer ---'",
-    "<axes::scripts::check_copyright>",
-    "echo 'Built with <axes::name>'"
+    "<scripts::check_copyright>",
+    "echo 'Built with <name>'"
 ]
 ```
 
@@ -216,9 +216,9 @@ description = "The Innovatech online store."
 
 [scripts]
 # This test script accepts a positional parameter.
-# `<axes::params::0>` will be replaced by the first argument
+# `<params::0>` will be replaced by the first argument
 # we pass to the script from the command line.
-test_module = "pytest tests/test_<axes::params::0>.py"
+test_module = "pytest tests/test_<params::0>.py"
 ```
 
 To run a script on a **different** project, you must now use the `run` command explicitly. This removes ambiguity and makes your intent clear.
@@ -251,7 +251,7 @@ description = "The monorepo for the Innovatech website."
 company_name = "Innovatech Inc."
 
 [scripts]
-check_copyright = "echo \"© $(date +%Y) <axes::vars::company_name>. All rights reserved.\""
+check_copyright = "echo \"© $(date +%Y) <vars::company_name>. All rights reserved.\""
 
 # NEW! A script that calls the scripts of its children.
 build_all = [
@@ -341,7 +341,7 @@ You now have a solid foundation to start using `axes` in your own projects.
 The journey doesn't end here. `axes` is a deep tool with many more features designed to make your life easier. To become an expert user, we recommend exploring the rest of our documentation:
 
 * **[Complete Command Reference (`COMMANDS.md`)](./COMMANDS.md):** Want to know everything `init`, `tree`, `link`, or `delete` can do? This is your reference guide.
-* **[Mastering `axes.toml` (`AXES_TOML_GUIDE.md`)](./AXES_TOML_GUIDE.md):** The definitive guide to the `axes.toml` syntax. Learn about cross-platform commands, the complete `<axes::params::...>` syntax, and more.
+* **[Mastering `axes.toml` (`AXES_TOML_GUIDE.md`)](./AXES_TOML_GUIDE.md):** The definitive guide to the `axes.toml` syntax. Learn about cross-platform commands, the complete `<params::...>` syntax, and more.
 * **[Technical and Contribution Guide (`TECNICAL.md`)](./TECNICAL.md):** If you are curious about how `axes` works internally or want to contribute to the project, this is your starting point.
 
 ## Join the Community

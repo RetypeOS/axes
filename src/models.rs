@@ -168,9 +168,9 @@ pub struct ParameterModifiers {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum RunSpec {
-    /// Represents a literal shell command, e.g., `<axes::run("./get_version.sh")>`
+    /// Represents a literal shell command, e.g., `<run("./get_version.sh")>`
     Literal(String),
-    // /// Represents a reference to another axes script, e.g., `<axes::run::get_version_script>`
+    // /// Represents a reference to another axes script, e.g., `<run::get_version_script>`
     // Script(String),
 }
 
@@ -249,6 +249,12 @@ pub struct ResolvedOptionsConfig {
     pub cache_dir: Option<String>,
 }
 
+/// A thread-safe, shareable container for a fully merged environment map.
+type MemoizedEnv = Arc<HashMap<String, String>>;
+
+/// A thread-safe, lockable container for a memoized value.
+type Memoized<T> = Arc<Mutex<Option<T>>>;
+
 /// An intelligent facade that provides access to the project's configuration.
 /// It loads and merges configuration layers from the inheritance chain on-demand.
 #[derive(Debug, Clone)]
@@ -258,12 +264,12 @@ pub struct ResolvedConfig {
     pub project_root: PathBuf,
     pub(crate) hierarchy: Arc<Vec<Uuid>>,
     pub(crate) layers: Arc<HashMap<Uuid, LayerPromise>>,
-    memoized_scripts: Arc<Mutex<HashMap<String, Option<Arc<Task>>>>>,
-    memoized_vars: Arc<Mutex<HashMap<String, Option<Arc<Task>>>>>,
-    memoized_env: Arc<Mutex<Option<Arc<HashMap<String, String>>>>>,
-    memoized_version: Arc<Mutex<Option<Option<String>>>>,
-    memoized_description: Arc<Mutex<Option<Option<String>>>>,
-    memoized_options: Arc<Mutex<Option<ResolvedOptionsConfig>>>,
+    memoized_scripts: Memoized<HashMap<String, Option<Arc<Task>>>>,
+    memoized_vars: Memoized<HashMap<String, Option<Arc<Task>>>>,
+    memoized_env: Memoized<MemoizedEnv>,
+    memoized_version: Memoized<Option<String>>,
+    memoized_description: Memoized<Option<String>>,
+    memoized_options: Memoized<ResolvedOptionsConfig>,
 }
 
 impl ResolvedConfig {
@@ -281,12 +287,12 @@ impl ResolvedConfig {
             project_root,
             hierarchy: Arc::new(hierarchy),
             layers: Arc::new(layers),
-            memoized_scripts: Arc::new(Mutex::new(HashMap::new())),
-            memoized_vars: Arc::new(Mutex::new(HashMap::new())),
-            memoized_env: Arc::new(Mutex::new(None)),
-            memoized_version: Arc::new(Mutex::new(None)),
-            memoized_description: Arc::new(Mutex::new(None)),
-            memoized_options: Arc::new(Mutex::new(None)),
+            memoized_scripts: Default::default(),
+            memoized_vars: Default::default(),
+            memoized_env: Default::default(),
+            memoized_version: Default::default(),
+            memoized_description: Default::default(),
+            memoized_options: Default::default(),
         }
     }
 
@@ -302,10 +308,18 @@ impl ResolvedConfig {
                 name
             ));
         }
-        if let Some(cached_result) = self.memoized_scripts.lock().unwrap().get(name) {
+
+        // Lock the mutex for the whole operation.
+        let mut guard = self.memoized_scripts.lock().unwrap();
+
+        // Check if the HashMap exists and if the script is already cached in it.
+        if let Some(cache) = &*guard
+            && let Some(cached_result) = cache.get(name)
+        {
             return Ok(cached_result.clone());
         }
 
+        // --- Not in cache, so we compute it ---
         let mut result = None;
         for &uuid in self.hierarchy.iter() {
             let layer = self.get_layer(uuid)?;
@@ -315,10 +329,12 @@ impl ResolvedConfig {
             }
         }
 
-        self.memoized_scripts
-            .lock()
-            .unwrap()
+        // Insert the result into the cache.
+        // `or_insert_with(Default::default)` ensures the HashMap is created if it's the first time.
+        guard
+            .get_or_insert_with(Default::default)
             .insert(name.to_string(), result.clone());
+
         Ok(result)
     }
 
@@ -330,7 +346,12 @@ impl ResolvedConfig {
                 name
             ));
         }
-        if let Some(cached_result) = self.memoized_vars.lock().unwrap().get(name) {
+
+        let mut guard = self.memoized_vars.lock().unwrap();
+
+        if let Some(cache) = &*guard
+            && let Some(cached_result) = cache.get(name)
+        {
             return Ok(cached_result.clone());
         }
 
@@ -343,34 +364,30 @@ impl ResolvedConfig {
             }
         }
 
-        self.memoized_vars
-            .lock()
-            .unwrap()
+        guard
+            .get_or_insert_with(Default::default)
             .insert(name.to_string(), result.clone());
+
         Ok(result)
     }
 
     /// Lazily merges and returns all environment variables from the entire hierarchy.
     /// [REBUILT] Lazily merges and returns all environment variables from the entire hierarchy.
     /// The result is cached in an Arc for extremely fast subsequent calls.
-    pub fn get_env(&self) -> Result<Arc<HashMap<String, String>>> {
+    pub fn get_env(&self) -> Result<MemoizedEnv> {
         let mut guard = self.memoized_env.lock().unwrap();
 
-        // If the value is already computed, clone the Arc and return.
         if let Some(env_arc) = &*guard {
             return Ok(env_arc.clone());
         }
 
-        // --- Value is not computed, so calculate it for the first time ---
         let mut final_env = HashMap::new();
-        // Iterate from parent to child so child env vars overwrite parent ones.
         for &uuid in self.hierarchy.iter().rev() {
             let layer = self.get_layer(uuid)?;
             final_env.extend(layer.env.clone());
         }
 
         let result_arc = Arc::new(final_env);
-        // Store the computed Arc in the memoized field.
         *guard = Some(result_arc.clone());
 
         Ok(result_arc)
@@ -747,7 +764,7 @@ impl ProjectConfig {
             "editor".to_string(),
             Command(CanonicalCommand {
                 default: Some(Runnable::Single(
-                    "<axes::vars::editor_cmd> \"<axes::path>\"".to_string(),
+                    "<vars::editor_cmd> \"<path>\"".to_string(),
                 )),
                 ..Default::default()
             }),
@@ -755,9 +772,7 @@ impl ProjectConfig {
         open_with_commands.insert(
             "idea".to_string(),
             Command(CanonicalCommand {
-                default: Some(Runnable::Single(
-                    "<axes::vars::idea_cmd> \"<axes::path>\"".to_string(),
-                )),
+                default: Some(Runnable::Single("<vars::idea_cmd> \"<path>\"".to_string())),
                 ..Default::default()
             }),
         );
@@ -767,7 +782,7 @@ impl ProjectConfig {
             open_with_commands.insert(
                 "explorer".to_string(),
                 Command(CanonicalCommand {
-                    default: Some(Runnable::Single("-explorer \"<axes::path>\"".to_string())),
+                    default: Some(Runnable::Single("-explorer \"<path>\"".to_string())),
                     ..Default::default()
                 }),
             );
@@ -775,7 +790,7 @@ impl ProjectConfig {
             open_with_commands.insert(
                 "finder".to_string(),
                 Command(CanonicalCommand {
-                    default: Some(Runnable::Single("open \"<axes::path>\"".to_string())),
+                    default: Some(Runnable::Single("open \"<path>\"".to_string())),
                     ..Default::default()
                 }),
             );
@@ -784,7 +799,7 @@ impl ProjectConfig {
             open_with_commands.insert(
                 "files".to_string(),
                 Command(CanonicalCommand {
-                    default: Some(Runnable::Single("xdg-open \"<axes::path>\"".to_string())),
+                    default: Some(Runnable::Single("xdg-open \"<path>\"".to_string())),
                     ..Default::default()
                 }),
             );
@@ -796,7 +811,7 @@ impl ProjectConfig {
                 "shell".to_string(),
                 Command(CanonicalCommand {
                     default: Some(Runnable::Single(
-                        "start cmd.exe /K \"cd /D <axes::path>\"".to_string(),
+                        "start cmd.exe /K \"cd /D <path>\"".to_string(),
                     )),
                     ..Default::default()
                 }),
@@ -805,7 +820,7 @@ impl ProjectConfig {
             open_with_commands.insert(
                 "shell".to_string(),
                 Command(CanonicalCommand {
-                    default: Some(Runnable::Single("<axes::vars::terminal_cmd>".to_string())),
+                    default: Some(Runnable::Single("<vars::terminal_cmd>".to_string())),
                     ..Default::default()
                 }),
             );
@@ -829,7 +844,7 @@ impl ProjectConfig {
         vars_defaults.insert("idea_cmd".to_string(), "idea".to_string());
         vars_defaults.insert(
             "terminal_cmd".to_string(),
-            "gnome-terminal --working-directory=<axes::path>".to_string(),
+            "gnome-terminal --working-directory=<path>".to_string(),
         );
 
         Self {
@@ -856,7 +871,7 @@ impl ProjectConfig {
         let mut vars = HashMap::new();
 
         let test_runnable =
-            Runnable::Single("echo \"✅ Test for '<axes::name>' successful!\"".to_string());
+            Runnable::Single("echo \"✅ Test for '<name>' successful!\"".to_string());
         let test_command = Command(CanonicalCommand {
             default: Some(test_runnable),
             desc: Some("Run a simple test echo command.".to_string()),

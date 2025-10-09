@@ -101,11 +101,11 @@ Your scripts become first-class command-line applications, complete with documen
 [scripts]
 # 1. Required positional parameter:
 #    Fails if an environment is not provided.
-test = "pytest --env <axes::params::0(required)>"
+test = "pytest --env <params::0(required)>"
 
 # 2. Named parameter with a default value:
 #    Uses '--tag latest' if not specified.
-build = "docker build . -t my-app:<axes::params::tag(map='', default='latest')>"
+build = "docker build . -t my-app:<params::tag(map='', default='latest')>"
 ```
 
 ```sh
@@ -148,9 +148,9 @@ host = "http://localhost:8080" # Defined once.
 
 [scripts.browse]
 desc    = "Opens local documentation in the browser."
-windows = "start <axes::vars::host>" # Reuses the variable.
-macos   = "open <axes::vars::host>"
-linux   = "xdg-open <axes::vars::host>"
+windows = "start <vars::host>" # Reuses the variable.
+macos   = "open <vars::host>"
+linux   = "xdg-open <vars::host>"
 ```
 
 #### 3. Dynamic Real-Time Values
@@ -160,7 +160,7 @@ Execute commands and use their output instantly as variables.
 ```toml
 [scripts]
 # Tags a Docker image with the current short git hash
-tag_release = "docker tag my-app:latest my-app:<axes::run('git rev-parse --short HEAD')>"
+tag_release = "docker tag my-app:latest my-app:<run('git rev-parse --short HEAD')>"
 ```
 
 #### 4. Immersive Focus Sessions
@@ -221,7 +221,7 @@ lint = [
 [scripts]
 lint = "poetry run ruff check ."
 run = "poetry run uvicorn app.main:app --reload"
-build = "docker build . -t <axes::vars::DOCKER_REGISTRY>/<axes::vars::APP_NAME>-api:latest"
+build = "docker build . -t <vars::DOCKER_REGISTRY>/<vars::APP_NAME>-api:latest"
 ```
 
 **`mi-monorepo/web/.axes/axes.toml` (Frontend)**
@@ -230,7 +230,7 @@ build = "docker build . -t <axes::vars::DOCKER_REGISTRY>/<axes::vars::APP_NAME>-
 [scripts]
 lint = "npm run lint"
 run = "npm run dev"
-build = "docker build . -t <axes::vars::DOCKER_REGISTRY>/<axes::vars::APP_NAME>-web:latest"
+build = "docker build . -t <vars::DOCKER_REGISTRY>/<vars::APP_NAME>-web:latest"
 ```
 
 The `axes lint` command, run from the root, will now run the linters of both sub-projects **simultaneously**, showing only the output of the linters themselves.

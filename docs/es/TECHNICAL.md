@@ -226,8 +226,8 @@ El `ArgResolver` es el componente que une los parámetros definidos en un `Task`
 - **Resolución en un Solo Paso:** El `ArgResolver` se construye una única vez con este contrato y los argumentos del usuario. En su constructor, realiza todas las validaciones:
   - Comprueba que todos los parámetros `required` estén presentes.
   - Detecta conflictos, como el uso simultáneo de un flag y su alias (`--verbose` y `-v`).
-  - Detecta argumentos inesperados si el script no usa el token genérico `<axes::params>`.
-- **Resultado Inmutable:** El `ArgResolver` produce un `HashMap` inmutable que mapea el token original (ej. `<axes::params::0(required)>`) a su valor final resuelto. Durante la ejecución, el `TaskExecutor` simplemente realiza búsquedas rápidas en este mapa, sin necesidad de parsear o validar nada más.
+  - Detecta argumentos inesperados si el script no usa el token genérico `<params>`.
+- **Resultado Inmutable:** El `ArgResolver` produce un `HashMap` inmutable que mapea el token original (ej. `<params::0(required)>`) a su valor final resuelto. Durante la ejecución, el `TaskExecutor` simplemente realiza búsquedas rápidas en este mapa, sin necesidad de parsear o validar nada más.
 
 ### 3.4. El Sistema de Caché
 

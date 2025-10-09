@@ -53,7 +53,7 @@ pub struct CliInputState {
 pub struct ArgResolver {
     /// Mapa del token original a su valor final resuelto.
     resolved_values: HashMap<String, String>,
-    /// El valor final para el token genérico `<axes::params>`.
+    /// El valor final para el token genérico `<params>`.
     generic_params_value: String,
 }
 
@@ -381,7 +381,7 @@ impl ArgResolver {
         let (unconsumed_str, had_unconsumed) = cli_state.get_unconsumed_as_string();
         if had_unconsumed && !has_generic_params {
             return Err(anyhow!(
-                "{} The script does not define a generic `<axes::params>` token to accept them.\nProvided unhandled arguments: {}",
+                "{} The script does not define a generic `<params>` token to accept them.\nProvided unhandled arguments: {}",
                 "Error: Unexpected arguments were provided.".red(),
                 unconsumed_str.yellow()
             ));

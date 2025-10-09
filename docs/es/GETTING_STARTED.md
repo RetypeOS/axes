@@ -111,7 +111,7 @@ description = "El monorepo para el sitio web de Innovatech."
 company_name = "Innovatech Inc."
 
 [scripts]
-check_copyright = "echo \"© $(date +%Y) <axes::vars::company_name>. Todos los derechos reservados.\""
+check_copyright = "echo \"© $(date +%Y) <vars::company_name>. Todos los derechos reservados.\""
 ```
 
 Hemos definido una variable y un script que actuarán como configuración compartida para todo nuestro monorepo.
@@ -165,8 +165,8 @@ build = "hugo --minify"
 # Este script COMPONE el script 'check_copyright' heredado del padre.
 generate_footer = [
     "echo '--- Generando Footer del Blog ---'",
-    "<axes::scripts::check_copyright>",
-    "echo 'Construido con <axes::name>'"
+    "<scripts::check_copyright>",
+    "echo 'Construido con <name>'"
 ]
 ```
 
@@ -222,9 +222,9 @@ payment_gateway_api_key = "pk_test_12345"
 
 [scripts]
 # Este script de prueba acepta un parámetro posicional.
-# `<axes::params::0>` será reemplazado por el primer argumento
+# `<params::0>` será reemplazado por el primer argumento
 # que le pasemos al script desde la línea de comandos.
-test_module = "pytest tests/test_<axes::params::0>.py"
+test_module = "pytest tests/test_<params::0>.py"
 ```
 
 Ahora, desde la raíz del monorepo, puedes ejecutar los tests para un módulo específico de la tienda:
@@ -257,7 +257,7 @@ description = "El monorepo para el sitio web de Innovatech."
 company_name = "Innovatech Inc."
 
 [scripts]
-check_copyright = "echo \"© $(date +%Y) <axes::vars::company_name>. Todos los derechos reservados.\""
+check_copyright = "echo \"© $(date +%Y) <vars::company_name>. Todos los derechos reservados.\""
 
 # ¡NUEVO! Un script que llama a los scripts de sus hijos.
 # El prefijo `>` indica que el comando debe ejecutarse en PARALELO.
@@ -345,7 +345,7 @@ Ahora tienes una base sólida para empezar a usar `axes` en tus propios proyecto
 El viaje no termina aquí. `axes` es una herramienta profunda con muchas más características diseñadas para hacer tu vida más fácil. Para convertirte en un usuario experto, te recomendamos explorar el resto de nuestra documentación:
 
 * **[Referencia Completa de Comandos (`COMMANDS.md`)](./COMMANDS.md):** ¿Quieres saber todo lo que `init`, `tree`, `link` o `delete` pueden hacer? Esta es tu guía de referencia.
-* **[Dominando el `axes.toml` (`AXES_TOML_GUIDE.md`)](./AXES_TOML_GUIDE.md):** La guía definitiva sobre la sintaxis del `axes.toml`. Aprende sobre comandos multiplataforma, la sintaxis completa de `<axes::params::...>`, y más.
+* **[Dominando el `axes.toml` (`AXES_TOML_GUIDE.md`)](./AXES_TOML_GUIDE.md):** La guía definitiva sobre la sintaxis del `axes.toml`. Aprende sobre comandos multiplataforma, la sintaxis completa de `<params::...>`, y más.
 * **[Guía Técnica y de Contribución (`TECNICAL.md`)](./TECNICAL.md):** Si sientes curiosidad por cómo funciona `axes` por dentro o quieres contribuir al proyecto, este es tu punto de partida.
 
 ## Únete a la Comunidad

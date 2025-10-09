@@ -117,7 +117,7 @@ impl<'a> ParsedArgs<'a> {
     }
 
     /// Retrieves and consumes all remaining, unconsumed arguments, formatting them
-    /// into a single string suitable for the generic `<axes::params>` token.
+    /// into a single string suitable for the generic `<params>` token.
     pub fn consume_remaining(&mut self) -> String {
         let mut remaining_parts: Vec<String> = Vec::new();
 
@@ -147,8 +147,8 @@ impl<'a> ParsedArgs<'a> {
     }
 
     /// Checks if all arguments originally passed on the command line have been
-    /// consumed by either an explicit token (e.g., `<axes::params::0>`) or the
-    /// generic `<axes::params>` token.
+    /// consumed by either an explicit token (e.g., `<params::0>`) or the
+    /// generic `<params>` token.
     pub fn all_consumed(&self) -> bool {
         self.positional.iter().all(|arg| arg.consumed)
             && self.named.values().all(|arg| arg.consumed)

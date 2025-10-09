@@ -56,18 +56,18 @@ pub fn get_global_index_path() -> Result<PathBuf, PathError> {
 /// and a limited set of safe `axes` tokens.
 ///
 /// # Arguments
-/// * `template` - The template string (e.g., "~/.cache/axes/<axes::uuid>").
+/// * `template` - The template string (e.g., "~/.cache/axes/<uuid>").
 /// * `project_uuid` - The UUID of the project to use for token expansion.
 ///
 /// # Errors
 /// Returns an error if the template contains unsupported dynamic tokens like
-/// `<axes::params...>` or `<axes::run...>`, or if path expansion fails.
+/// `<params...>` or `<run...>`, or if path expansion fails.
 /// Expands a path template string, resolving home directory and environment variables.
 fn expand_path_template(template: &str) -> Result<PathBuf> {
     // We remove the project-specific tokens here as the root path should be generic.
-    if template.contains("<axes::") {
+    if template.contains("<") {
         return Err(anyhow!(
-            "The 'cache_dir' path template should only define a root directory and must not contain dynamic axes tokens like <axes::uuid>. Invalid template: '{}'",
+            "The 'cache_dir' path template should only define a root directory and must not contain dynamic axes tokens like <uuid>. Invalid template: '{}'",
             template
         ));
     }

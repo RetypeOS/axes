@@ -8,7 +8,7 @@
 
 The `axes` scripting engine allows you to do much more than execute static commands. It allows you to define **scripts that act as command-line functions**, accepting arguments in a structured, declarative, and validated manner.
 
-This guide explains in depth how the new and robust `axes` parsing system works and how to use the `<axes::params::...>` token family to create flexible and powerful workflows.
+This guide explains in depth how the new and robust `axes` parsing system works and how to use the `<params::...>` token family to create flexible and powerful workflows.
 
 ## The Paradigm: Pre-Definition and Validation
 
@@ -16,13 +16,13 @@ Unlike traditional shell scripts where you have to manually parse `$1` and `$2` 
 
 Before executing a single line of your script, `axes` performs a complete analysis:
 
-1. **Discovers** all parameter definitions (`<axes::params::...>`) in your script.
+1. **Discovers** all parameter definitions (`<params::...>`) in your script.
 2. **Parses** the arguments you provided on the command line.
 3. **Validates** that the provided arguments match the definitions, checking requirements, aliases, and conflicts.
 
 Only if this validation is successful does `axes` proceed to assemble and execute your commands. This eliminates an entire class of errors and ensures predictable behavior.
 
-> **The Golden Rule:** If, at the end of the analysis, there are remaining CLI arguments that were not consumed by any explicit token (`<axes::params::0>`, `<axes::params::flag>`, etc.) and the script does not include the generic `<axes::params>` token, `axes` will throw an error to prevent unexpected behavior.
+> **The Golden Rule:** If, at the end of the analysis, there are remaining CLI arguments that were not consumed by any explicit token (`<params::0>`, `<params::flag>`, etc.) and the script does not include the generic `<params>` token, `axes` will throw an error to prevent unexpected behavior.
 
 ---
 
@@ -45,11 +45,11 @@ Positional arguments are accessed by their numerical index, starting at `0`.
 
 You can add a configuration block in parentheses to refine the behavior of a parameter.
 
-* **Basic Syntax:** `<axes::params::0>`, `<axes::params::1>`, etc.
+* **Basic Syntax:** `<params::0>`, `<params::1>`, etc.
 * **Modifiers:**
   * `required`: Execution fails if the argument is not provided.
   * `default='value'`: Provides a default value if the argument is not passed in the CLI.
-  * `map='--new-flag'`: Transforms the positional argument into a flag with a value. If the user types `command my-value`, and the token is `<axes::params::0(map='--target')>`, the injected result will be `"--target my-value"`.
+  * `map='--new-flag'`: Transforms the positional argument into a flag with a value. If the user types `command my-value`, and the token is `<params::0(map='--target')>`, the injected result will be `"--target my-value"`.
 
 #### **Examples (Positional)**
 
@@ -58,7 +58,7 @@ You can add a configuration block in parentheses to refine the behavior of a par
 ```toml
 # axes.toml
 [scripts]
-greet = "echo 'Hello, <axes::params::0(default='World')>!'"
+greet = "echo 'Hello, <params::0(default='World')>!'"
 ```
 
 ```sh
@@ -71,7 +71,7 @@ axes . greet Valeria  # -> echo 'Hello, Valeria!'
 ```toml
 # axes.toml
 [scripts]
-create_file = "touch <axes::params::0(required)>"
+create_file = "touch <params::0(required)>"
 ```
 
 ```sh
@@ -86,7 +86,7 @@ This pattern is extremely useful for creating more readable interfaces.
 # axes.toml
 [scripts]
 # Lints a path, converting the positional argument into a --path flag.
-lint = "eslint <axes::params::0(map='--path', default='src/')>"
+lint = "eslint <params::0(map='--path', default='src/')>"
 ```
 
 ```sh
@@ -107,7 +107,7 @@ Parameter tokens can also search for and consume flags (`--name`) from the comma
 
 ### Syntax and Default Behavior
 
-* **Basic Syntax:** `<axes::params::flag-name>`
+* **Basic Syntax:** `<params::flag-name>`
 * **Behavior (Pass-through):** By default, a flag token looks for the corresponding flag in the CLI and reinjects it as is, along with its value if it has one.
   * If run with `--flag-name value`, the token expands to `"--flag-name value"`.
   * If run with `--flag-name` (no value), it expands to `"--flag-name"`.
@@ -128,7 +128,7 @@ Parameter tokens can also search for and consume flags (`--name`) from the comma
 ```toml
 # axes.toml
 [scripts]
-build = "cargo build <axes::params::release>"
+build = "cargo build <params::release>"
 ```
 
 ```sh
@@ -141,7 +141,7 @@ axes . build --release  # -> cargo build --release
 ```toml
 # axes.toml
 [scripts]
-test = "pytest <axes::params::marker(alias='-m')>"
+test = "pytest <params::marker(alias='-m')>"
 ```
 
 ```sh
@@ -156,7 +156,7 @@ axes . test -m smoke --marker slow # -> Error: Conflict: Both flag '--marker' an
 # axes.toml
 [scripts]
 # The internal script expects --environment, but we want to expose --env to the user.
-deploy = "terraform apply <axes::params::env(map='--environment', required)>"
+deploy = "terraform apply <params::env(map='--environment', required)>"
 ```
 
 ```sh
@@ -171,7 +171,7 @@ This is an advanced pattern for injecting values into places where a flag is not
 # axes.toml
 [scripts]
 # The image tag is passed as a flag but is injected as a positional value.
-docker_tag = "docker tag my-image:latest my-org/my-image:<axes::params::tag(map='', default='latest')>"
+docker_tag = "docker tag my-image:latest my-org/my-image:<params::tag(map='', default='latest')>"
 ```
 
 ```sh
@@ -186,11 +186,11 @@ axes . docker_tag --tag v1.2.0
 
 ---
 
-## 4. The Generic Collector: `<axes::params>`
+## 4. The Generic Collector: `<params>`
 
 This is the "collector" token. It is useful when you want to pass a variable number of arguments or flags to an underlying command without having to explicitly define them all.
 
-* **Syntax:** `<axes::params>`
+* **Syntax:** `<params>`
 * **Behavior:** Replaced by **all arguments** (positional and named) that **were not consumed** by an explicit token (`::0`, `::flag`, etc.), maintaining their original order.
 
 ### **Example: A generic `wrapper` for `cargo run`**
@@ -199,9 +199,9 @@ This is the "collector" token. It is useful when you want to pass a variable num
 # axes.toml
 [scripts]
 # Passes all undefined arguments directly to the binary.
-run = "cargo run -- <axes::params>"
+run = "cargo run -- <params>"
 # Allows an optional --release flag, and passes the rest.
-run_release = "cargo run <axes::params::release> -- <axes::params>"
+run_release = "cargo run <params::release> -- <params>"
 ```
 
 ```sh
@@ -211,8 +211,8 @@ axes . run --input /data/file.txt --verbose
 
 # Execution 2: Using the script with release
 axes . run_release --input /data/file.txt --release
-# `release` is consumed by <axes::params::release> and expands to `--release`.
-# `--input /data/file.txt` is consumed by <axes::params> and expands to itself.
+# `release` is consumed by <params::release> and expands to `--release`.
+# `--input /data/file.txt` is consumed by <params> and expands to itself.
 # Command executed: `cargo run --release -- --input /data/file.txt`
 ```
 

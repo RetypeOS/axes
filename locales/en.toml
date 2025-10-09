@@ -11,7 +11,7 @@
 "common.info.caches_will_regenerate" = "Note: Caches will be automatically regenerated on the next run."
 "common.error.operation_cancelled" = "Operation cancelled by user."
 "common.label.default" = "(default)"
-"common.label.inherited" = "inherited from {from}"
+"common.label.inherited" = "from {from}"
 "common.label.in_project" = "in project"
 "common.label.unknown" = "<unknown>"
 

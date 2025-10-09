@@ -227,8 +227,8 @@ The `ArgResolver` is the component that bridges the parameters defined in a `Tas
 - **Single-Pass Resolution:** The `ArgResolver` is constructed once with this contract and the user arguments. In its constructor, it performs all validation:
   - Checks that all `required` parameters are present.
   - Detects conflicts, such as simultaneous use of a flag and its alias (`--verbose` and `-v`).
-  - Detects unexpected arguments if the script does not use the generic `<axes::params>` token.
-- **Immutable Result:** The `ArgResolver` produces an immutable `HashMap` that maps the original token (e.g., `<axes::params::0(required)>`) to its final resolved value. During execution, the `TaskExecutor` simply performs fast lookups in this map, without needing further parsing or validation.
+  - Detects unexpected arguments if the script does not use the generic `<params>` token.
+- **Immutable Result:** The `ArgResolver` produces an immutable `HashMap` that maps the original token (e.g., `<params::0(required)>`) to its final resolved value. During execution, the `TaskExecutor` simply performs fast lookups in this map, without needing further parsing or validation.
 
 ### 3.4. The Caching System
 

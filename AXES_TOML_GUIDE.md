@@ -40,7 +40,7 @@ dist_dir = "dist/"
 
 # --- Scripts and Workflows ---
 [scripts]
-build = "npm run build -- --output <axes::vars::dist_dir>"
+build = "npm run build -- --output <vars::dist_dir>"
 serve = "npm run serve"
 
 # --- Options and Hooks ---
@@ -52,7 +52,7 @@ at_exit = "echo 'Cleaning up session...'"
 
 # Configuration for the `axes my-app open` command
 [options.open_with]
-editor = "code \"<axes::path>\""
+editor = "code \"<path>\""
 default = "editor"
 ```
 
@@ -62,7 +62,7 @@ default = "editor"
 
 These keys are purely informational and help document your project.
 
-* `version`: The version of your project (e.g., `"1.0.0"`). It is accessible in scripts via the `<axes::version>` token.
+* `version`: The version of your project (e.g., `"1.0.0"`). It is accessible in scripts via the `<version>` token.
 * `description`: A brief description of what the project does. It is shown in commands like `info`.
 
 ```toml
@@ -85,12 +85,12 @@ compiler_flags = "--optimization-level 3 -DNDEBUG"
 ```
 
 **Usage:**
-To use a variable, use the syntax `<axes::vars::variable_name>`. `axes` will replace the token with the variable's value before executing the command.
+To use a variable, use the syntax `<vars::variable_name>`. `axes` will replace the token with the variable's value before executing the command.
 
 ```toml
 [scripts]
 # Uses the variables defined above.
-build = "c++ <axes::vars::compiler_flags> -o <axes::vars::output_dir>/app main.cpp"
+build = "c++ <vars::compiler_flags> -o <vars::output_dir>/app main.cpp"
 ```
 
 Variables can also compose each other and use other `axes` tokens:
@@ -98,9 +98,9 @@ Variables can also compose each other and use other `axes` tokens:
 ```toml
 [vars]
 # The artifact directory depends on the project name.
-artifact_dir = "artifacts/<axes::name>"
+artifact_dir = "artifacts/<name>"
 # The final file name is composed of another variable.
-final_zip = "<axes::vars::artifact_dir>/<axes::name>.zip"
+final_zip = "<vars::artifact_dir>/<name>.zip"
 ```
 
 ## 3. Scripts and Workflows `[scripts]`
@@ -222,7 +222,7 @@ advanced = ">| -v --some-flag"
 
 One of the most powerful features of `axes` is its ability to build complex scripts from smaller, reusable pieces by expanding tokens **before** execution.
 
-* **Syntax:** `<axes::scripts::other_script_name>`
+* **Syntax:** `<scripts::other_script_name>`
 
 When `axes` prepares your scripts, it **structurally composes** them. If you call a multi-line script, its commands are inserted directly into the parent's command list.
 
@@ -239,8 +239,8 @@ test = { desc = "Runs the test suite.", run = ["pytest tests/unit", "pytest test
 # Execution control (sequential, parallel) belongs to `quality`.
 quality = [
     "# Running all quality checks...",
-    "<axes::scripts::lint>",
-    "> <axes::scripts::test>", # `test` itself is sequential, but `quality` runs it in parallel.
+    "<scripts::lint>",
+    "> <scripts::test>", # `test` itself is sequential, but `quality` runs it in parallel.
 ]
 ```
 
@@ -248,7 +248,7 @@ Running `axes quality` will execute `ruff check .`, and once it finishes, it wil
 
 ## 4. The Expansion Engine: Supercharging Your Scripts
 
-The feature that ties everything together is its token expansion engine. Any string value in your `axes.toml` can contain special tokens in the format `<axes::...>` that `axes` will process.
+The feature that ties everything together is its token expansion engine. Any string value in your `axes.toml` can contain special tokens in the format `<...>` that `axes` will process.
 
 Expansion happens lazily, and its results are saved as a pure Abstract Syntax Tree (AST) in a binary cache (`.axes/config.cache.bin`), making subsequent executions extremely fast.
 
@@ -260,14 +260,14 @@ These tokens are resolved to their final values during the expansion (JIT compil
 
 | Token             | Expansion Value                                                     |
 | :---------------- | :------------------------------------------------------------------ |
-| `<axes::name>`    | The full qualified name of the project (e.g., `my-app/api`).        |
-| `<axes::path>`    | The absolute physical path to the project root directory.           |
-| `<axes::uuid>`    | The project's universal unique identifier.                          |
-| `<axes::version>` | The version defined in the project's `axes.toml`.                   |
+| `<name>`    | The full qualified name of the project (e.g., `my-app/api`).        |
+| `<path>`    | The absolute physical path to the project root directory.           |
+| `<uuid>`    | The project's universal unique identifier.                          |
+| `<version>` | The version defined in the project's `axes.toml`.                   |
 
 #### **Variable Tokens**
 
-* **`<axes::vars::variable_name>`:** Expands to the value of the variable defined in the `[vars]` section.
+* **`<vars::variable_name>`:** Expands to the value of the variable defined in the `[vars]` section.
 
 **Combined Example:**
 
@@ -278,14 +278,14 @@ docker_registry = "registry.example.com/my-org"
 
 # in the child `my-app/api`'s `axes.toml`
 [scripts]
-docker_build = "docker build -t <axes::vars::docker_registry>/<axes::name>:<axes::version> ."
+docker_build = "docker build -t <vars::docker_registry>/<name>:<version> ."
 ```
 
-### 4.2. Dynamic Execution Token: `<axes::run::(...)>`
+### 4.2. Dynamic Execution Token: `<run::(...)>`
 
 Sometimes, you need the **result** of a command to use it in another.
 
-* **Syntax:** `<axes::run('command_to_execute')>`
+* **Syntax:** `<run('command_to_execute')>`
 * **Behavior:** `axes` executes `command_to_execute` **at runtime**, captures its standard output (stdout), cleans it up (removing trailing whitespace), and injects it into the main command.
 
 > **Important:** The output of `run` tokens is **never** cached to ensure the data is always fresh.
@@ -294,36 +294,36 @@ Sometimes, you need the **result** of a command to use it in another.
 
 ```toml
 [scripts]
-tag_release = "docker tag my-app:latest my-app:<axes::run('git rev-parse --short HEAD')>"
+tag_release = "docker tag my-app:latest my-app:<run('git rev-parse --short HEAD')>"
 ```
 
 When running `axes tag_release`:
 
 1. `axes` prepares to execute the `tag_release` script.
-2. It encounters the `<axes::run::(...)>` token.
+2. It encounters the `<run::(...)>` token.
 3. It executes `git rev-parse --short HEAD`.
 4. The git output (e.g., `a1b2c3d`) is captured.
 5. The final command is assembled as `docker build -t my-app:a1b2c3d .` and then executed.
 
-### 4.3. Runtime Parameter Tokens: `<axes::params::...>`
+### 4.3. Runtime Parameter Tokens: `<params::...>`
 
 This special family of tokens is not expanded beforehand. They are placeholders that are resolved at the very last moment by the `task_executor`, using the arguments you provide on the command line.
 
 (This is covered in depth in the next section.)
 
-## 5. Scripts as Functions: The Parameter System (`<axes::params::...`)
+## 5. Scripts as Functions: The Parameter System (`<params::...`)
 
 `axes` doesn't just run scripts; it allows you to define true command-line "functions" that accept arguments in a structured way. This eliminates the need to write complex `bash` scripts to parse flags and parameters.
 
-All parameter logic is controlled through the `<axes::params::...>` namespace and follows a **declarative paradigm**: you define the parameters your script expects, and `axes` validates the user input **before** executing anything.
+All parameter logic is controlled through the `<params::...>` namespace and follows a **declarative paradigm**: you define the parameters your script expects, and `axes` validates the user input **before** executing anything.
 
-> **Golden Rule:** If you pass arguments to a script from the command line (`axes my-script arg1 --flag`), that script's `axes.toml` **must** use `<axes::params::...>` tokens to consume them. If any arguments remain unconsumed by any token (and there is no generic `<axes::params>` token), `axes` will return an error.
+> **Golden Rule:** If you pass arguments to a script from the command line (`axes my-script arg1 --flag`), that script's `axes.toml` **must** use `<params::...>` tokens to consume them. If any arguments remain unconsumed by any token (and there is no generic `<params>` token), `axes` will return an error.
 
 ### 5.1. Positional Parameters
 
 These are arguments passed without a flag. They are accessed by their index (starting at 0).
 
-* **Basic Syntax:** `<axes::params::0>`, `<axes::params::1>`, etc.
+* **Basic Syntax:** `<params::0>`, `<params::1>`, etc.
 * **Behavior:** Replaced by the positional argument at that index. If the argument does not exist and is not required or does not have a `default`, it is replaced by an empty string.
 
 #### **Modifiers for Positionals `(...)`**
@@ -337,7 +337,7 @@ These are arguments passed without a flag. They are accessed by their index (sta
 ```toml
 [scripts]
 # Accepts a commit message as the first required positional argument.
-commit = "git commit -m \"<axes::params::0(required)>\""
+commit = "git commit -m \"<params::0(required)>\""
 ```
 
 **Execution:**
@@ -358,7 +358,7 @@ axes commit
 
 You can make your scripts react to flags (`--name`) passed from the CLI.
 
-* **Basic Syntax:** `<axes::params::flag-name>`
+* **Basic Syntax:** `<params::flag-name>`
 * **Default Behavior (Pass-through):** The token looks for the flag in the CLI and reinjects it as is, along with its value if it has one. If not found, it expands to an empty string.
 
 #### **Modifiers for Flags `(...)`**
@@ -374,7 +374,7 @@ You can make your scripts react to flags (`--name`) passed from the CLI.
 ```toml
 [scripts]
 # Uses the default pass-through with an alias.
-test = "pytest <axes::params::marker(alias='-m')>"
+test = "pytest <params::marker(alias='-m')>"
 ```
 
 **Execution:**
@@ -400,7 +400,7 @@ axes test -m smoke
 [scripts]
 # The internal script expects --environment, but we expose --env to the user.
 # By default, it deploys to 'staging'.
-deploy = "terraform apply -var 'env=<axes::params::env(map=' ', default='staging')>'"
+deploy = "terraform apply -var 'env=<params::env(map=' ', default='staging')>'"
 ```
 
 *Note the use of `map=' '` to inject only the value.*
@@ -417,11 +417,11 @@ axes deploy --env production
 # Command executed: terraform apply -var 'env=production'
 ```
 
-### 5.3. The Generic Collector: `<axes::params>`
+### 5.3. The Generic Collector: `<params>`
 
 This is the "collector" token. It is useful when you want to pass a variable number of arguments or flags to an underlying command without having to explicitly define them all.
 
-* **Syntax:** `<axes::params>`
+* **Syntax:** `<params>`
 * **Behavior:** Replaced by **all arguments** (positional and named) that **were not consumed** by an explicit token (`::0`, `::flag`, etc.), maintaining their original order.
 
 **Example: A generic `wrapper` for `npm install`.**
@@ -430,7 +430,7 @@ This is the "collector" token. It is useful when you want to pass a variable num
 [scripts]
 # `add` passes all remaining arguments to `npm install`,
 # but also explicitly handles a `--save-dev` flag with a `-D` alias.
-add = "npm install <axes::params::save-dev(alias='-D')> <axes::params>"
+add = "npm install <params::save-dev(alias='-D')> <params>"
 ```
 
 **Execution:**
@@ -443,7 +443,7 @@ axes add react
 # Installs a development dependency
 axes add -D typescript
 # `-D` is consumed by <...::save-dev> and expands to `--save-dev`.
-# `typescript` is unconsumed and gets collected by <axes::params>.
+# `typescript` is unconsumed and gets collected by <params>.
 # Command executed: `npm install --save-dev typescript`
 
 # Installs multiple dependencies with additional flags
@@ -479,7 +479,7 @@ These are full scripts that run automatically when entering and exiting an inter
 [options]
 at_start = { desc = "Activates venv and spins up the DB.", run = [
     "source .venv/bin/activate",
-    "docker-compose up -d <axes::params::service(default='db')>"
+    "docker-compose up -d <params::service(default='db')>"
 ]}
 at_exit = "docker-compose down"
 ```
@@ -492,8 +492,8 @@ Define shortcuts for the `axes <ctx> open` command. Each entry is a full script 
 
 ```toml
 [options.open_with]
-edit = { desc = "Opens the project in VS Code.", run = "code \"<axes::path>\"" }
-terminal = "wt -d \"<axes::path>/<axes::params::0(default='.')>\"" # Windows Terminal in subfolder
+edit = { desc = "Opens the project in VS Code.", run = "code \"<path>\"" }
+terminal = "wt -d \"<path>/<params::0(default='.')>\"" # Windows Terminal in subfolder
 default = "edit"
 ```
 

@@ -104,11 +104,11 @@ Tus scripts se convierten en aplicaciones de línea de comandos de primera clase
 [scripts]
 # 1. Parámetro posicional requerido:
 #    Falla si no se provee un entorno.
-test = "pytest --env <axes::params::0(required)>"
+test = "pytest --env <params::0(required)>"
 
 # 2. Parámetro nombrado con valor por defecto:
 #    Usa '--tag latest' si no se especifica.
-build = "docker build . -t my-app:<axes::params::tag(map='', default='latest')>"
+build = "docker build . -t my-app:<params::tag(map='', default='latest')>"
 ```
 
 ```sh
@@ -149,9 +149,9 @@ host = "http://localhost:8080" # Definido una sola vez.
 
 [scripts.browse]
 desc    = "Abre la documentación local en el navegador."
-windows = "start <axes::vars::host>" # Reutiliza la variable.
-macos   = "open <axes::vars::host>"
-linux   = "xdg-open <axes::vars::host>"
+windows = "start <vars::host>" # Reutiliza la variable.
+macos   = "open <vars::host>"
+linux   = "xdg-open <vars::host>"
 ```
 
 #### 3. Valores Dinámicos en Tiempo Real
@@ -161,7 +161,7 @@ Ejecuta comandos y utiliza su salida como variables al instante.
 ```toml
 [scripts]
 # Etiqueta una imagen de Docker con el hash corto del commit actual de git.
-tag_release = "docker tag mi-app:latest mi-app:<axes::run('git rev-parse --short HEAD')>"
+tag_release = "docker tag mi-app:latest mi-app:<run('git rev-parse --short HEAD')>"
 ```
 
 #### 4. Sesiones de Trabajo Inmersivas
@@ -222,7 +222,7 @@ lint = [
 [scripts]
 lint = "poetry run ruff check ."
 run = "poetry run uvicorn app.main:app --reload"
-build = "docker build . -t <axes::vars::DOCKER_REGISTRY>/<axes::vars::APP_NAME>-api:latest"
+build = "docker build . -t <vars::DOCKER_REGISTRY>/<vars::APP_NAME>-api:latest"
 ```
 
 **`mi-monorepo/web/.axes/axes.toml` (Frontend)**
@@ -231,7 +231,7 @@ build = "docker build . -t <axes::vars::DOCKER_REGISTRY>/<axes::vars::APP_NAME>-
 [scripts]
 lint = "npm run lint"
 run = "npm run dev"
-build = "docker build . -t <axes::vars::DOCKER_REGISTRY>/<axes::vars::APP_NAME>-web:latest"
+build = "docker build . -t <vars::DOCKER_REGISTRY>/<vars::APP_NAME>-web:latest"
 ```
 
 El comando `axes lint` ejecutado desde la raíz ahora correrá los linters de ambos sub-proyectos **simultáneamente**, mostrando solo la salida de los propios linters.
