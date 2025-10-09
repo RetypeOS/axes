@@ -282,6 +282,8 @@ Installation on Windows is the recommended and officially supported path.
 
 We currently do not offer pre-compiled binaries for macOS or Linux due to the lack of CI and testing infrastructure for these platforms. In theory, `axes` should work correctly as it is built with Rust, but **we cannot guarantee its stability**.
 
+> Currently, `axes` has **first-class support** on Windows, where it has been extensively developed and tested. Support for macOS and Linux is **experimental but architecturally sound**. The reason for this label is our current lack of CI infrastructure and hardware for continuous testing on these platforms.
+
 The community is welcome to test it and report any issues. The only installation method for now is compiling from source code.
 
 **Compiling from Source Code:**
