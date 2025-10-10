@@ -265,51 +265,49 @@ These modifiers can be combined, as in the `lint` example (`@>`), for powerful a
 
 `axes` creates a **cohesive language** over a set of heterogeneous tools, making the development experience predictable and simple, no matter the stack's complexity.
 
-### Installation
+## Installation
 
-`axes` is a single binary file with no dependencies.
+`axes` is distributed as a single, high-performance binary with no external dependencies, ensuring a frictionless installation experience across all major operating systems.
 
-#### Windows
+---
 
-Installation on Windows is the recommended and officially supported path.
+### First-Class Support: Windows, macOS, and Linux
 
-1. Go to the [**`axes` Releases page on GitHub**](https://github.com/retypeos/axes/releases).
-2. Download the `.zip` file for Windows (e.g., `axes-x86_64-pc-windows-msvc.zip`).
-3. Unzip the file and move the `axes.exe` executable to a directory included in your system's `PATH`.
-4. Open a **new terminal** and verify the installation with `axes --version`.
+We are committed to delivering the same robust, fast experience everywhere. Binaries are now tested and provided for **Windows**, **macOS**, and **Linux**.
 
-#### macOS and Linux (Experimental Support)
+1. **Download the Binary:** Go to the official [**`axes` Releases page on GitHub**](https://github.com/retypeos/axes/releases).
 
-We currently do not offer pre-compiled binaries for macOS or Linux due to the lack of CI and testing infrastructure for these platforms. In theory, `axes` should work correctly as it is built with Rust, but **we cannot guarantee its stability**.
+2. **Select Your System:** Download the compressed file (`.zip` or `.tar.gz`) appropriate for your operating system and architecture:
 
-> Currently, `axes` has **first-class support** on Windows, where it has been extensively developed and tested. Support for macOS and Linux is **experimental but architecturally sound**. The reason for this label is our current lack of CI infrastructure and hardware for continuous testing on these platforms.
+    - `axes-x86_64-pc-windows-msvc.zip` (Windows)
 
-The community is welcome to test it and report any issues. The only installation method for now is compiling from source code.
+    - `axes-x86_64-apple-darwin.tar.gz` (macOS)
 
-**Compiling from Source Code:**
+    - `axes-x86_64-unknown-linux-gnu.tar.gz` (Linux)
 
-1. Ensure you have the [Rust toolchain](https://rustup.rs/) installed (`rustc`, `cargo`).
-2. Clone the repository:
+3. **Place in PATH:**
 
-    ```sh
-    git clone https://github.com/retypeos/axes.git
-    cd axes
-    ```
+    - **Unzip/Extract** the file.
 
-3. (Optional) Language Selection: `axes` includes translations. You can embed a specific language in the stable binary by setting the `AXES_LANG` environment variable before compiling; if not specified, English is used by default.
+    - Move the `axes` executable (or `axes.exe` on Windows) to a directory included in your system's **`PATH`** (e.g., `/usr/local/bin` on Linux/macOS, or a custom directory you add to your PATH on Windows).
+
+4. **Verify Installation:** Open a **new terminal** and run the following command to verify the installation:
 
     ```sh
-    # To compile with the interface in Spanish
-    export AXES_LANG='es' 
+    axes --version
     ```
 
-4. Compile in `release` mode to get maximum performance:
+---
 
-    ```sh
-    cargo build --release
-    ```
+## Architectural Confidence and Cross-Platform Caching
 
-5. The final binary will be in `target/release/axes`. Copy it to a location in your `PATH` (e.g., `/usr/local/bin`).
+`axes` is engineered with **architectural confidence** thanks to its Rust foundation and its unique caching system.
+
+- **Engineering Guarantee:** The core logic, the **AST Compiler**, and the execution engine are designed to be **platform-agnostic**. The superior speed you get from the **AOT (Ahead-of-Time) Compilation** is consistent across all operating systems.
+
+- **Team Collaboration Feature:** `axes` creates an optimized binary cache that can be **shared across different operating systems** (e.g., via a network drive or a shared project folder). If one developer compiles the workflow on Windows, another developer on Linux instantly benefits from the **Hot Execution Path**, skipping the costly initial parsing.
+
+We continuously test and improve the experience on all platforms. If you encounter any platform-specific issues, please [**Open an Issue**](https://github.com/retypeos/axes/issues).
 
 ---
 

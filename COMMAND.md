@@ -23,9 +23,10 @@ This document is the definitive reference guide for every command available in t
     * *Example (Global):* `axes tree --all`
     * *Example (Implicit Context):* `axes info` (equivalent to `axes . info`)
 
-3. **`axes <script_name> [params...]` (Default)**
-    * If neither of the above rules match, `axes` assumes you are trying to **run a script**. This is a shortcut for `axes . run <script_name>`.
-    * *Example:* `axes build --release`
+3. **`axes <virtual_script_path> [params...]` (Default)**
+    * If neither of the above rules match, `axes` assumes you are trying to **run a script**. This is a shortcut for `axes <ctx> run <script_name>`.
+    * *Example:* `axes build --release` => `run build script of current project` (`axes run build --release`)
+    * *Example:* `axes api/build --release` => `run build script of child 'api' from actual project` (`axes api run build --release`)
 
 ### **Context System:**
 
@@ -192,7 +193,7 @@ Shows a visual representation of the registered project tree, starting from the 
 #### **Syntax**
 
 ```sh
-axes tree [<context>] [-p, --paths] [-u, --uuids] [--all]
+axes [<context>] tree [-p, --paths] [-u, --uuids] [--all]
 ```
 
 #### **Behavior**
@@ -202,12 +203,14 @@ axes tree [<context>] [-p, --paths] [-u, --uuids] [--all]
 
 #### **Arguments and Flags**
 
-| Argument/Flag      | Description                                                              | Required |
+| Argument/Flag      | Description                                                                 | Required  |
 | :------------------ | :------------------------------------------------------------------------- | :-------- |
 | `<context>`         | The project from which to start showing the tree.                          | No        |
 | `-p`, `--paths`     | Shows the absolute physical path of each project.                          | No        |
 | `-u`, `--uuids`     | Shows the unique UUID of each project.                                     | No        |
 | `--all`             | A shortcut to show all available information (`--paths` and `--uuids`).    | No        |
+| `-d`, `--depth <DEPTH>` | Limit the depth of the tree display                                    | No        |
+| `--check`           | Check if the project paths exist on the filesystem                         | No        |
 
 #### **Usage Examples**
 
@@ -216,7 +219,7 @@ axes tree [<context>] [-p, --paths] [-u, --uuids] [--all]
 axes tree
 
 # Shows the sub-tree of the `my-app` monorepo
-axes tree my-app
+axes my-app tree
 
 # Shows the complete tree with paths and UUIDs, useful for debugging
 axes tree --all
@@ -239,7 +242,7 @@ axes [<context>] info
 
 #### **Arguments and Flags**
 
-| Argument    | Description                                   | Required |
+| Argument    | Description                                   | Required  |
 | :---------- | :-------------------------------------------- | :-------- |
 | `<context>` | The project whose information to display.     | No        |
 
@@ -265,10 +268,17 @@ Manages shortcuts (aliases) for your project context paths. Aliases are global a
 #### **Syntax**
 
 ```sh
-axes alias <subcommand> [arguments...]
+axes [<ctx>] alias <subcommand> [arguments...]
 ```
 
 #### **`alias` Subcommands**
+
+| Argument    | Description                                      | Require                    |
+| :---------- | :----------------------------------------------- | :------------------------- |
+| `set`       | Sets a new alias or updates an existing one.     | `<alias> <target_context>` |
+| `list`      | Lists all defined aliases.                       | Nothing                    |
+| `remove`    | Removes an alias.                                | `<alias>`                  |
+| `check`     | Verifies all aliases, reporting any broken links | Nothing                    |
 
 **`list`**
 (Alias: `ls`)
@@ -325,6 +335,8 @@ Executes a script defined in the `[scripts]` section of a project's `axes.toml`.
 
 ```sh
 axes [<context>] run <script_name> [parameters...]
+# Or:
+axes [<context>]/<script_name> [parameters...]
 ```
 
 #### **Arguments and Flags**
@@ -341,8 +353,8 @@ The `run` command is orchestrated by a powerful text expansion engine. Inside yo
 
 * **Include variables:** `<vars::my_variable>`
 * **Compose other scripts:** `<scripts::other_script>`
-* **Execute commands and substitute their output:** `<run::git rev-parse --short HEAD>`
-* **Pass CLI parameters in a structured way:** `<params::0>`, `<params::flag='--flag'>`, `<params>`
+* **Execute commands and substitute their output:** `<run('git rev-parse --short HEAD')>`
+* **Pass CLI parameters in a structured way:** `<params::0>`, `<params::fl(map='--flag', default='some', required)>`, `<params>`
 
 > **Note:** The scripting and parameter system is the deepest feature of `axes`. For a complete guide with examples, see **[Mastering `axes.toml` (`AXES_TOML_GUIDE.md`)](./AXES_TOML_GUIDE.md)**.
 
@@ -357,11 +369,11 @@ axes my-app/frontend run build
 
 # Executes the 'test' script and passes a parameter
 # (assuming `test` uses `<params>` or `<params::0>`)
-axes my-app/api test tests/unit/test_auth.py
+axes my-app/api/test tests/unit/test_auth.py
 
 # Executes a script passing a flag
-# (assuming `deploy` uses `<params::production='--prod'>`)
-axes my-app deploy --production
+# (assuming `deploy` uses `<params::production>`)
+axes my-app/deploy --production
 ```
 
 ---
@@ -375,8 +387,6 @@ Starts an interactive and persistent shell session within a project's context. I
 ```sh
 axes [<context>] start [parameters...]
 ```
-
-* **Shortcut:** `axes <context>` is equivalent to `axes <context> start`.
 
 #### **Arguments and Flags**
 
@@ -398,8 +408,8 @@ Once inside, you can execute `axes` commands without specifying the context. Whe
 #### **Usage Examples**
 
 ```sh
-# Starts a simple session in the API service (using shortcut)
-axes my-app/api
+# Starts a simple session in the API service
+axes my-app/api start
 
 # Assuming an `at_start` like: "docker-compose up -d <params::service>"
 # Starts a session and specifies which service to spin up
@@ -428,7 +438,7 @@ axes [<context>] open [<app_key>] [parameters...]
 
 #### **Configuration**
 
-Applications are defined in the `[options.open_with]` section of your `axes.toml`. Since v0.1.8, each entry is a **complete script** that can be a string, a sequence, or a table with a description.
+Applications are defined in the `[options.open_with]` section of your `axes.toml`. Since v0.1.8, each entry is a **complete script** that can be a string, a sequence, or a table with a description. [WARN: Pending to Change...]
 
 ```toml
 [options.open_with]

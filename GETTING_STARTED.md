@@ -82,9 +82,9 @@ Before starting, it is crucial to understand how `axes` refers to projects. Just
 | :------ | :-------------------------------------------------------------------------- | :----------------------------------- |
 | `name`  | A direct child of the root project (default name is `global`).              | `axes innovatech-website info`       |
 | `/`     | The level separator in the hierarchy.                                       | `axes innovatech-website/blog info`  |
-| `.`     | The project in the current directory, or the first ancestor found.          | `axes . info` (resolves to `innovatech-website/blog`)    |
+| `.`     | The project in the current work directory.                                  | `axes . info` (resolves to `innovatech-website/blog`)    |
 | `_`     | The project whose root directory is *exactly* the current directory.        | `axes _ info` (resolves to `innovatech-website/blog`)    |
-| `..`    | The parent of the current context project or the first ancestor found.      | `axes .. info` (resolves to `innovatech-website`)  |
+| `..`    | The parent of the current context project or search on superior path.       | `axes .. info` (resolves to `innovatech-website`)  |
 | `**`    | (Double asterisk) Resolves to the last project you used in the **entire system.** Useful for quickly returning. | `axes ** start`    |
 | `*`     | (Single asterisk) Resolves to the last child you used **of the current parent project**. | `axes mi-super-app/* start`    |
 | `alias!`| A custom shortcut you create.                                               | `axes blog! info` (if `blog!` points to our project)  |
@@ -137,7 +137,7 @@ To visualize the new structure, go back to the parent directory and run `tree`:
 ```sh
 # From the innovatech-website/ directory
 cd ..
-axes innovatech-website tree
+axes tree # Implicit by '.'
 
 # Or, more intelligently, from inside `blog/`:
 # "Show me my parent's tree"
@@ -164,9 +164,9 @@ description = "The Innovatech blog."
 build = "hugo --minify"
 # This script COMPOSES the 'check_copyright' script inherited from the parent.
 generate_footer = [
-    "echo '--- Generating Blog Footer ---'",
+    "# --- Generating Blog Footer ---",
     "<scripts::check_copyright>",
-    "echo 'Built with <name>'"
+    "# Built with <name>"
 ]
 ```
 
@@ -180,9 +180,9 @@ axes generate_footer
 The output will be:
 
 ```text
-> --- Generating Blog Footer ---
-> © 2024 Innovatech Inc.. All rights reserved.
-> Built with innovatech-website/blog
+ --- Generating Blog Footer ---
+© 2025 Innovatech Inc.. All rights reserved.
+ Built with innovatech-website/blog
 ```
 
 You have shared configuration and logic cleanly and navigated your project intuitively. Next, we will add more complexity with our online store.
@@ -196,7 +196,7 @@ Our online store will be the third project in our tree. The process is identical
 mkdir store && cd store
 
 # Initialize, again specifying the parent with `..`
-axes init --parent ..
+axes init --name store --parent ..
 ```
 
 After the wizard, your project tree (`axes innovatech-website tree`) will look like this:
@@ -221,17 +221,43 @@ description = "The Innovatech online store."
 test_module = "pytest tests/test_<params::0>.py"
 ```
 
-To run a script on a **different** project, you must now use the `run` command explicitly. This removes ambiguity and makes your intent clear.
+To run a script on a **different** project, you will be use the `run` command explicitly or ./script_name. This removes ambiguity and makes your intent clear.
 
 ```sh
 # From the innovatech-website/ directory
-axes store run test_module payments  # --> will execute `pytest tests/test_payments.py`
-axes store run test_module products  # --> will execute `pytest tests/test_products.py`
+axes store run test_module payments  # --> will execute `pytest tests/test_payments.py` (Explicit mode with `run`)
+axes store/test_module products  # --> will execute `pytest tests/test_products.py` (Implicit mode with <ctx>/script_name [args...])
 ```
 
 You have created a reusable and parameterizable shortcut, eliminating the need to remember or type long, complex test paths.
 
 > **Go Deeper:** The `axes` parameter system is extremely powerful, allowing flags, default values, and more. To master it, consult our complete guide: **[Mastering `axes.toml` (`AXES_TOML_GUIDE.md`)](./AXES_TOML_GUIDE.md)**.
+
+### A Deeper Look: The Universal Command Grammar
+
+The command `axes store/test_module payments` is a prime example of `axes`'s most powerful and ergonomic feature: its **universal command grammar**.
+
+Unlike traditional task runners that often require a specific subcommand like `run` to execute a script (`task_runner run <script> -- <args>`), `axes` treats the combination of `<context>/<script_name>` as a single, directly executable command.
+
+This creates a **"virtual command space"** where every script across your entire monorepo becomes accessible as if it were a native binary in your `PATH`.
+
+#### How It Works
+
+The `axes` dispatcher is engineered to intelligently parse this grammar. When it receives a command, it splits the first argument at the *last* `/` it finds:
+
+```sh
+axes store/test_module payments
+#    └─┬─┘ └───┬─────┘ └───┬───···>
+#      │       │           └─ Parameters (passed to the script)
+#      │       └─ Script Name
+#      └─ Context
+```
+
+* Everything before the last `/` (`store`) is treated as the **context**.
+* Everything after it (`test_module`) is the **script name** to be executed within that context.
+* Any subsequent arguments (`payments`) are passed as **parameters** to the script.
+
+This design choice is intentional. It makes your project's scripts feel like native, first-class commands, reducing cognitive load and making your workflow feel seamless and integrated with your shell. This turns your entire monorepo into a single, cohesive command-line application.
 
 ---
 
@@ -253,21 +279,21 @@ company_name = "Innovatech Inc."
 [scripts]
 check_copyright = "echo \"© $(date +%Y) <vars::company_name>. All rights reserved.\""
 
-# NEW! A script that calls the scripts of its children.
+# A script that calls the scripts of its children.
 build_all = [
-    "echo '🚀 Building the entire website...'",
+    "# 🚀 Building the entire website...",
     # The `>` prefix indicates that the command must be executed in PARALLEL.
     # We use the explicit `run` command for clarity and robustness.
-    "> axes blog run build",
-    "> axes store run build" # Assuming `store` also has a `build` script.
+    "@> axes blog/build",
+    "@> axes store/build" # Assuming `store` also has a `build` script.
 ]
 
 # A quality script that runs in sequence.
 quality_check = [
-    "echo ' linting...'",
-    "axes blog run lint",  # Assuming `lint` scripts in the children.
-    "axes store run lint",
-    "echo '✅ Code quality verified!'"
+    "# linting...",
+    "@ axes blog/lint",  # Assuming `lint` scripts in the children.
+    "@ axes store/lint",
+    "# ✅ Code quality verified!"
 ]
 ```
 
@@ -276,19 +302,19 @@ With this configuration, you have created single entry points for complex operat
 ```sh
 # From anywhere in your system.
 # Builds the blog and the store simultaneously.
-axes innovatech-website run build_all
+axes innovatech-website/build_all
 
 # Runs the linters one after the other.
-axes innovatech-website run quality_check
+axes innovatech-website/quality_check
 ```
 
 And if you only want to execute individually, you just need to call its function:
 
 ```sh
 # Execute the script only for the blog project.
-axes innovatech-website/blog run build
+axes innovatech-website/blog/build
 
-axes */store run build # if you already executed the previous command, '*' indicates that the most recently used project from the parent is returned.
+axes */store/build # if you already executed the previous command, '*' indicates that the most recently used project from the parent is returned.
 ```
 
 You have moved from managing individual commands to orchestrating entire workflows. The complexity of each sub-project is encapsulated, and the parent project provides a simple and powerful API to interact with the whole.
@@ -302,9 +328,7 @@ For this, `axes` offers **project sessions**.
 To enter the `blog` project's context:
 
 ```sh
-# `start` is the default action if you only provide a context.
-# This command is a shortcut for `axes innovatech-website/blog start`
-$ axes innovatech-website/blog
+$ axes innovatech-website/blog start
 
 --- `axes` session for 'innovatech-website/blog' started. Type 'exit' to leave. ---
 # Your terminal prompt might change to reflect the active session.

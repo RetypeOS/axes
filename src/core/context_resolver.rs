@@ -59,10 +59,9 @@ type ContextResult<T> = Result<T, ContextError>;
 /// The resolution follows a strict, multi-layered priority order to ensure
 /// predictable behavior both inside and outside of project sessions.
 pub fn resolve_context(context: &str, index: &mut GlobalIndex) -> ContextResult<(Uuid, String)> {
-    let parts: Vec<&str> = context.split('/').filter(|s| !s.is_empty()).collect();
-    if parts.is_empty() {
-        return Err(ContextError::EmptyContext);
-    }
+    let context = if context.trim().is_empty() { "." } else { context.trim() };
+
+    let parts: Vec<&str> = context.split('/').collect();
 
     let first_part = parts[0];
     let global_project_entry = index.projects.get(&GLOBAL_PROJECT_UUID).unwrap();
@@ -136,7 +135,7 @@ pub fn resolve_context(context: &str, index: &mut GlobalIndex) -> ContextResult<
             }
         };
 
-    // --- 2. TRAVERSE THE PATH (Unchanged from previous version) ---
+    // --- 2. TRAVERSE THE PATH ---
     for part in traversal_parts {
         let current_entry = index.projects.get(&current_uuid).unwrap();
 

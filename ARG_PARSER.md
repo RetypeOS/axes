@@ -49,7 +49,7 @@ You can add a configuration block in parentheses to refine the behavior of a par
 * **Modifiers:**
   * `required`: Execution fails if the argument is not provided.
   * `default='value'`: Provides a default value if the argument is not passed in the CLI.
-  * `map='--new-flag'`: Transforms the positional argument into a flag with a value. If the user types `command my-value`, and the token is `<params::0(map='--target')>`, the injected result will be `"--target my-value"`.
+  * `map='--new-flag'`: Transforms the positional argument into a flag with a value. If the user types `command my-value`, and the token is `<params::0(map='--target ')>`, the injected result will be `"--target my-value"`.
 
 #### **Examples (Positional)**
 
@@ -86,7 +86,7 @@ This pattern is extremely useful for creating more readable interfaces.
 # axes.toml
 [scripts]
 # Lints a path, converting the positional argument into a --path flag.
-lint = "eslint <params::0(map='--path', default='src/')>"
+lint = "eslint <params::0(map='--path ', default='src/')>"
 ```
 
 ```sh
@@ -134,6 +134,8 @@ build = "cargo build <params::release>"
 ```sh
 axes . build            # -> cargo build
 axes . build --release  # -> cargo build --release
+axes . build --another-param  # -> Error: Unexpected arguments were provided. The script does not define a generic `<params>` token to accept them.
+#Provided unhandled arguments: --another-param
 ```
 
 **`test` script with alias:**
@@ -148,6 +150,20 @@ test = "pytest <params::marker(alias='-m')>"
 axes . test --marker slow   # -> pytest --marker slow
 axes . test -m smoke        # -> pytest --marker smoke
 axes . test -m smoke --marker slow # -> Error: Conflict: Both flag '--marker' and its alias '-m' were provided.
+```
+
+**Another possible use cases, but not recommended because will generate a conflicts:**
+
+```toml
+# axes.toml
+[scripts]
+copy-file = "rsync <params::files-from(alias='from', default='list.txt')> <params::copy-in(alias='in', required)>"
+```
+
+```sh
+axes . copy-file from file.txt in ./backup            # -> rsync --files-from file.txt --copy-in ./backup
+axes . copy-file in ./backup                          # -> rsync --files-from list.txt --copy-in ./backup
+axes . copy-file in ./backup --copy-in /another/place # -> Error: Conflict: Both flag '--copy-in' and its alias 'in' were provided.
 ```
 
 **`deploy` script with `map` and `required`:**
@@ -176,11 +192,11 @@ docker_tag = "docker tag my-image:latest my-org/my-image:<params::tag(map='', de
 
 ```sh
 # Execution 1: Uses the default
-axes . docker_tag
+axes docker_tag
 # Command executed: `docker tag my-image:latest my-org/my-image:latest`
 
 # Execution 2: Specifies the tag
-axes . docker_tag --tag v1.2.0
+axes docker_tag --tag v1.2.0
 # Command executed: `docker tag my-image:latest my-org/my-image:v1.2.0`
 ```
 
@@ -206,11 +222,11 @@ run_release = "cargo run <params::release> -- <params>"
 
 ```sh
 # Execution 1: Passing arguments to the binary
-axes . run --input /data/file.txt --verbose
+axes ./run --input /data/file.txt --verbose
 # Command executed: `cargo run -- --input /data/file.txt --verbose`
 
 # Execution 2: Using the script with release
-axes . run_release --input /data/file.txt --release
+axes run_release --input /data/file.txt --release
 # `release` is consumed by <params::release> and expands to `--release`.
 # `--input /data/file.txt` is consumed by <params> and expands to itself.
 # Command executed: `cargo run --release -- --input /data/file.txt`
