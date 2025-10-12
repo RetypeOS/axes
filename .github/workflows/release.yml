@@ -106,7 +106,7 @@ jobs:
           if [ "${{ runner.os }}" == "Windows" ]; then
             7z a -tzip -mx=9 "${{ env.ASSET_NAME }}" "./$PACKAGE_DIR/"
           else
-            tar cJf -9 "${{ env.ASSET_NAME }}" "./$PACKAGE_DIR/"
+            tar cJf "${{ env.ASSET_NAME }}" "./$PACKAGE_DIR/"
           fi
 
       - name: Sign Compressed Artifact (Final Signature)
