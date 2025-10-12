@@ -1,7 +1,8 @@
 name: Release Binaries
+
 permissions:
   contents: write
-  
+
 on:
   push:
     tags:
@@ -13,19 +14,19 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Get Release Version
+        run: echo "VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
+        
+      - name: Create GitHub Release using gh CLI
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref_name }}
-          draft: true
-          prerelease: false
+        run: gh release create ${{ env.VERSION }} --draft --verify-tag --title "Release ${{ env.VERSION }}"
+    outputs:
+      version: ${{ env.VERSION }}
 
   build_and_upload_assets:
     name: Build and Upload Assets
@@ -71,7 +72,7 @@ jobs:
       - name: Define Artifact Name and Sign Binary
         shell: bash
         run: |
-          VERSION="${{ github.ref_name }}"
+          VERSION="${{ needs.create_release.outputs.version }}"
           ASSET_NAME="axes-${{ matrix.target }}-${VERSION}.${{ matrix.compression_ext }}"
           
           echo "ASSET_NAME=$ASSET_NAME" >> $GITHUB_ENV
@@ -87,7 +88,7 @@ jobs:
       - name: Create package (Max Compression)
         shell: bash
         run: |
-          VERSION="${{ github.ref_name }}"
+          VERSION="${{ needs.create_release.outputs.version }}"
           PACKAGE_DIR="axes-${{ matrix.target }}-${VERSION}"
 
           mkdir -p "$PACKAGE_DIR"
@@ -105,7 +106,7 @@ jobs:
           if [ "${{ runner.os }}" == "Windows" ]; then
             7z a -tzip -mx=9 "${{ env.ASSET_NAME }}" "./$PACKAGE_DIR/"
           else
-            # xz is used for maximum compression on Unix systems (-J)
+            # tar cJf utiliza compresión XZ con máxima compresión (-9)
             tar cJf -9 "${{ env.ASSET_NAME }}" "./$PACKAGE_DIR/"
           fi
 
@@ -118,22 +119,14 @@ jobs:
               --output "${{ env.ASSET_NAME }}.sig" \
               --detach-sign "${{ env.ASSET_NAME }}"
           
-      - name: Upload Release Asset (Compressed)
-        uses: actions/upload-release-asset@v1
+      - name: Upload All Release Assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create_release.outputs.upload_url }}
-          asset_path: ./${{ env.ASSET_NAME }}
-          asset_name: ${{ env.ASSET_NAME }}
-          asset_content_type: application/octet-stream
-
-      - name: Upload Release Asset (Compressed Signature)
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create_release.outputs.upload_url }}
-          asset_path: ./${{ env.ASSET_NAME }}.sig
-          asset_name: ${{ env.ASSET_NAME }}.sig
-          asset_content_type: application/octet-stream
+        shell: bash
+        run: |
+          VERSION="${{ needs.create_release.outputs.version }}"
+          
+          # gh release upload es la herramienta estándar de GitHub CLI, la más fiable.
+          gh release upload "$VERSION" \
+            "${{ env.ASSET_NAME }}" \
+            "${{ env.ASSET_NAME }}.sig"
