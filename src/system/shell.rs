@@ -146,6 +146,18 @@ pub fn launch_session(
     Ok(())
 }
 
+/// Helper function to escape a string for safe use within a `cmd.exe` `set "KEY=VALUE"` command.
+/// It handles special characters that could otherwise terminate the command or be interpreted by the shell.
+fn escape_for_cmd_set(value: &str) -> String {
+    value
+        .replace('%', "%%") // Escape percent signs
+        .replace('^', "^^") // Escape carets (escape character itself)
+        .replace('&', "^&") // Escape ampersands (command separator)
+        .replace('<', "^<") // Escape less than (redirection)
+        .replace('>', "^>") // Escape greater than (redirection)
+        .replace('|', "^|") // Escape pipes (command piping)
+}
+
 /// Builds the content of the temporary shell initialization script.
 /// This script sets environment variables and then runs the `at_start` commands.
 fn build_init_script(
@@ -163,8 +175,8 @@ fn build_init_script(
     for (key, value) in &*config.get_env()? {
         if is_windows {
             // Basic escaping for cmd.exe
-            let value = value.replace('%', "%%");
-            script.push_str(&format!("set \"{}={}\"\n", key, value));
+            let escaped_value = escape_for_cmd_set(value);
+            script.push_str(&format!("set \"{}={}\"\n", key, escaped_value));
         } else {
             // Escaping for POSIX shells
             let escaped_value = value.replace('\'', "'\\''");
