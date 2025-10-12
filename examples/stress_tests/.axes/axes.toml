@@ -13,8 +13,9 @@ _defaults = """
  <params::axes-divided(alias='-ad', map='', default='axes ./big_divided_test/into/script_49990', literal)> \
  <params::axes-big(alias='-ab', map='', default='axes ./big_test/script_49990', literal)> \
  <params::just-big(alias='-jb', map='', default='just receta_49990', literal)> \
+ <params(literal)>\
 """
 
 [scripts.hyperfine]
-desc = "USE EXAMPLE: `axes hyperfine -ad -ab -jb --high` Execute script 'hyperfine' with script test axes and just. Finally all has optional values."
-run = 'hyperfine --shell=none <vars::_defaults> <vars::_if_condition> <vars::_if_prepare> <params::output-mk(alias="-out-mk", map="--export-markdown", default="benchmark_results.md")> <params(literal)>'
+desc = "USE EXAMPLE: `axes hyperfine -ad -ab -jb --high -nc -out-mk \"test_benchmark.md\"` Execute script 'hyperfine' with script test axes and just. Finally all has optional values."
+run = 'hyperfine --shell=none <vars::_defaults> <vars::_if_condition> <vars::_if_prepare> <params::output-mk(alias="-out-mk", map="--export-markdown", default="benchmark_results.md")>'

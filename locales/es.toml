@@ -1,91 +1,80 @@
-# ES: locales/es.toml
-
 # ===================================================================
-# Common Terms & Labels
-# Reutilizable a través de múltiples comandos.
+# 1. Common Terms & Labels
+# Reusable across multiple commands for consistency.
 # ===================================================================
-"common.success" = "✔ Éxito"
+"common.success" = "✔ ¡Éxito!"
 "common.prompt.continue" = "¿Continuar?"
-"common.prompt.are_you_sure" = "¿Está seguro de que desea proceder?"
+"common.prompt.are_you_sure" = "¿Estás seguro de que deseas proceder?"
 "common.info.operation_cancelled" = "Operación cancelada."
-"common.info.caches_will_regenerate" = "Nota: Las cachés se regenerarán automáticamente en la próxima resolución."
+"common.info.caches_will_regenerate" = "Nota: Las cachés se regenerarán automáticamente en la próxima ejecución."
 "common.error.operation_cancelled" = "Operación cancelada por el usuario."
-"common.label.default" = "(predeterminado)"
+"common.label.default" = "(por defecto)"
 "common.label.inherited" = "heredado de {from}"
-"common.label.in_project" = "en el proyecto"
 "common.label.unknown" = "<desconocido>"
 
-
 # ===================================================================
-# General System & Framework Errors
+# 2. System & Framework Errors
+# Low-level errors related to the core logic.
 # ===================================================================
 "error.context_required" = "El comando '{command}' requiere un contexto de proyecto explícito."
 "error.saving_global_index" = "No se pudo guardar el índice global actualizado."
 "error.local_ref_failed" = "No se pudo obtener o crear la referencia de proyecto local (`project_ref.bin`)."
-"error.path_resolve" = "No se pudo resolver la ruta absoluta para '{path}'"
-"error.path_not_exist" = "La ruta especificada no existe: {path}"
-
 
 # ===================================================================
-# Validation Errors (for project/alias names)
+# 3. Validation Errors
+# For project names, alias names, etc.
 # ===================================================================
-"validation.error.empty_name" = "El nombre del proyecto no puede estar vacío."
-"validation.error.contains_whitespace" = "Los nombres de proyecto no pueden contener espacios en blanco. Use '-' o '_' en su lugar."
-"validation.error.invalid_chars" = "El nombre del proyecto no puede contener caracteres de ruta ('/' o '\\')."
-"validation.error.reserved_name" = "El nombre '{name}' está reservado para navegación y no puede usarse para un proyecto."
+"validation.error.empty_name" = "El nombre no puede estar vacío."
+"validation.error.contains_whitespace" = "El nombre no puede contener espacios en blanco. Usa '-' o '_' en su lugar."
+"validation.error.invalid_chars" = "El nombre no puede contener caracteres de ruta ('/' o '\\')."
+"validation.error.reserved_name" = "El nombre '{name}' está reservado para navegación y no puede ser utilizado."
 
-
 # ===================================================================
-# Plan Preparation (Shared by delete/unregister)
+# 4. Shared Logic (delete/unregister plans)
 # ===================================================================
-"plan.summary.unregister_single" = "Solo el proyecto '{name}' será afectado."
-"plan.summary.unregister_recursive" = "Este proyecto y todos sus descendientes serán afectados."
-"plan.summary.delete_recursive" = "El proyecto '{name}' y todos sus descendientes serán afectados."
+"plan.summary.unregister_single" = "Solo el proyecto '{name}' se verá afectado."
+"plan.summary.unregister_recursive" = "Este proyecto y todos sus descendientes se verán afectados."
+"plan.summary.delete_recursive" = "El proyecto '{name}' y todos sus descendientes se verán afectados."
 "plan.summary.reparent_to" = "Los hijos directos serán movidos al proyecto '{name}'."
-"plan.error.reparent_collision" = "No se puede proceder: La reasignación de padre causaría colisiones de nombre para los siguientes hijos: '{conflicts}'. Resuélvalos manualmente primero."
+"plan.error.reparent_collision" = "No se puede proceder: Reasignar provocaría colisiones de nombres para los siguientes hijos: '{conflicts}'. Por favor, resuélvelos manualmente primero."
 "plan.error.recursive_and_reparent" = "Las banderas '--recursive' y '--reparent-to' son mutuamente excluyentes."
 
+# ===================================================================
+# 5. Commands (Alphabetical Order)
+# ===================================================================
 
-# ===================================================================
-# `alias` Command
-# ===================================================================
+# --- ALIAS ---
 "alias.error.not_in_session" = "El comando 'alias' no está disponible dentro de una sesión de proyecto."
 "alias.error.empty_name" = "El nombre del alias no puede estar vacío."
-"alias.error.invalid_chars" = "El nombre del alias '{name}' no puede contener espacios en blanco ni separadores de ruta ('/' o '\\')."
-"alias.error.reserved_name" = "El nombre '{name}' está reservado para navegación y no puede usarse como un alias."
+"alias.error.invalid_chars" = "El nombre del alias '{name}' no puede contener espacios en blanco o separadores de ruta ('/' o '\\')."
+"alias.error.reserved_name" = "El nombre '{name}' está reservado para navegación y no puede ser usado como alias."
 "alias.error.not_found" = "Alias '{name}!' no encontrado."
-"alias.warning.modifying_g" = "⚠️ Está a punto de modificar o eliminar el alias especial 'g!', el cual es un valor predeterminado del sistema para el proyecto raíz. Esto puede romper flujos de trabajo comunes."
-"alias.warning.overwriting" = "El alias '{name}!' ya existe y será sobrescrito. (Objetivo anterior: {old_target})"
-"alias.warning.found_broken" = "Se encontraron {count} alias(es) rotos."
+"alias.warning.modifying_g" = "⚠️ Estás a punto de modificar o eliminar el alias especial 'g!', que es una configuración predeterminada del sistema para el proyecto raíz. Esto puede romper flujos de trabajo comunes."
+"alias.warning.overwriting" = "El alias '{name}!' ya existe y será sobrescrito. (Objetivo antiguo: {old_target})"
+"alias.warning.found_broken" = "Se encontraron {count} alias rotos."
 "alias.success.set" = "Alias establecido:"
 "alias.success.updated" = "Alias actualizado:"
 "alias.success.removed" = "Alias '{name}!' eliminado."
 "alias.success.all_ok" = "Todos los alias apuntan a proyectos válidos."
-"alias.info.no_aliases" = "No hay alias definidos. Use `axes alias set <nombre> <contexto>` para crear uno."
+"alias.info.no_aliases" = "No hay alias definidos. Usa `axes alias set <nombre> <contexto>` para crear uno."
 "alias.info.header" = "Alias Definidos"
-"alias.info.checking_header" = "Comprobando la salud de los alias..."
+"alias.info.checking_header" = "Verificando salud de los alias..."
 "alias.info.broken_link" = "<enlace roto>"
 
-
-# ===================================================================
-# `delete` Command
-# ===================================================================
-"delete.error.cannot_delete_global" = "El proyecto raíz 'global' no puede ser eliminado. Para reiniciar `axes`, elimine el directorio `~/.config/axes` manualmente."
+# --- DELETE ---
+"delete.error.cannot_delete_global" = "El proyecto raíz 'global' no puede ser eliminado. Para restablecer `axes`, elimina manualmente el directorio `~/.config/axes`."
 "delete.warning.destructive_header" = "☢️  ADVERTENCIA: ¡OPERACIÓN DESTRUCTIVA! ☢️"
 "delete.info.files_to_be_deleted" = "Los siguientes directorios '.axes' serán ELIMINADOS IRREVERSIBLEMENTE:"
-"delete.prompt.are_you_sure" = "Esta acción es irreversible. ¿Está seguro?"
-"delete.prompt.recursive_confirm" = "Esto eliminará recursivamente este proyecto y todos sus hijos. Para confirmar, escriba el nombre del proyecto '{name}':"
-"delete.success.header" = "Se eliminaron {purged} directorios `.axes` y se desvincularon {unregistered} proyecto(s)."
-"delete.success.header_recursive" = "Se eliminaron recursivamente {purged} directorios `.axes` y se desvincularon {unregistered} proyecto(s)."
+"delete.prompt.are_you_sure" = "Esta acción es irreversible. ¿Estás seguro?"
+"delete.prompt.recursive_confirm" = "Esto eliminará recursivamente este proyecto y todos sus hijos. Para confirmar, escribe el nombre del proyecto '{name}':"
+"delete.success.header" = "Eliminados {purged} directorios `.axes` y registrados {unregistered} proyecto(s)."
+"delete.success.header_recursive" = "Eliminados recursivamente {purged} directorios `.axes` y registrados {unregistered} proyecto(s)."
 
-
-# ===================================================================
-# `info` Command
-# ===================================================================
+# --- INFO ---
 "info.header" = "Información para"
 "info.label.uuid" = "UUID"
 "info.label.root_path" = "Ruta Raíz"
-"info.label.config_file" = "Archivo Config"
+"info.label.config_file" = "Archivo de Configuración"
 "info.label.version" = "Versión"
 "info.label.description" = "Descripción"
 "info.label.inheritance" = "Herencia"
@@ -95,100 +84,153 @@
 "info.label.vars" = "Variables Fusionadas ([vars])"
 "info.label.env" = "Entorno Fusionado ([env])"
 
-
-# ===================================================================
-# `init` Command
-# ===================================================================
-"init.error.already_exists" = "Ya existe un directorio '{dir}' en esta ubicación. El proyecto no puede ser inicializado."
-"init.error.add_to_index" = "No se pudo añadir el proyecto al índice global. Podría existir un hermano con el mismo nombre."
-"init.error.write_ref" = "No se pudo escribir el archivo de referencia de proyecto ('{file}')."
-"init.error.invalid_kv_pair" = "Formato no válido para par clave-valor: '{pair}'. Se esperaba 'CLAVE=VALOR'."
+# --- INIT ---
+"init.error.already_exists" = "Un directorio '{dir}' ya existe en esta ubicación. No se puede inicializar el proyecto."
+"init.error.add_to_index" = "No se pudo agregar el proyecto al índice global. Podría existir un hermano con el mismo nombre."
+"init.error.write_ref" = "No se pudo escribir el archivo de referencia del proyecto ('{file}')."
+"init.error.invalid_kv_pair" = "Formato no válido para el par clave-valor: '{pair}'. Se esperaba 'KEY=VALUE'."
 "init.prompt.name" = "Nombre del proyecto"
 "init.prompt.version" = "Versión"
 "init.prompt.description" = "Descripción"
-"init.success.next_steps" = "Para empezar, intente ejecutar `axes test` o `axes ls`."
+"init.success.next_steps" = "Para comenzar, intenta ejecutar `axes test` o `axes ls`."
 
-
-# ===================================================================
-# `link` Command
-# ===================================================================
+# --- LINK ---
 "link.error.cannot_link_global" = "El proyecto 'global' no puede ser movido."
 "link.error.link_to_self" = "Un proyecto no puede ser enlazado a sí mismo."
-"link.error.cannot_resolve_parent" = "No se pudo resolver el contexto del nuevo padre '{parent}'."
-"link.error.link_failed" = "Fallo al enlazar el proyecto '{name}'. Esto puede deberse a una colisión de nombres o a una dependencia circular."
-"link.warning.local_ref_update_failed" = "Advertencia: El proyecto fue enlazado en el índice global, pero el archivo de referencia local no pudo ser actualizado: {error}"
-"link.info.attempting" = "Intentando mover '{name}' para que sea un hijo de '{new_parent}'..."
-"link.info.already_child" = "El proyecto '{name}' ya es un hijo de '{parent}'. No se realizó ninguna acción."
+"link.error.cannot_resolve_parent" = "No se pudo resolver el nuevo contexto padre '{parent}'."
+"link.error.link_failed" = "Fallo al enlazar el proyecto '{name}'. Esto podría deberse a una colisión de nombres o una dependencia circular."
+"link.warning.local_ref_update_failed" = "Advertencia: El proyecto fue enlazado en el índice global, pero el archivo de referencia local no pudo actualizarse: {error}"
+"link.info.attempting" = "Intentando mover '{name}' para que sea hijo de '{new_parent}'..."
+"link.info.already_child" = "El proyecto '{name}' ya es hijo de '{parent}'. No se realizó ninguna acción."
 
-
-# ===================================================================
-# `open` Command
-# ===================================================================
+# --- OPEN ---
 "open.error.key_not_found" = "La clave de aplicación '{key}' no se encontró en las definiciones de [options.open_with]."
-"open.error.no_default" = "No se proporcionó clave de aplicación y no se configuró un valor 'default' en [options.open_with]."
-"open.error.default_not_found" = "La clave de apertura predeterminada se establece en '{key}', pero no se encontró la acción correspondiente."
+"open.error.no_default" = "No se proporcionó una clave de aplicación y no hay 'default' configurado en [options.open_with]."
+"open.error.default_not_found" = "La clave de apertura predeterminada está configurada como '{key}', pero no se encontró ninguna acción correspondiente."
 
-
-# ===================================================================
-# `register` Command
-# ===================================================================
+# --- REGISTER ---
 "register.error.in_session" = "El comando 'register' no está disponible dentro de una sesión de proyecto."
 "register.error.failed" = "No se pudo registrar el proyecto en '{path}'."
-"register.success.header" = "Se registraron {count} nuevo(s) proyecto(s) con éxito."
-"register.success.structure_registered" = "Estructura de proyecto registrada:"
-"register.info.no_new_projects" = "No se registraron nuevos proyectos."
-"register.info.reason_already_indexed" = "El proyecto especificado (y sus hijos) pueden haber sido indexados previamente."
+"register.error.name_collision" = "Un proyecto con el nombre '{name}' ya existe bajo el padre elegido. Registro abortado."
+"register.success.header" = "{count} nuevo(s) proyecto(s) registrado(s) exitosamente."
+"register.info.starting_scan" = "Escaneando en busca de proyectos no registrados comenzando desde '{path}'..."
+"register.info.no_new_projects_to_register" = "Escaneo completo. No se encontraron nuevos proyectos para registrar."
+"register.prompt.name_for_identityless" = "Por favor, proporcione un nombre para este proyecto:"
+"register.warning.invalid_parent" = "El padre definido en '{path}' ya no es válido. Se le pedirá que seleccione uno nuevo."
+"register.info.plan_header" = "Los siguientes proyectos se registrarán:"
+"register.info.plan_line_project" = "Proyecto"
+"register.info.plan_line_as_child_of" = "como hijo de"
 
-
-# ===================================================================
-# `rename` Command
-# ===================================================================
-"rename.warning.renaming_global_header" = "⚠️ Está a punto de renombrar el proyecto especial 'global'."
-"rename.warning.renaming_global_docs" = "Toda la documentación del sistema y ejemplos de la comunidad se refieren a él como 'global'."
+# --- RENAME ---
+"rename.error.rename_failed" = "Fallo al renombrar el proyecto '{name}'. Podría existir ya un hermano con el mismo nombre."
+"rename.warning.renaming_global_header" = "⚠️ Estás a punto de renombrar el proyecto especial 'global'."
+"rename.warning.renaming_global_docs" = "Toda la documentación del sistema y ejemplos de la comunidad lo llaman 'global'."
 "rename.warning.renaming_global_community" = "Esto puede dificultar la obtención de ayuda o el intercambio de configuraciones."
-"rename.error.rename_failed" = "Fallo al renombrar el proyecto '{name}'. Podría existir un hermano con el mismo nombre."
-"rename.info.renaming" = "Renombrando el proyecto '{old_name}' a '{new_name}'..."
-"rename.info.no_change" = "El nuevo nombre ('{name}') es el mismo que el nombre actual. No se han realizado cambios."
+"rename.warning.local_ref_update_failed" = "Advertencia: El proyecto fue renombrado en el índice global, pero el archivo de referencia local en '{path}' no pudo actualizarse: {error}"
+"rename.info.renaming" = "Renombrando proyecto '{old_name}' a '{new_name}'..."
+"rename.info.no_change" = "El nuevo nombre ('{name}') es el mismo que el nombre actual. No se realizaron cambios."
 "rename.info.caches_remain_valid" = "Las cachés siguen siendo válidas y no se regenerarán."
-"rename.warning.local_ref_update_failed" = "Advertencia: El proyecto fue renombrado en el índice global, pero el archivo de referencia local en '{path}' no pudo ser actualizado: {error}"
 
+# --- REPAIR ---
+"repair.error.in_session" = "El comando 'repair' no está disponible dentro de una sesión de proyecto."
+"repair.info.starting_scan" = "Escaneando en busca de inconsistencias de ruta comenzando desde '{path}'..."
+"repair.success.no_issues" = "Escaneo completo. No se encontraron inconsistencias de ruta."
+"repair.success.fixed" = "Se repararon {count} ruta(s) de proyecto con éxito."
+"repair.warning.found_issues" = "Se encontraron {count} proyecto(s) con rutas desactualizadas:"
+"repair.warning.corrupt_ref" = "Advertencia: No se pudo leer el archivo de referencia del proyecto en '{path}': {error}"
+"repair.info.mismatch_header" = "Desajuste para el proyecto '{name}' ({uuid}):"
+"repair.label.registered_path" = "Ruta Registrada"
+"repair.label.found_at" = "Encontrado en"
+"repair.prompt.apply_fixes" = "¿Deseas aplicar estas correcciones de ruta al índice?"
+"repair.info.how_to_fix" = "Vuelve a ejecutar este comando con la bandera --fix para aplicar estas correcciones."
 
-# ===================================================================
-# `run` Command
-# ===================================================================
-"run.error.not_found" = "Script '{script}' no encontrado en el proyecto '{project}'."
-"run.info.how_to_run" = "Ejecute un script con `axes <nombre_del_script>`."
-"run.info.empty_script" = "El script está vacío. Nada que ejecutar."
-"run.info.dry_run_header" = "Ejecución en seco para"
+# --- RUN ---
+"run.error.not_found" = "Script '{script}' no encontrado en el proyecto '{project}' o sus ancestros."
+"run.info.how_to_run" = "Ejecuta un script con `axes <nombre_del_script>`."
+"run.info.empty_script" = "El script está vacío. No hay nada que ejecutar."
 
+# --- START ---
+"start.error.nested_session" = "No se puede iniciar una sesión anidada. Por favor, `exit` la actual primero."
+"start.info.preparing_hook" = "Preparando hook de '{hook}'..."
+"start.info.executing_hook" = "Ejecutando hook de '{hook}'..."
 
-# ===================================================================
-# `start` Command (Session)
-# ===================================================================
-"start.error.nested_session" = "No se puede iniciar una sesión anidada. Por favor, `exit` de la sesión actual primero."
-"start.info.preparing_hook" = "Preparando hook '{hook}'..."
-"start.info.executing_hook" = "Ejecutando hook '{hook}'..."
-
-
-# ===================================================================
-# `tree` Command
-# ===================================================================
+# --- TREE ---
 "tree.header.full_tree" = "Árbol de Proyectos Registrados"
-"tree.header.from_project" = "Sub-Árbol de Proyecto desde '{name}'"
-"tree.info.no_projects" = "No hay proyectos registrados. Use `axes init` para comenzar."
+"tree.header.from_project" = "Sub-Árbol de Proyectos desde '{name}'"
+"tree.info.no_projects" = "No hay proyectos registrados. Usa `axes init` para comenzar."
 "tree.error.project_not_found" = "Error: El proyecto de inicio especificado no se encontró en el índice."
-"tree.error.root_project_missing" = "Advertencia: El proyecto raíz está ausente. El índice podría ser inconsistente."
+"tree.error.root_project_missing" = "Advertencia: Falta el proyecto raíz. El índice podría ser inconsistente."
 "tree.label.last_used" = "**"
 "tree.label.broken_path" = "⚠️"
 "tree.legend.last_used" = "Proyecto usado más recientemente"
 "tree.legend.alias" = "Alias"
-"tree.legend.broken_path" = "Ruta de proyecto no encontrada en disco"
+"tree.legend.broken_path" = "Ruta del proyecto no encontrada en el disco"
 
+# --- UNREGISTER ---
+"unregister.error.cannot_unregister_global" = "El proyecto raíz 'global' no puede ser desregistrado."
+"unregister.info.header" = "Esto eliminará el proyecto(s) del índice de axes. Los archivos del proyecto NO serán eliminados."
+"unregister.info.projects_to_remove" = "Proyectos a eliminar:"
+"unregister.success.header" = "{count} proyecto(s) han sido desregistrados."
 
 # ===================================================================
-# `unregister` Command
+# 6. Main CLI Help Message (`axes --help`)
+# A single, semantic template for the entire help message.
+# Styling is handled by the `build_help_string` function in Rust.
 # ===================================================================
-"unregister.error.cannot_unregister_global" = "El proyecto raíz 'global' no puede ser desvinculado."
-"unregister.info.header" = "Esto eliminará proyecto(s) del índice de axes. Los archivos de proyecto NO serán eliminados."
-"unregister.info.projects_to_remove" = "Proyectos a desvincular:"
-"unregister.success.header" = "{count} proyecto(s) han sido desvinculados."
+"cli.help.template" = """
+<hl>{name}</hl> <dim>v{version}</dim>
+{author}
+{about}
+
+<title>USO</title>
+<cmd>{bin} [CONTEXTO|ACCIÓN|SCRIPT] [ARGS]...</cmd>
+
+<title>DESCRIPCIÓN</title>
+axes unifica proyectos complejos bajo una interfaz de línea de comandos simple,
+consistente y ultrarrápida. Utiliza una gramática universal para interpretar
+tu entrada, determinando dinámicamente si estás ejecutando un script,
+ejecutando una acción del sistema o navegando por contextos de proyecto.
+
+<title>GRAMÁTICA UNIVERSAL</title>
+1. <cmd>axes <contexto> <acción> [args...]</cmd>
+Ejecuta una <hl>acción</hl> del sistema sobre un <hl>contexto</hl> de proyecto específico.
+<dim>Ejemplo: `axes mi-app/api info`</dim>
+
+
+<cmd>axes <acción> [args...]</cmd>
+Ejecuta una <hl>acción</hl> del sistema globalmente o sobre el contexto implícito (actual).
+<dim>Ejemplo: axes tree --all</dim>
+
+<cmd>axes [contexto/]<script> [params...]</cmd>
+El comportamiento por defecto. Un potente atajo para <hl>ejecutar un script</hl>.
+<dim>Ejemplo: axes build --release o axes api/build</dim>
+
+<title>ACCIONES DISPONIBLES</title>
+Para obtener ayuda detallada sobre una acción, ejecuta <cmd>axes <acción> --help</cmd>.
+
+
+<group>[Ciclo de Vida del Proyecto]</group>
+<hl>init</hl>, <hi>new</hi>             Inicializa un nuevo proyecto axes en el directorio actual.
+<hl>register</hl>, <hi>reg</hi>         Registra un proyecto axes existente en el índice global.
+<hl>unregister</hl>, <hi>unreg</hi>     Elimina un proyecto del índice sin borrar archivos.
+<hl>delete</hl>, <hi>del</hi>           Elimina el directorio .axes del proyecto y lo desregistra. <err>(Destructivo)</err>
+
+<group>[Inspección y Navegación]</group>
+<hl>tree</hl>, <hi>ls</hi>              Muestra la jerarquía del proyecto como un árbol.
+<hl>info</hl>                  Muestra la configuración detallada de un proyecto.
+<hl>alias</hl>                 Gestiona atajos de proyecto <hi>(alias)</hi>.
+<hl>repair</hl>, <hi>rep</hi>           Escanea y repara inconsistencias en el índice.
+
+<group>[Ejecución e Interacción]</group>
+<hl>run</hl>                   <hi>(Por defecto)</hi> Ejecuta un script del axes.toml del proyecto.
+<hl>start</hl>                 Inicia una sesión de proyecto interactiva con hooks.
+<hl>open</hl>                  Abre el proyecto usando una aplicación configurada.
+
+<group>[Refactorización y Estructura]</group>
+<hl>link</hl>                  Mueve un proyecto para que sea hijo de otro.
+<hl>rename</hl>                Renombra un proyecto registrado.
+
+<title>OPCIONES</title>
+<hl>--help</hl>, <hi>-h</hi>            Imprime este mensaje de ayuda.
+<hl>--version</hl>, <hi>-v</hi>         Imprime la información de la versión.
+"""

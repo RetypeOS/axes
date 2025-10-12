@@ -1,8 +1,6 @@
-# EN: locales/en.toml
-
 # ===================================================================
-# Common Terms & Labels
-# Reusable across multiple commands.
+# 1. Common Terms & Labels
+# Reusable across multiple commands for consistency.
 # ===================================================================
 "common.success" = "✔ Success!"
 "common.prompt.continue" = "Continue?"
@@ -12,31 +10,27 @@
 "common.error.operation_cancelled" = "Operation cancelled by user."
 "common.label.default" = "(default)"
 "common.label.inherited" = "from {from}"
-"common.label.in_project" = "in project"
 "common.label.unknown" = "<unknown>"
 
-
 # ===================================================================
-# General System & Framework Errors
+# 2. System & Framework Errors
+# Low-level errors related to the core logic.
 # ===================================================================
 "error.context_required" = "The '{command}' command requires an explicit project context."
 "error.saving_global_index" = "Could not save updated global index."
 "error.local_ref_failed" = "Could not get or create the local project reference (`project_ref.bin`)."
-"error.path_resolve" = "Could not resolve the absolute path for '{path}'"
-"error.path_not_exist" = "Specified path does not exist: {path}"
-
 
 # ===================================================================
-# Validation Errors (for project/alias names)
+# 3. Validation Errors
+# For project names, alias names, etc.
 # ===================================================================
-"validation.error.empty_name" = "Project name cannot be empty."
-"validation.error.contains_whitespace" = "Project names cannot contain whitespace. Use '-' or '_' instead."
-"validation.error.invalid_chars" = "Project name cannot contain path characters ('/' or '\\')."
-"validation.error.reserved_name" = "The name '{name}' is reserved for navigation and cannot be used for a project."
-
+"validation.error.empty_name" = "Name cannot be empty."
+"validation.error.contains_whitespace" = "Name cannot contain whitespace. Use '-' or '_' instead."
+"validation.error.invalid_chars" = "Name cannot contain path characters ('/' or '\\')."
+"validation.error.reserved_name" = "The name '{name}' is reserved for navigation and cannot be used."
 
 # ===================================================================
-# Plan Preparation (Shared by delete/unregister)
+# 4. Shared Logic (delete/unregister plans)
 # ===================================================================
 "plan.summary.unregister_single" = "Only project '{name}' will be affected."
 "plan.summary.unregister_recursive" = "This project and all its descendants will be affected."
@@ -45,11 +39,12 @@
 "plan.error.reparent_collision" = "Cannot proceed: Reparenting would cause name collisions for the following children: '{conflicts}'. Please resolve them manually first."
 "plan.error.recursive_and_reparent" = "The '--recursive' and '--reparent-to' flags are mutually exclusive."
 
+# ===================================================================
+# 5. Commands (Alphabetical Order)
+# ===================================================================
 
-# ===================================================================
-# `alias` Command
-# ===================================================================
-"alias.error.not_in_session" = "'alias' command is not available inside a project session."
+# --- ALIAS ---
+"alias.error.not_in_session" = "The 'alias' command is not available inside a project session."
 "alias.error.empty_name" = "Alias name cannot be empty."
 "alias.error.invalid_chars" = "Alias name '{name}' cannot contain whitespace or path separators ('/' or '\\')."
 "alias.error.reserved_name" = "The name '{name}' is reserved for navigation and cannot be used as an alias."
@@ -66,10 +61,7 @@
 "alias.info.checking_header" = "Checking alias health..."
 "alias.info.broken_link" = "<broken link>"
 
-
-# ===================================================================
-# `delete` Command
-# ===================================================================
+# --- DELETE ---
 "delete.error.cannot_delete_global" = "The root 'global' project cannot be deleted. To reset `axes`, remove the `~/.config/axes` directory manually."
 "delete.warning.destructive_header" = "☢️  WARNING: DESTRUCTIVE OPERATION! ☢️"
 "delete.info.files_to_be_deleted" = "The following '.axes' directories will be IRREVERSIBLY DELETED:"
@@ -78,10 +70,7 @@
 "delete.success.header" = "Deleted {purged} `.axes` directories and unregistered {unregistered} project(s)."
 "delete.success.header_recursive" = "Recursively deleted {purged} `.axes` directories and unregistered {unregistered} project(s)."
 
-
-# ===================================================================
-# `info` Command
-# ===================================================================
+# --- INFO ---
 "info.header" = "Information for"
 "info.label.uuid" = "UUID"
 "info.label.root_path" = "Root Path"
@@ -95,10 +84,7 @@
 "info.label.vars" = "Merged Variables ([vars])"
 "info.label.env" = "Merged Environment ([env])"
 
-
-# ===================================================================
-# `init` Command
-# ===================================================================
+# --- INIT ---
 "init.error.already_exists" = "An '{dir}' directory already exists at this location. Project cannot be initialized."
 "init.error.add_to_index" = "Could not add project to global index. A sibling with the same name might exist."
 "init.error.write_ref" = "Could not write project reference file ('{file}')."
@@ -108,10 +94,7 @@
 "init.prompt.description" = "Description"
 "init.success.next_steps" = "To get started, try running `axes test` or `axes ls`."
 
-
-# ===================================================================
-# `link` Command
-# ===================================================================
+# --- LINK ---
 "link.error.cannot_link_global" = "The 'global' project cannot be moved."
 "link.error.link_to_self" = "A project cannot be linked to itself."
 "link.error.cannot_resolve_parent" = "Could not resolve new parent context '{parent}'."
@@ -120,59 +103,58 @@
 "link.info.attempting" = "Attempting to move '{name}' to be a child of '{new_parent}'..."
 "link.info.already_child" = "Project '{name}' is already a child of '{parent}'. No action taken."
 
-
-# ===================================================================
-# `open` Command
-# ===================================================================
+# --- OPEN ---
 "open.error.key_not_found" = "Application key '{key}' not found in [options.open_with] definitions."
 "open.error.no_default" = "No application key provided and no 'default' is configured in [options.open_with]."
 "open.error.default_not_found" = "The default open key is set to '{key}', but no corresponding action was found."
 
-
-# ===================================================================
-# `register` Command
-# ===================================================================
-"register.error.in_session" = "'register' command is not available inside a project session."
+# --- REGISTER ---
+"register.error.in_session" = "The 'register' command is not available inside a project session."
 "register.error.failed" = "Could not register project at '{path}'."
+"register.error.name_collision" = "A project with the name '{name}' already exists under the chosen parent. Registration aborted."
 "register.success.header" = "{count} new project(s) successfully registered."
-"register.success.structure_registered" = "Project structure registered:"
-"register.info.no_new_projects" = "No new projects were registered."
-"register.info.reason_already_indexed" = "The specified project (and its children) may have already been indexed."
+"register.info.starting_scan" = "Scanning for unregistered projects starting from '{path}'..."
+"register.info.no_new_projects_to_register" = "Scan complete. No new projects were found to register."
+"register.prompt.name_for_identityless" = "Please provide a name for this project:"
+"register.warning.invalid_parent" = "The parent project defined in '{path}' is no longer valid. You will be asked to select a new one."
+"register.info.plan_header" = "The following projects will be registered:"
+"register.info.plan_line_project" = "Project"
+"register.info.plan_line_as_child_of" = "as child of"
 
-
-# ===================================================================
-# `rename` Command
-# ===================================================================
+# --- RENAME ---
+"rename.error.rename_failed" = "Failed to rename project '{name}'. A sibling with the same name might already exist."
 "rename.warning.renaming_global_header" = "⚠️ You are about to rename the special 'global' project."
 "rename.warning.renaming_global_docs" = "All system documentation and community examples refer to it as 'global'."
 "rename.warning.renaming_global_community" = "This can make it harder to get help or share configurations."
-"rename.error.rename_failed" = "Failed to rename project '{name}'. A sibling with the same name might already exist."
+"rename.warning.local_ref_update_failed" = "Warning: Project was renamed in the global index, but the local reference file at '{path}' could not be updated: {error}"
 "rename.info.renaming" = "Renaming project '{old_name}' to '{new_name}'..."
 "rename.info.no_change" = "The new name ('{name}') is the same as the current name. No changes have been made."
 "rename.info.caches_remain_valid" = "Caches remain valid and will not be regenerated."
-"rename.warning.local_ref_update_failed" = "Warning: Project was renamed in the global index, but the local reference file at '{path}' could not be updated: {error}"
 
+# --- REPAIR ---
+"repair.error.in_session" = "'repair' command is not available inside a project session."
+"repair.info.starting_scan" = "Scanning for project inconsistencies starting from '{path}'..."
+"repair.success.no_issues" = "Scan complete. No path inconsistencies found."
+"repair.success.fixed" = "Successfully repaired {count} project path(s)."
+"repair.warning.found_issues" = "Found {count} project(s) with outdated paths:"
+"repair.warning.corrupt_ref" = "Warning: Could not read project reference file at '{path}': {error}"
+"repair.info.mismatch_header" = "Mismatch for project '{name}' ({uuid}):"
+"repair.label.registered_path" = "Registered Path"
+"repair.label.found_at" = "Found At"
+"repair.prompt.apply_fixes" = "Do you want to apply these path corrections to the index?"
+"repair.info.how_to_fix" = "Run this command again with the --fix flag to apply these corrections."
 
-# ===================================================================
-# `run` Command
-# ===================================================================
-"run.error.not_found" = "Script '{script}' not found in project '{project}'."
+# --- RUN ---
+"run.error.not_found" = "Script '{script}' not found in project '{project}' or its ancestors."
 "run.info.how_to_run" = "Run a script with `axes <script_name>`."
 "run.info.empty_script" = "Script is empty. Nothing to execute."
-"run.info.dry_run_header" = "Dry-run for"
 
-
-# ===================================================================
-# `start` Command (Session)
-# ===================================================================
+# --- START ---
 "start.error.nested_session" = "Cannot start a nested session. Please `exit` the current one first."
 "start.info.preparing_hook" = "Preparing '{hook}' hook..."
 "start.info.executing_hook" = "Executing '{hook}' hook..."
 
-
-# ===================================================================
-# `tree` Command
-# ===================================================================
+# --- TREE ---
 "tree.header.full_tree" = "Registered Project Tree"
 "tree.header.from_project" = "Project Sub-Tree from '{name}'"
 "tree.info.no_projects" = "No projects are registered. Use `axes init` to start."
@@ -184,43 +166,71 @@
 "tree.legend.alias" = "Alias"
 "tree.legend.broken_path" = "Project path not found on disk"
 
-
-# ===================================================================
-# `unregister` Command
-# ===================================================================
+# --- UNREGISTER ---
 "unregister.error.cannot_unregister_global" = "The root 'global' project cannot be unregistered."
 "unregister.info.header" = "This will remove project(s) from the axes index. Project files will NOT be deleted."
 "unregister.info.projects_to_remove" = "Projects to be unregistered:"
 "unregister.success.header" = "{count} project(s) have been unregistered."
 
 # ===================================================================
-# `repair` Command
+# 6. Main CLI Help Message (`axes --help`)
+# A single, semantic template for the entire help message.
+# Styling is handled by the `build_help_string` function in Rust.
 # ===================================================================
-"repair.error.in_session" = "'repair' command is not available inside a project session."
-"repair.info.starting_scan" = "Scanning for project inconsistencies starting from '{path}'..."
-"repair.success.no_issues" = "Scan complete. No path inconsistencies found."
-"repair.warning.found_issues" = "Found {count} project(s) with outdated paths:"
-"repair.info.mismatch_header" = "Mismatch for project '{name}' ({uuid}):"
-"repair.label.registered_path" = "Registered Path"
-"repair.label.found_at" = "Found At"
-"repair.prompt.apply_fixes" = "Do you want to apply these path corrections to the index?"
-"repair.success.fixed" = "Successfully repaired {count} project path(s)."
-"repair.info.how_to_fix" = "Run this command again with the --fix flag to apply these corrections."
-"repair.warning.corrupt_ref" = "Warning: Could not read project reference file at '{path}': {error}"
+"cli.help.template" = """
+<hl>{name}</hl> <dim>v{version}</dim>
+{author}
+{about}
+
+<title>USAGE</title>
+<cmd>{bin} [CONTEXT|ACTION|SCRIPT] [ARGS]...</cmd>
+
+<title>DESCRIPTION</title>
+axes unifies complex projects under a simple, consistent, and ultra-fast
+command-line interface. It uses a universal grammar to interpret your input,
+dynamically determining whether you are running a script, executing a system
+action, or navigating project contexts.
+
+<title>UNIVERSAL GRAMMAR</title>
+1. <cmd>axes <context> <action> [args...]</cmd>
+Executes a system <hl>action</hl> on a specific project <hl>context</hl>.
+<dim>Example: `axes my-app/api info`</dim>
 
 
+<cmd>axes <action> [args...]</cmd>
+Executes a system <hl>action</hl> globally or on the implicit (current) context.
+<dim>Example: axes tree --all</dim>
+
+<cmd>axes [context/]<script> [params...]</cmd>
+The default behavior. A powerful shortcut to <hl>run a script</hl>.
+<dim>Example: axes build --release or axes api/build</dim>
+
+<title>AVAILABLE ACTIONS</title>
+For detailed help on an action, run <cmd>axes <action> --help</cmd>.
 
 
+<group>[Project Lifecycle]</group>
+<hl>init</hl>, <hi>new</hi>             Initializes a new axes project in the current directory.
+<hl>register</hl>, <hi>reg</hi>         Registers an existing axes project into the global index.
+<hl>unregister</hl>, <hi>unreg</hi>     Removes a project from the index without deleting files.
+<hl>delete</hl>, <hi>del</hi>           Deletes the project's .axes directory and unregisters it. <err>(Destructive)</err>
 
-"register.info.scanning_childs" = "register.info.scanning_childs"
-"register.info.registered_with_id" = "register.info.registered_with_id {name}"
-"register.error.name_collision" = "register.error.name_collision {name}"
-"register.info.registered_new_id" = "register.info.registered_new_id {name}"
-"register.info.no_new_projects_to_register" = "register.info.no_new_projects_to_register"
-"register.prompt.name_for_identityless" = "register.prompt.name_for_identityless"
-"register.warning.invalid_parent" = "register.warning.invalid_parent {path}"
-"register.info.plan_header" = "register.info.plan_header"
-"register.info.plan_line_project" = "register.info.plan_line_project"
-"register.info.plan_line_as_child_of" = "register.info.plan_line_as_child_of"
-"register.info.starting_scan" = "register.info.starting_scan {path}"
-"error.context_required_no_command" = "error.context_required_no_command"
+<group>[Inspection & Navigation]</group>
+<hl>tree</hl>, <hi>ls</hi>              Displays the project hierarchy as a tree.
+<hl>info</hl>                  Displays detailed configuration for a project.
+<hl>alias</hl>                 Manages project shortcuts <hi>(alias)</hi>.
+<hl>repair</hl>, <hi>rep</hi>           Scans and repairs inconsistencies in the index.
+
+<group>[Execution & Interaction]</group>
+<hl>run</hl>                   <hi>(Default)</hi> Executes a script from the project's axes.toml.
+<hl>start</hl>                 Starts an interactive project session with hooks.
+<hl>open</hl>                  Opens the project using a configured application.
+
+<group>[Refactoring & Structure]</group>
+<hl>link</hl>                  Moves a project to be a child of another project.
+<hl>rename</hl>                Renames a registered project.
+
+<title>OPTIONS</title>
+<hl>--help</hl>, <hi>-h</hi>            Print this help message.
+<hl>--version</hl>, <hi>-v</hi>         Print version information.
+"""
