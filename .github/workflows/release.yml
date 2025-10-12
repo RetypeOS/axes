@@ -17,6 +17,9 @@ jobs:
     outputs:
       version: ${{ env.VERSION }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+      
       - name: Get Release Version
         run: echo "VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
         
