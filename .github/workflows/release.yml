@@ -113,7 +113,7 @@ jobs:
         shell: bash
         run: |
           gpg --batch --pinentry-mode loopback --yes \
-              --passphrase "${{ secrets.GPG_PASSPHRA-SE }}" \
+              --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
               --local-user ${{ secrets.GPG_KEY_ID }} \
               --output "${{ env.ASSET_NAME }}.sig" \
               --detach-sign "${{ env.ASSET_NAME }}"
