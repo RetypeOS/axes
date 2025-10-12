@@ -1,7 +1,7 @@
 // EN: src/core/task_executor.rs (REBUILT FOR LAZY EXECUTION)
 
 use crate::{
-    core::parameters::ArgResolver,
+    core::{color, commons::wrap_value, parameters::ArgResolver},
     models::{CommandAction, GlobalIndex, ResolvedConfig, RunSpec, Task, TemplateComponent},
     system::executor,
 };
@@ -102,7 +102,6 @@ fn execute_task_inner(
 // --- Command Assembly (Recursive String Renderer) ---
 
 /// "Renders" a template of components into a final, executable string.
-/// It recursively resolves all dynamic and static tokens, including symbolic references.
 #[allow(clippy::only_used_in_recursion)]
 pub fn assemble_final_command(
     template: &[TemplateComponent],
@@ -115,6 +114,7 @@ pub fn assemble_final_command(
     for component in template {
         match component {
             TemplateComponent::Literal(s) => final_command.push_str(s),
+
             TemplateComponent::Parameter(def) => {
                 let value = resolver
                     .get_specific_value(&def.original_token)
@@ -124,10 +124,24 @@ pub fn assemble_final_command(
                             def.original_token
                         )
                     })?;
+
                 final_command.push_str(value);
             }
-            TemplateComponent::GenericParams => {
-                final_command.push_str(resolver.get_generic_value())
+
+            TemplateComponent::GenericParams { literal } => {
+                if *literal {
+                    let literal_args: Vec<String> = resolver
+                        .get_generic_values()
+                        .iter()
+                        .map(|arg| wrap_value(arg))
+                        .collect();
+                    final_command.push_str(&literal_args.join(" "));
+                } else {
+                    final_command.push_str(&resolver.get_generic_values().join(" "));
+                }
+            }
+            TemplateComponent::Color(color) => {
+                final_command.push_str(color::ansi_color_to_code(*color));
             }
             TemplateComponent::Run(spec) => {
                 let command_to_run = match spec {

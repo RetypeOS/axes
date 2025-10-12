@@ -221,8 +221,8 @@ run_release = "cargo run <params::release> -- <params>"
 ```
 
 ```sh
-# Execution 1: Passing arguments to the binary
-axes ./run --input /data/file.txt --verbose
+# Execution 1: Passing arguments to the binary (Use '/' because run is a system argument, that's equivalent to `axes ./run ...`)
+axes /run --input /data/file.txt --verbose
 # Command executed: `cargo run -- --input /data/file.txt --verbose`
 
 # Execution 2: Using the script with release

@@ -127,7 +127,7 @@ fn execute_open_command(
                 crate::models::CommandAction::Execute(t)
                 | crate::models::CommandAction::Print(t) => t.iter().collect::<Vec<_>>(),
             })
-            .any(|c| matches!(c, crate::models::TemplateComponent::GenericParams));
+            .any(|c| matches!(c, crate::models::TemplateComponent::GenericParams { .. }));
 
     // 4. Create the argument resolver.
     let resolver = ArgResolver::new(&definitions, &open_args.params, has_generic_params)?;

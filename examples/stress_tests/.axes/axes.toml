@@ -1,0 +1,20 @@
+name = "stress_tests"
+version = "0.1.0"
+description = "Project charged to execute all stress and velocity tests."
+
+[vars]
+_if_prepare = '''<params::no-cache(alias='-nc', map='--prepare', default="cmd /c rmdir /s /q C:\\Users\\reyni\\AppData\\Local\\axes\\cache\\projects || exit /b 0", literal)>'''
+_if_condition = """
+<params::low(map='', default='--warmup 0 --runs 20')>\
+<params::mid(map='', default='--warmup 5 --runs 40')>\
+<params::high(map='', default='--warmup 10 --runs 100')>\
+"""
+_defaults = """
+ <params::axes-divided(alias='-ad', map='', default='axes ./big_divided_test/into/script_49990', literal)> \
+ <params::axes-big(alias='-ab', map='', default='axes ./big_test/script_49990', literal)> \
+ <params::just-big(alias='-jb', map='', default='just receta_49990', literal)> \
+"""
+
+[scripts.hyperfine]
+desc = "USE EXAMPLE: `axes hyperfine -ad -ab -jb --high` Execute script 'hyperfine' with script test axes and just. Finally all has optional values."
+run = 'hyperfine --shell=none <vars::_defaults> <vars::_if_condition> <vars::_if_prepare> <params::output-mk(alias="-out-mk", map="--export-markdown", default="benchmark_results.md")> <params(literal)>'

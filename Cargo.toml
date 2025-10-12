@@ -1,6 +1,6 @@
 [package]
 name = "axes"
-version = "0.2.4-Beta"
+version = "0.2.5-Beta"
 edition = "2024"
 license = "MIT"
 
@@ -43,6 +43,7 @@ tokio = { version = "1.47.1", features = ["rt-multi-thread", "process", "signal"
 shellexpand = "3.1.1"
 blake3 = "1.8.2"
 hex = "0.4.3"
+walkdir = "2.5.0"
 
 [build-dependencies]
 toml = "0.9.5"

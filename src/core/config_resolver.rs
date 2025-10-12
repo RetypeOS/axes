@@ -1,7 +1,7 @@
 // EN: src/core/config_resolver.rs
 
 use crate::{
-    core::{cache, parameters, paths},
+    core::{cache, color, parameters, paths},
     models::{
         CachedOpenWithConfig, CachedOptionsConfig, CachedProjectConfig, CanonicalCommand, Command,
         CommandAction, CommandExecution, GlobalIndex, IndexEntry, IndexUpdate, ProjectConfig,
@@ -149,6 +149,7 @@ fn expand_line_to_execution(line: &str) -> Result<CommandExecution> {
 fn tokenize_string(text: &str) -> Result<Vec<TemplateComponent>> {
     let mut components = Vec::new();
     let mut last_index = 0;
+
     for caps in TOKEN_RE.captures_iter(text) {
         let full_match = caps.get(0).unwrap();
 
@@ -160,6 +161,8 @@ fn tokenize_string(text: &str) -> Result<Vec<TemplateComponent>> {
         }
 
         if full_match.as_str().starts_with('\\') {
+            // This is an escaped token, like `\<path>`.
+            // We treat it as a literal, but without the escape character.
             components.push(TemplateComponent::Literal(
                 full_match.as_str()[1..].to_string(), // Slice to remove the leading `\`
             ));
@@ -167,15 +170,31 @@ fn tokenize_string(text: &str) -> Result<Vec<TemplateComponent>> {
             // This is a real token to be parsed.
             let content = caps.get(1).unwrap().as_str().trim();
 
-            // The internal parsing logic remains the same, just without the `` prefix.
             let component = if let Some(param_spec) = content.strip_prefix("params::") {
+                // Case 1: Specific parameter like `<params::0(required)>`
                 TemplateComponent::Parameter(parameters::parse_parameter_token(
                     full_match.as_str(),
                     param_spec,
                 )?)
+            // [MODIFIED] New logic to handle `<params(...)>` and `<params>`
+            } else if let Some(modifiers_str) = content
+                .strip_prefix("params")
+                .and_then(|s| s.strip_prefix('('))
+                .and_then(|s| s.strip_suffix(')'))
+            {
+                // Case 2: Generic params with modifiers, like `<params(literal)>`
+                let modifiers = parameters::parse_parameter_modifiers_from_str(modifiers_str)?;
+                TemplateComponent::GenericParams {
+                    literal: modifiers.literal,
+                }
             } else if content == "params" {
-                TemplateComponent::GenericParams
+                // Case 3: Simple generic params, `<params>`
+                TemplateComponent::GenericParams { literal: false }
+            } else if let Some(color_name) = content.strip_prefix('#') {
+                let color = color::parse_color_name(color_name)?;
+                TemplateComponent::Color(color)
             } else if let Some(run_spec) = content.strip_prefix("run") {
+                // ... (el resto de la lógica no cambia)
                 if let Some(cmd) = run_spec
                     .strip_prefix("('")
                     .and_then(|s| s.strip_suffix("')"))
@@ -188,21 +207,17 @@ fn tokenize_string(text: &str) -> Result<Vec<TemplateComponent>> {
                     ));
                 }
             } else {
-                // Static tokens and NEW symbolic references
                 match content {
                     "path" => TemplateComponent::Path,
                     "name" => TemplateComponent::Name,
                     "uuid" => TemplateComponent::Uuid,
                     "version" => TemplateComponent::Version,
-
-                    // FIX: Instead of erroring, create symbolic components.
                     s if s.starts_with("scripts::") => {
                         TemplateComponent::Script(s.strip_prefix("scripts::").unwrap().to_string())
                     }
                     s if s.starts_with("vars::") => {
                         TemplateComponent::Var(s.strip_prefix("vars::").unwrap().to_string())
                     }
-
                     _ => {
                         return Err(anyhow!(
                             "Unknown token namespace in: '{}'",
@@ -215,9 +230,12 @@ fn tokenize_string(text: &str) -> Result<Vec<TemplateComponent>> {
         }
         last_index = full_match.end();
     }
+
+    // Add any remaining literal text after the last match.
     if last_index < text.len() {
         components.push(TemplateComponent::Literal(text[last_index..].to_string()));
     }
+
     Ok(components)
 }
 

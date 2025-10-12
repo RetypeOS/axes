@@ -10,8 +10,10 @@ description = "The development workflow configuration for the `axes` project its
 # === Development Scripts ===
 # Defines workflows for building, testing, and managing the tool.
 [scripts]
-hello = "echo 'Hola, <scripts::hello_2>'"
-hello_2 = "echo 'Hola, <params::0()>'"
+hello_2 = "# Hello, <#blue><params::0(default='World')><#reset>! JAJAJ"
+test_rec = "echo <scripts::test_rec2>"
+test1 = "echo : <params(literal)>"
+test2 = "echo : <params::flag(literal)>"
 
 # --- Core Development Workflows ---
 build = { desc = "Builds the project in debug mode with fast compilation.", run = "cargo build <params>" }

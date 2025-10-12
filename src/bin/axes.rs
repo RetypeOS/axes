@@ -103,6 +103,11 @@ static COMMAND_REGISTRY: &[CommandDefinition] = &[
         aliases: &["unreg"],
         handler: handlers::unregister::handle,
     },
+    CommandDefinition {
+        name: "repair",
+        aliases: &["rep"],
+        handler: handlers::repair::handle,
+    },
 ];
 
 /// Finds a command definition in the registry by its name or alias.

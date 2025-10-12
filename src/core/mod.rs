@@ -2,6 +2,8 @@
 
 pub mod arg_parser;
 pub mod cache;
+pub mod color;
+pub mod commons;
 pub mod config_loader;
 pub mod config_resolver;
 pub mod context_resolver;

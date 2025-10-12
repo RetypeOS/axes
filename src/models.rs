@@ -164,6 +164,7 @@ pub struct ParameterModifiers {
     pub default_value: Option<String>,
     pub alias: Option<String>,
     pub map: Option<String>,
+    pub literal: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -178,12 +179,13 @@ pub enum RunSpec {
 pub enum TemplateComponent {
     Literal(String),
     Parameter(ParameterDef),
-    GenericParams,
+    GenericParams { literal: bool },
     Run(RunSpec),
     Path,
     Name,
     Uuid,
     Version,
+    Color(AnsiColor),
     Script(String),
     Var(String),
 }
@@ -915,4 +917,20 @@ impl ProjectConfig {
             env: HashMap::new(),
         }
     }
+}
+
+// COLOR IMPLS:
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+
+// Enum for supported ANSI colors for type safety.
+pub enum AnsiColor {
+    Reset,
+    Black,
+    Red,
+    Green,
+    Yellow,
+    Blue,
+    Magenta,
+    Cyan,
+    White,
 }

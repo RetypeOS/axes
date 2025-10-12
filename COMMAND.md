@@ -341,11 +341,11 @@ axes [<context>]/<script_name> [parameters...]
 
 #### **Arguments and Flags**
 
-| Argument         | Description                                                                 | Required |
+| Argument          | Description                                                                  | Required  |
 | :---------------- | :--------------------------------------------------------------------------- | :-------- |
 | `<context>`       | The project context in which the script will be executed. (Implicitly `.` if omitted). | No       |
-| `<script_name>`   | The name of the script to execute (the key under the `[scripts]` table).     | Yes      |
-| `[parameters...]` | Any additional arguments that will be passed to the script.                  | No       |
+| `<script_name>`   | The name of the script to execute (the key under the `[scripts]` table).     | Yes       |
+| `[parameters...]` | Any additional arguments that will be passed to the script.                  | No        |
 
 #### **Key Functionality**
 
@@ -390,7 +390,7 @@ axes [<context>] start [parameters...]
 
 #### **Arguments and Flags**
 
-| Argument         | Description                                                                         | Required |
+| Argument          | Description                                                                         | Required |
 | :---------------- | :---------------------------------------------------------------------------------- | :-------- |
 | `<context>`       | The project in which to start the session. (Implicitly `.` if omitted).             | No       |
 | `[parameters...]` | Any additional arguments that will be passed to the `at_start` and `at_exit` hooks. | No       |
@@ -482,7 +482,7 @@ axes <child_context> link <new_parent_context>
 
 #### **Arguments and Flags**
 
-| Argument                  | Description                                       | Required |
+| Argument                   | Description                                       | Required  |
 | :------------------------- | :------------------------------------------------ | :-------- |
 | `<child_context>`          | The project you want to move.                     | Yes       |
 | `<new_parent_context>`     | The project that will become its new parent.      | Yes       |
@@ -518,7 +518,7 @@ axes <context> rename <new_name>
 
 #### **Arguments and Flags**
 
-| Argument         | Description                                   | Required |
+| Argument          | Description                                   | Required  |
 | :---------------- | :-------------------------------------------- | :-------- |
 | `<context>`       | The project you want to rename.               | Yes       |
 | `<new_name>`      | The new name for the project.                 | Yes       |

@@ -59,7 +59,11 @@ type ContextResult<T> = Result<T, ContextError>;
 /// The resolution follows a strict, multi-layered priority order to ensure
 /// predictable behavior both inside and outside of project sessions.
 pub fn resolve_context(context: &str, index: &mut GlobalIndex) -> ContextResult<(Uuid, String)> {
-    let context = if context.trim().is_empty() { "." } else { context.trim() };
+    let context = if context.trim().is_empty() {
+        "."
+    } else {
+        context.trim()
+    };
 
     let parts: Vec<&str> = context.split('/').collect();
 

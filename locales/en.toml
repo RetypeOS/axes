@@ -193,6 +193,24 @@
 "unregister.info.projects_to_remove" = "Projects to be unregistered:"
 "unregister.success.header" = "{count} project(s) have been unregistered."
 
+# ===================================================================
+# `repair` Command
+# ===================================================================
+"repair.error.in_session" = "'repair' command is not available inside a project session."
+"repair.info.starting_scan" = "Scanning for project inconsistencies starting from '{path}'..."
+"repair.success.no_issues" = "Scan complete. No path inconsistencies found."
+"repair.warning.found_issues" = "Found {count} project(s) with outdated paths:"
+"repair.info.mismatch_header" = "Mismatch for project '{name}' ({uuid}):"
+"repair.label.registered_path" = "Registered Path"
+"repair.label.found_at" = "Found At"
+"repair.prompt.apply_fixes" = "Do you want to apply these path corrections to the index?"
+"repair.success.fixed" = "Successfully repaired {count} project path(s)."
+"repair.info.how_to_fix" = "Run this command again with the --fix flag to apply these corrections."
+"repair.warning.corrupt_ref" = "Warning: Could not read project reference file at '{path}': {error}"
+
+
+
+
 
 "register.info.scanning_childs" = "register.info.scanning_childs"
 "register.info.registered_with_id" = "register.info.registered_with_id {name}"

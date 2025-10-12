@@ -72,7 +72,7 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
             };
             template
                 .iter()
-                .any(|c| matches!(c, crate::models::TemplateComponent::GenericParams))
+                .any(|c| matches!(c, crate::models::TemplateComponent::GenericParams { .. }))
         });
 
     let resolver = ArgResolver::new(&all_definitions, &start_args.params, has_generic_params)?;

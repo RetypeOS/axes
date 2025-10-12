@@ -3,7 +3,7 @@
 use crate::{
     cli::handlers::commons,
     constants::{AXES_DIR, PROJECT_CONFIG_FILENAME},
-    core::index_manager,
+    core::{color, index_manager},
     models::{CommandAction, GlobalIndex, ResolvedConfig, RunSpec, Task, TemplateComponent},
 };
 use anyhow::Result;
@@ -243,7 +243,14 @@ fn render_component_to_string(component: &TemplateComponent) -> String {
     match component {
         TemplateComponent::Literal(s) => s.clone(),
         TemplateComponent::Parameter(p) => p.original_token.clone(),
-        TemplateComponent::GenericParams => "<params>".to_string(),
+        TemplateComponent::GenericParams { literal } => {
+            if *literal {
+                "<params(literal)>".to_string()
+            } else {
+                "<params>".to_string()
+            }
+        }
+        TemplateComponent::Color(color) => format!("<#{}>", color::ansi_color_to_code(*color)),
         TemplateComponent::Run(spec) => match spec {
             RunSpec::Literal(cmd) => format!("<run('{}')>", cmd),
         },

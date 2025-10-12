@@ -12,6 +12,7 @@ pub mod link;
 pub mod open;
 pub mod register;
 pub mod rename;
+pub mod repair;
 pub mod run;
 pub mod start;
 pub mod tree;

@@ -12,7 +12,7 @@ The `axes.toml` file is the brain of each of your projects. This is where you tr
 
 Before diving into the details, remember the most important concept: **inheritance**.
 
-Every `axes` project inherits the complete configuration from its parent project. When `axes` executes a command in the context of `my-app/api`, it first reads the `axes.toml` of `my-app/api`, then "merges" the configuration of `my-app` below it, and finally that of `global`.
+Every `axes` project inherits the complete configuration from its parent project. When `axes` executes a command in the context of `my-app/api`, it first reads the `axes.toml` of `my-app/api`, then if object to search not exist in the configuration, search in `my-app`, then in your parent, and finally that of `global`.
 
 This means a child project can:
 
@@ -26,33 +26,103 @@ This means a child project can:
 Here is an example of an `axes.toml` with all the main sections. We will explore them one by one.
 
 ```toml
-# --- Metadata (Optional) ---
-version = "1.0.0"
-description = "An example project."
+# ==============================================================================
+# axes.toml: Complete Reference Guide
+# This file serves as an exhaustive example of all features available in `axes`.
+# ==============================================================================
 
-# --- Environment Variables for every execution ---
+# --- 1. Metadata (Optional) ---
+# Provides information about the project, visible with `axes info`.
+version = "2.0.0"
+description = "Backend API for the WebApp project. Provides data endpoints."
+
+# --- 2. Environment Variables ([env]) ---
+# These variables are injected as system environment variables into EVERY command executed by `axes` in this context.
 [env]
-NODE_ENV = "development"
+# Ideal for secrets (if defines on exterior ancestor project) or environment constants.
+DATABASE_URL = "postgresql://user:pass@localhost:5432/webapp_db"
+LOG_LEVEL = "info"
 
-# --- Variables to reuse in scripts ---
+# --- `axes` Variables ([vars]) ---
+# Internal variables for reuse within scripts using the `<vars::...>` syntax.
+# They promote the DRY (Don't Repeat Yourself) philosophy.
 [vars]
-dist_dir = "dist/"
+image_name = "webapp/api"
+# Variables can be dynamic, executing a command in real-time.
+git_hash = "<run('git rev-parse --short HEAD')>"
 
-# --- Scripts and Workflows ---
+# --- 4. Scripts ([scripts]) ---
+# The core of `axes`. Defines the project's workflows.
 [scripts]
-build = "npm run build -- --output <vars::dist_dir>"
-serve = "npm run serve"
 
-# --- Options and Hooks ---
+# Simple form: a single command as a text string.
+run = "poetry run uvicorn app.main:app --reload"
+
+# Sequence form: a list of commands executed sequentially.
+# Use '#' to print status messages without invoking a shell.
+test = [
+    "# Running API tests...",
+    "poetry run pytest"
+]
+
+# Extended form: a dictionary with a description (`desc`) and the command (`run`).
+# This improves the output of `axes info` and `axes run` (without arguments).
+[scripts.seed_db]
+desc = "Populates the database with test data."
+run = [
+  "# Applying seeds to the database...",
+  # `run` can contain cross-platform lines. `axes` will choose the correct one.
+  # If the OS-specific one doesn't exist, it falls back to `default`.
+  { windows = "psql.exe -U user -d webapp_db -f ./seed.sql", default = "psql -U user -d webapp_db -f ./seed.sql" }
+]
+
+# Script with a named parameter (`tag`) that has a default value.
+[scripts.build]
+desc = "Builds the local Docker image."
+run = "docker build . -t <vars::image_name>:<params::tag(default='latest')>"
+
+# Script that delegates argument parsing to the shell using the '$' prefix.
+# Allows passing flags and arguments directly to the underlying command.
+# Example usage: `axes format --check .` becomes `poetry run ruff format .`
+[scripts.format]
+desc = "Formats the code using Ruff."
+run = "$ poetry run ruff format ."
+
+# A complex script demonstrating composition and command modifiers.
+[scripts.deploy]
+desc = "Builds and pushes the API Docker image."
+run = [
+  "# Step 1: Build the image (silent execution, command not printed).",
+  "@ <scripts::build>", # <-- Composition: calls another `axes` script.
+
+  "# Step 2: Tag the image with the commit hash (ignores errors if the tag already exists).",
+  "- docker tag <vars::image_name>:latest <vars::image_name>:<vars::git_hash>",
+
+  "# Step 3: Push both tags in parallel for maximum speed.",
+  "> docker push <vars::image_name>:latest", # <-- The `>` prefix starts a parallel batch.
+  "> docker push <vars::image_name>:<vars::git_hash>"
+]
+
+
+# --- 5. Session Options and Hooks ([options]) ---
 [options]
-# Executes when starting a session with `axes my-app start`
-at_start = "nvm use 18"
-# Executes when exiting the session
-at_exit = "echo 'Cleaning up session...'"
 
-# Configuration for the `axes my-app open` command
+# `at_start`: Executes once when starting a session with `axes start`.
+# Ideal for activating virtual environments, starting services, etc.
+at_start = "poetry install --no-root"
+
+# `at_exit`: Executes upon exiting the session (with `exit`).
+# Ideal for stopping services, cleaning temporary files, etc.
+at_exit = "# Exiting API session..."
+
+# Configuration for the `axes open` command.
 [options.open_with]
+# Define "shortcuts" to open the project in different applications.
+# `<path>` is a special token that resolves to the project's root path.
 editor = "code \"<path>\""
+terminal = { windows = "wt -d \"<path>\"", default = "gnome-terminal --working-directory=\"<path>\""}
+
+# `default` specifies which shortcut to use if `axes open` is run without arguments.
 default = "editor"
 ```
 

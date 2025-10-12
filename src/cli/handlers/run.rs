@@ -162,7 +162,7 @@ fn execute_script(
         };
         template
             .iter()
-            .any(|c| matches!(c, TemplateComponent::GenericParams))
+            .any(|c| matches!(c, TemplateComponent::GenericParams { .. }))
     });
 
     let resolver = ArgResolver::new(&all_definitions, params, has_generic_params)?;
@@ -209,7 +209,7 @@ fn dry_run_script(
         };
         template
             .iter()
-            .any(|c| matches!(c, TemplateComponent::GenericParams))
+            .any(|c| matches!(c, TemplateComponent::GenericParams { .. }))
     });
 
     let resolver = ArgResolver::new(&all_definitions, params, has_generic_params)?;
