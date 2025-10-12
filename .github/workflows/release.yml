@@ -14,20 +14,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      version: ${{ env.VERSION }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      
       - name: Get Release Version
         run: echo "VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
         
       - name: Create GitHub Release using gh CLI
         env:
-          # El GITHUB_TOKEN es usado automáticamente por gh CLI
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release create ${{ env.VERSION }} --draft --verify-tag --title "Release ${{ env.VERSION }}"
-    outputs:
-      version: ${{ env.VERSION }}
 
   build_and_upload_assets:
     name: Build and Upload Assets
@@ -114,7 +110,7 @@ jobs:
         shell: bash
         run: |
           gpg --batch --pinentry-mode loopback --yes \
-              --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
+              --passphrase "${{ secrets.GPG_PASSPHRA-SE }}" \
               --local-user ${{ secrets.GPG_KEY_ID }} \
               --output "${{ env.ASSET_NAME }}.sig" \
               --detach-sign "${{ env.ASSET_NAME }}"
