@@ -1,6 +1,7 @@
 // EN: src/models.rs
 
 use anyhow::{Result, anyhow};
+use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -590,21 +591,31 @@ impl ResolvedConfig {
             {
                 let key = format!("script::{}", name);
                 if !call_stack.insert(key.clone()) {
-                    return Err(anyhow!("Circular dependency: {}", name));
+                    return Err(anyhow!(
+                        "Circular dependency detected involving script: '{}'",
+                        name
+                    ));
                 }
-                if let Some(sub_task) = self.get_script(name, 0)? {
-                    let flattened_sub_task = self.flatten_task_recursive(&sub_task, call_stack)?;
-                    // Apply prefixes from the call site (`cmd_exec`) to the sub-commands
-                    let mut inherited_commands = flattened_sub_task.commands.clone();
-                    for sub_cmd in &mut inherited_commands {
-                        sub_cmd.ignore_errors |= cmd_exec.ignore_errors;
-                        sub_cmd.run_in_parallel |= cmd_exec.run_in_parallel;
-                        sub_cmd.silent_mode |= cmd_exec.silent_mode;
-                    }
-                    new_commands.extend(inherited_commands);
+
+                let sub_task = self.get_script(name, 0)?.ok_or_else(|| {
+                    anyhow!(
+                        "Broken Reference: The script '<scripts::{}>' used in a composition was not found in context '{}' or any of its ancestors.",
+                        name.cyan(),
+                        self.qualified_name.yellow()
+                    )
+                })?;
+
+                let flattened_sub_task = self.flatten_task_recursive(&sub_task, call_stack)?;
+                // Apply prefixes from the call site (`cmd_exec`) to the sub-commands
+                let mut inherited_commands = flattened_sub_task.commands.clone();
+                for sub_cmd in &mut inherited_commands {
+                    sub_cmd.ignore_errors |= cmd_exec.ignore_errors;
+                    sub_cmd.run_in_parallel |= cmd_exec.run_in_parallel;
+                    sub_cmd.silent_mode |= cmd_exec.silent_mode;
                 }
+                new_commands.extend(inherited_commands);
                 call_stack.remove(&key);
-                continue; // Continue to the next command in the outer task
+                continue;
             }
 
             // If it's not a pure composition, it's an inline composition.
@@ -634,38 +645,49 @@ impl ResolvedConfig {
             match component {
                 TemplateComponent::Script(name) | TemplateComponent::Var(name) => {
                     let is_var = matches!(component, TemplateComponent::Var(_));
-                    let key = if is_var {
-                        format!("var::{}", name)
-                    } else {
-                        format!("script::{}", name)
-                    };
+                    let token_type = if is_var { "var" } else { "script" };
+                    let key = format!("{}::{}", token_type, name);
 
                     if !call_stack.insert(key.clone()) {
-                        return Err(anyhow!("Circular dependency: {}", name));
+                        return Err(anyhow!(
+                            "Circular dependency detected involving {}: '{}'",
+                            token_type,
+                            name
+                        ));
                     }
 
-                    let sub_task = if is_var {
+                    let sub_task_opt = if is_var {
                         self.get_var(name, 0)?
                     } else {
                         self.get_script(name, 0)?
                     };
 
-                    if let Some(task) = sub_task {
-                        if task.commands.len() > 1 {
-                            return Err(anyhow!(
-                                "Inline composition of multi-line script/var '{}' is not supported.",
-                                name
-                            ));
-                        }
-                        if let Some(cmd) = task.commands.first() {
-                            let sub_template = match &cmd.action {
-                                CommandAction::Execute(t) | CommandAction::Print(t) => t,
-                            };
-                            // Recurse into the sub-template
-                            final_components
-                                .extend(self.flatten_template_recursive(sub_template, call_stack)?);
-                        }
+                    let sub_task = sub_task_opt.ok_or_else(|| {
+                        anyhow!(
+                            "Broken Reference: The {} '<{}s::{}>' was not found in context '{}' or any of its ancestors.",
+                            token_type,
+                            token_type,
+                            name.cyan(),
+                            self.qualified_name.yellow()
+                        )
+                    })?;
+
+                    // El resto de la lógica ahora opera sobre `sub_task` (no `Option`).
+                    if sub_task.commands.len() > 1 {
+                        return Err(anyhow!(
+                            "Inline composition of multi-line {} '{}' is not supported.",
+                            token_type,
+                            name
+                        ));
                     }
+                    if let Some(cmd) = sub_task.commands.first() {
+                        let sub_template = match &cmd.action {
+                            CommandAction::Execute(t) | CommandAction::Print(t) => t,
+                        };
+                        final_components
+                            .extend(self.flatten_template_recursive(sub_template, call_stack)?);
+                    }
+
                     call_stack.remove(&key);
                 }
                 _ => {

@@ -169,13 +169,8 @@ impl CliInputState {
         let mut params_iter = cli_params.iter().peekable();
 
         while let Some(param) = params_iter.next() {
-            let name_opt = if let Some(name) = param.strip_prefix("--") {
-                Some(name)
-            } else {
-                param.strip_prefix('-')
-            };
-
-            if let Some(name) = name_opt {
+            if let Some(name) = param.strip_prefix("--") {
+                // This is a long flag, like `--verbose`. The key is `verbose`.
                 let value = if let Some(next_param) = params_iter.peek() {
                     if !next_param.starts_with('-') {
                         Some(params_iter.next().unwrap().clone())
@@ -192,7 +187,27 @@ impl CliInputState {
                         consumed: false,
                     },
                 );
+            } else if param.starts_with('-') {
+                // This is a short flag or an alias, like `-v` or `-ab`.
+                // The key is the full string, e.g., `-v` or `-ab`.
+                let value = if let Some(next_param) = params_iter.peek() {
+                    if !next_param.starts_with('-') {
+                        Some(params_iter.next().unwrap().clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                named.insert(
+                    param.clone(),
+                    CliArgument {
+                        value,
+                        consumed: false,
+                    },
+                );
             } else {
+                // This is a positional argument.
                 positional.push(CliArgument {
                     value: Some(param.clone()),
                     consumed: false,

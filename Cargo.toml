@@ -14,16 +14,19 @@ bincode = {version = "2.0.1", features = ["serde"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.145"
 toml = "0.9.5"
+hex = "0.4.3"
 
 # Command Line Interface
 clap = { version = "4.5.47", features = ["derive"] }
 dialoguer = "0.12.0"
 colored = "3.0.0"
+shellexpand = "3.1.1"
 
 # System & Filesystem Utilities
 dirs = "6.0.0"
 dunce = "1.0.5"
 tempfile = "3.21.0"
+walkdir = "2.5.0"
 
 # Logging
 env_logger = "0.11.8"
@@ -40,10 +43,11 @@ uuid = { version = "1.18.1", features = ["v4", "serde"] }
 
 # Asynchronous Runtime
 tokio = { version = "1.47.1", features = ["rt-multi-thread", "process", "signal", "macros"] }
-shellexpand = "3.1.1"
+
+# Hashing
 blake3 = "1.8.2"
-hex = "0.4.3"
-walkdir = "2.5.0"
+
+# Pendient to order
 
 [build-dependencies]
 toml = "0.9.5"

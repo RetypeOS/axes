@@ -48,9 +48,12 @@ fn execute_task_inner(
                 if template.len() == 1
                     && let TemplateComponent::Script(script_name) = &template[0]
                 {
-                    // FIX: Pass incremented depth to the recursive call.
                     let sub_task = config.get_script(script_name, depth + 1)?.ok_or_else(|| {
-                        anyhow!("Script '{}' not found for composition.", script_name)
+                        anyhow!(
+                            "Composition Error: The script '<scripts::{}>' referenced for direct execution was not found in context '{}' or any of its ancestors.",
+                            script_name.cyan(),
+                            config.qualified_name.yellow()
+                        )
                     })?;
 
                     // Recursive call to execute the sub-task.
@@ -170,42 +173,38 @@ pub fn assemble_final_command(
             }
 
             // --- LAZY RESOLUTION OF SYMBOLIC REFERENCES ---
-            TemplateComponent::Script(script_name) => {
-                log::debug!("Resolving inline script reference: '{}'", script_name);
-                let script_task = config
-                    .get_script(script_name, depth + 1)?
-                    .ok_or_else(|| anyhow!("Referenced script '{}' not found.", script_name))?;
-                if script_task.commands.len() > 1 {
+            TemplateComponent::Script(name) | TemplateComponent::Var(name) => {
+                let is_var = matches!(component, TemplateComponent::Var(_));
+                let token_type = if is_var { "vars" } else { "scripts" };
+                log::debug!("Resolving inline reference: '<{}::{}>'", token_type, name);
+
+                // Get the appropriate task (script or var)
+                let task_result = if is_var {
+                    config.get_var(name, depth + 1)
+                } else {
+                    config.get_script(name, depth + 1)
+                };
+
+                let task = task_result?.ok_or_else(|| {
+                    anyhow!(
+                        "Broken Reference: The {} '<{}::{}>' was not found in context '{}' or any of its ancestors.",
+                        if is_var { "variable" } else { "script" },
+                        token_type,
+                        name.cyan(),
+                        config.qualified_name.yellow()
+                    )
+                })?;
+
+                // The rest of the logic remains the same, but now operates on `task` which is guaranteed to exist.
+                if task.commands.len() > 1 {
                     return Err(anyhow!(
-                        "Inline script composition for '<scripts::{}>' is not supported because it is a multi-line script.",
-                        script_name
+                        "Inline composition for '<{}::{}>' is not supported because it is a multi-line {}.",
+                        token_type,
+                        name,
+                        if is_var { "variable" } else { "script" }
                     ));
                 }
-                if let Some(command) = script_task.commands.first() {
-                    let sub_template = match &command.action {
-                        CommandAction::Execute(t) | CommandAction::Print(t) => t,
-                    };
-                    final_command.push_str(&assemble_final_command(
-                        sub_template,
-                        config,
-                        resolver,
-                        index,
-                        depth + 1,
-                    )?);
-                }
-            }
-            TemplateComponent::Var(var_name) => {
-                log::debug!("Resolving var reference: '{}'", var_name);
-                let var_task = config
-                    .get_var(var_name, depth + 1)?
-                    .ok_or_else(|| anyhow!("Referenced variable '{}' not found.", var_name))?;
-                if var_task.commands.len() > 1 {
-                    return Err(anyhow!(
-                        "Variable '{}' must expand to a single-line value.",
-                        var_name
-                    ));
-                }
-                if let Some(command) = var_task.commands.first() {
+                if let Some(command) = task.commands.first() {
                     let sub_template = match &command.action {
                         CommandAction::Execute(t) | CommandAction::Print(t) => t,
                     };

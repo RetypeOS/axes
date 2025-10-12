@@ -121,7 +121,7 @@ fn find_command(name: &str) -> Option<&'static CommandDefinition> {
 fn main() {
     #[cfg(debug_assertions)]
     {
-        //env_logger::init(); // This is often too verbose, let's keep it commented for now.
+        env_logger::init(); // This is often too verbose, let's keep it commented for now.
     }
 
     // 1. Load the index and clone its initial state.
@@ -131,7 +131,7 @@ fn main() {
     };
 
     if let Err(e) = run_cli(Cli::parse()) {
-        // --- [NEW] Graceful handling for clap's informational exits (`--help`, `--version`) ---
+        // --- Graceful handling for clap's informational exits (`--help`, `--version`) ---
         // Before treating the error as a generic failure, check if it's a special
         // error from clap that should result in a clean exit.
         if let Some(clap_err) = e.downcast_ref::<clap::Error>() {
