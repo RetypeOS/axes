@@ -368,6 +368,7 @@ impl ArgResolver {
                 }
                 ParameterKind::Named { name } => {
                     let alias = def.modifiers.alias.as_deref();
+                    // This part remains the same
                     let is_provided = cli_state.named.contains_key(name)
                         || alias.is_some_and(|a| cli_state.named.contains_key(a));
 
@@ -378,8 +379,8 @@ impl ArgResolver {
                         ));
                     }
 
-                    // [CORRECTED LOGIC] Only build the string IF the flag was provided.
                     if is_provided {
+                        // Get CLI value and apply default if necessary (logic is the same)
                         let cli_value = if let Some(arg) = cli_state.named.get(name) {
                             arg.value.clone()
                         } else if let Some(a) = alias {
@@ -390,26 +391,39 @@ impl ArgResolver {
 
                         let final_value = cli_value.or_else(|| def.modifiers.default_value.clone());
 
+                        // Apply literal wrapping if needed (logic is the same)
                         let final_value_maybe_wrapped = if def.modifiers.literal {
                             final_value.as_deref().map(wrap_value)
                         } else {
                             final_value
                         };
 
-                        let output_flag_name = match &def.modifiers.map {
-                            Some(map_str) if map_str.is_empty() => None,
-                            Some(map_str) => Some(map_str.clone()),
-                            None => Some(format!("--{}", name)),
-                        };
+                        if let Some(map_str) = &def.modifiers.map {
+                            // --- Case 1: `map` is defined ---
+                            // This implements the new literal concatenation behavior.
+                            if map_str.is_empty() {
+                                // Special case: map="" (or map=''), just extract the value.
+                                final_string = final_value_maybe_wrapped.unwrap_or_default();
+                            } else {
+                                // Standard case: `map` is a literal prefix.
+                                // The user must include a space in `map_str` if they want one.
+                                final_string = format!(
+                                    "{}{}",
+                                    map_str,
+                                    final_value_maybe_wrapped.unwrap_or_default()
+                                );
+                            }
+                        } else {
+                            // --- Case 2: `map` is NOT defined ---
+                            // This preserves the default "pass-through" behavior with a space.
+                            let flag_name = format!("--{}", name);
+                            final_string = match final_value_maybe_wrapped {
+                                Some(val) => format!("{} {}", flag_name, val),
+                                None => flag_name,
+                            };
+                        }
 
-                        final_string = match (output_flag_name, final_value_maybe_wrapped) {
-                            (Some(flag), Some(val)) => format!("{} {}", flag, val),
-                            (Some(flag), None) => flag,
-                            (None, Some(val)) => val,
-                            (None, None) => String::new(),
-                        };
-
-                        // Mark as consumed.
+                        // Mark as consumed
                         if let Some(arg) = cli_state.named.get_mut(name) {
                             arg.consumed = true;
                         } else if let Some(alias) = &def.modifiers.alias

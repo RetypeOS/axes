@@ -13,12 +13,12 @@ fn build_help_string() -> &'static str {
 
     // Define styles. If colors are disabled, they are empty strings.
     let title = if use_colors { "\x1b[1;33m" } else { "" }; // Bold Yellow
-    let hl = if use_colors { "\x1b[1;36m" } else { "" };    // Bold Cyan (for highlights)
-    let hi = if use_colors { "\x1b[1;20m" } else { "" };    // Bold Cyan (for highlights)
-    let cmd = if use_colors { "\x1b[36m" } else { "" };     // Cyan (for commands)
+    let hl = if use_colors { "\x1b[1;36m" } else { "" }; // Bold Cyan (for highlights)
+    let hi = if use_colors { "\x1b[1;20m" } else { "" }; // Bold Cyan (for highlights)
+    let cmd = if use_colors { "\x1b[36m" } else { "" }; // Cyan (for commands)
     let group = if use_colors { "\x1b[1;32m" } else { "" }; // Bold Green
-    let err = if use_colors { "\x1b[91m" } else { "" };      // Bright Red (for destructive)
-    let dim = if use_colors { "\x1b[2m" } else { "" };      // Dim
+    let err = if use_colors { "\x1b[91m" } else { "" }; // Bright Red (for destructive)
+    let dim = if use_colors { "\x1b[2m" } else { "" }; // Dim
     let reset = if use_colors { "\x1b[0m" } else { "" };
 
     // Perform replacements in a single, chained expression.
@@ -37,7 +37,6 @@ fn build_help_string() -> &'static str {
         .replace("</err>", reset)
         .replace("<dim>", dim)
         .replace("</dim>", reset);
-
 
     Box::leak(formatted_string.into_boxed_str())
 }

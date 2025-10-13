@@ -543,4 +543,38 @@ axes my-app/api-legacy info
 ```
 
 ---
+
+### `repair`
+
+Reports errors in the project system and/or project files and offers to automatically repair them.
+
+#### **Syntax**
+
+```sh
+axes [path] repair [args...]
+```
+
+#### **Arguments and Flags**
+
+| Argument            | Description                                                             | Required |
+| :------------------ | :---------------------------------------------------------------------- | :------- |
+| `--recursive`, `-r` | Explores recursively all projects in subdirectories                     | No       |
+| `--depth`, `-d`     | (uint) Maximum search depth.                                            | No       |
+| `--fix`             | Applies the proposed solution automatically to detected errors.         | No       |
+
+#### **Usage Examples**
+
+```sh
+#Scan actual directory and report any inconsistence encountered.
+axes repair
+
+# Scan actual directory and subdirectories and report any inconsistence encountered.
+axes repair --recursive
+
+# Scan actual directory and subdirectories and automatically repair any inconsistence encountered.
+axes repair --recursive --fix
+```
+
+---
+
 This document provides a complete reference of the available commands. To learn how to write powerful workflows, the next recommended reading is the **[`axes.toml` Guide](./AXES_TOML_GUIDE.md)**.

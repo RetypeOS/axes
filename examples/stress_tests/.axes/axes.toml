@@ -10,12 +10,14 @@ _if_condition = """
 <params::high(map='', default='--warmup 10 --runs 100')>\
 """
 _defaults = """
- <params::axes-divided(alias='-ad', map='', default='axes ./big_divided_test/into/script_49990', literal)> \
- <params::axes-big(alias='-ab', map='', default='axes ./big_test/script_49990', literal)> \
- <params::just-big(alias='-jb', map='', default='just receta_49990', literal)> \
- <params(literal)>\
+<params(literal)> \
+<params::axes-low(alias='-al', map='', default='axes ./low_test/script_0090', literal)> \
+<params::axes-divided(alias='-ad', map='', default='axes ./big_divided_test/into/script_49990', literal)> \
+<params::axes-big(alias='-ab', map='', default='axes ./big_test/script_49990', literal)> \
+<params::just-low(alias='-jl', map='', default='just --justfile low_test/justfile receta_0090', literal)>\
+<params::just-big(alias='-jb', map='', default='just --justfile big_test/justfile receta_49990', literal)> \
 """
 
 [scripts.hyperfine]
-desc = "USE EXAMPLE: `axes hyperfine -ad -ab -jb --high -nc -out-mk \"test_benchmark.md\"` Execute script 'hyperfine' with script test axes and just. Finally all has optional values."
-run = 'hyperfine --shell=none <vars::_defaults> <vars::_if_condition> <vars::_if_prepare> <params::output-mk(alias="-out-mk", map="--export-markdown", default="benchmark_results.md")>'
+desc = "USE EXAMPLE: `axes hyperfine -ad -ab -jb --high -nc -exmk \"test_benchmark.md\"` Execute script 'hyperfine' with script test axes and just. Finally all has optional values."
+run = 'hyperfine --shell=none <vars::_defaults> <vars::_if_condition> <vars::_if_prepare> <params::output-mk(alias="-exmk", map="--export-markdown ", default="benchmark_results.md")>'

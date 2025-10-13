@@ -7,7 +7,6 @@ use std::path::Path;
 
 fn main() {
     // --- 1. Determine the language using a prioritized approach ---
-    let lang: String;
 
     // Priority 1: Check for `lang_*` feature flags set by Cargo.
     let mut active_langs = Vec::new();
@@ -17,7 +16,7 @@ fn main() {
         }
     }
 
-    if !active_langs.is_empty() {
+    let lang: String = if !active_langs.is_empty() {
         // A feature flag was found. This takes highest priority.
         if active_langs.len() > 1 {
             println!(
@@ -25,12 +24,12 @@ fn main() {
                 active_langs, active_langs[0]
             );
         }
-        lang = active_langs[0].clone();
+        active_langs[0].clone()
     } else {
         // Priority 2 & 3: No feature flags were found.
         // Fall back to the original behavior: check AXES_LANG, then default to "en".
-        lang = env::var("AXES_LANG").unwrap_or_else(|_| "en".to_string());
-    }
+        env::var("AXES_LANG").unwrap_or_else(|_| "en".to_string())
+    };
 
     println!("cargo:rustc-env=AXES_LANG_EFFECTIVE={}", lang);
 
@@ -39,7 +38,6 @@ fn main() {
     println!("cargo:rerun-if-env-changed=AXES_LANG");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=locales/");
-
 
     // --- 3. Load the base language file (English) as a fallback ---
     let fallback_file_path = "locales/en.toml";

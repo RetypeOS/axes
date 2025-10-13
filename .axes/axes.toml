@@ -10,9 +10,10 @@ description = "The development workflow configuration for the `axes` project its
 # === Development Scripts ===
 # Defines workflows for building, testing, and managing the tool.
 [scripts]
+tests = 'echo <params(literal)> <params::flag(map="zzzz=", default="aaaa", required)>'
 # --- Core Development Workflows ---
 build = { desc = "Builds the project in debug mode with fast compilation.", run = "cargo build <params>" }
-build_release = { desc = "Builds the project in release mode for distribution.", run = "cargo build --release" }
+build_release = { desc = "Builds the project in release mode for distribution.", run = "cargo build --release <params::lang(map='--features lang_', default='es')>" }
 run = { desc = "Runs the project, passing all arguments to the binary.", run = "cargo run -- <params>" }
 test = { desc = "Runs all unit and integration tests.", run = "cargo test" }
 
@@ -25,8 +26,8 @@ fmt_fix = { desc = "Formats the code automatically.", run = "cargo fmt --all <pa
 # This is a composite script, showcasing the power of `axes` to create complete workflows.
 quality = { desc = "Runs all quality checks in sequence (fmt, check, lint, test).", run = [
     "<scripts::fmt>",
-    "<scripts::check>",
-    "<scripts::lint>",
+    "> <scripts::check>",
+    "> <scripts::lint>",
     "<scripts::test>",
 ]}
 
@@ -59,13 +60,9 @@ macos = [
 [scripts.flamegraph]
 desc = "Generates a performance flamegraph for a given command and opens the result."
 run = [
-    "cargo flamegraph --bin axes -- <params>",
+    "cargo flamegraph --bin axes -- <params::0(literal)>",
     "<scripts::_flamgraph_exec>"
 ]
-[scripts.Hyperfine]
-desc = ""
-run = "hyperfine 'axes hello' 'just hola' 'task hello' --warmup 5 --runs 50 --export-markdown benchmark_results.md"
-
 
 # === Interpolation Variables ===
 # Reusable values for maintaining consistency across scripts.
@@ -74,7 +71,7 @@ run = "hyperfine 'axes hello' 'just hola' 'task hello' --warmup 5 --runs 50 --ex
 # By default, install into a local './bin' directory. This is safe and portable.
 # A user can override this by creating a `.axes/axes.local.toml` file with:
 # [vars]
-install_welcome = "Installing 'axes' on: '<vars::install_path_win>'..."
+install_welcome = "Installing <#green>'axes'<#reset> on: <#blue>'<vars::install_path_win>'<#reset>..."
 install_path_win = "<params::0(default='.\\bin\\axes.exe')>" 
 install_path_nix = "<params::0(default='./bin/axes')>"
 

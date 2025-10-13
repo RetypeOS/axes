@@ -6,55 +6,125 @@
 
 > **Nota:** Esta traducción es mantenida por la comunidad y podría no estar completamente sincronizada con la [versión en inglés](../../AXES_TOML_GUIDE.md), que es la fuente canónica de la documentación.
 
-# Dominando el `axes.toml`: La Guía Definitiva
+# Dominando `axes.toml`: La Guía Definitiva
 
-El archivo `axes.toml` es el cerebro de cada uno de tus proyectos. Es aquí donde transformas secuencias de comandos caóticas en flujos de trabajo limpios, reutilizables y potentes. Esta guía es la referencia completa de cada sección y característica que puedes usar.
+El archivo `axes.toml` es el cerebro de cada uno de tus proyectos. Aquí es donde transformas secuencias de comandos caóticas en flujos de trabajo limpios, reutilizables y potentes. Esta guía es la referencia completa para cada sección y característica que puedes utilizar.
 
 ## El Principio Fundamental: Herencia
 
 Antes de sumergirnos en los detalles, recuerda el concepto más importante: **la herencia**.
 
-Cada proyecto `axes` hereda la configuración completa de su proyecto padre. Cuando `axes` ejecuta un comando en el contexto de `mi-app/api`, primero lee el `axes.toml` de `mi-app/api`, y luego "fusiona" la configuración de `mi-app` por debajo, y finalmente la de `global`.
+Cada proyecto `axes` hereda la configuración completa de su proyecto padre. Cuando `axes` ejecuta un comando en el contexto de `my-app/api`, primero lee el `axes.toml` de `my-app/api`, luego, si el objeto a buscar no existe en esa configuración, busca en `my-app`, luego en su padre, y finalmente en el de `global`.
 
 Esto significa que un proyecto hijo puede:
 
-* **Usar** variables y scripts definidos en sus padres.
-* **Sobrescribir** variables y scripts para especializar el comportamiento.
+* **Usar** variables y *scripts* definidos en sus padres.
+* **Sobrescribir** variables y *scripts* para especializar el comportamiento.
 
-> **Regla de Fusión:** La configuración del hijo siempre tiene prioridad. Si `mi-app` define `[vars] version = "1.0"` y `mi-app/api` define `[vars] version = "1.1"`, el valor para `api` será `1.1`.
+> **Regla de Fusión:** La configuración del hijo siempre tiene precedencia. Si `my-app` define `[vars] version = "1.0"` y `my-app/api` define `[vars] version = "1.1"`, el valor para `api` será `"1.1"`.
 
 ### Anatomía de un `axes.toml`
 
 Aquí tienes un ejemplo de un `axes.toml` con todas las secciones principales. Las exploraremos una por una.
 
 ```toml
-# --- Metadatos (Opcional) ---
-version = "1.0.0"
-description = "Un proyecto de ejemplo."
+# ==============================================================================
+# axes.toml: Guía de Referencia Exhaustiva
+# Este archivo sirve como un ejemplo exhaustivo de todas las características disponibles en `axes`.
+# ==============================================================================
 
-# --- Variables de Entorno para cada ejecución ---
+# --- 1. Metadatos (Opcional) ---
+# Proporciona información sobre el proyecto, visible con `axes info`.
+version = "2.0.0"
+description = "API de Backend para el proyecto WebApp. Proporciona endpoints de datos."
+
+# --- 2. Variables de Entorno ([env]) ---
+# Estas variables se inyectan como variables de entorno del sistema en CADA comando ejecutado por `axes` en este contexto.
 [env]
-NODE_ENV = "development"
+# Ideal para secretos (si se definen en un proyecto ancestro exterior) o constantes de entorno.
+DATABASE_URL = "postgresql://user:pass@localhost:5432/webapp_db"
+LOG_LEVEL = "info"
 
-# --- Variables para reutilizar en scripts ---
+# --- 3. Variables de `axes` ([vars]) ---
+# Variables internas para reutilización dentro de scripts usando la sintaxis `<vars::...>` .
+# Promueven la filosofía DRY (Don't Repeat Yourself).
 [vars]
-dist_dir = "dist/"
+image_name = "webapp/api"
+# Las variables pueden ser dinámicas, ejecutando un comando en tiempo real.
+git_hash = "<run('git rev-parse --short HEAD')>"
 
-# --- Scripts y Flujos de Trabajo ---
+# --- 4. Scripts ([scripts]) ---
+# El núcleo de `axes`. Define los flujos de trabajo del proyecto.
 [scripts]
-build = "npm run build -- --output <vars::dist_dir>"
-serve = "npm run serve"
 
-# --- Opciones y Hooks ---
+# Forma simple: un único comando como una cadena de texto.
+run = "poetry run uvicorn app.main:app --reload"
+
+# Forma de secuencia: una lista de comandos ejecutados secuencialmente.
+# Usa '#' para imprimir mensajes de estado sin invocar el shell.
+test = [
+    "# Ejecutando tests de la API...",
+    "poetry run pytest"
+]
+
+# Forma extendida: un diccionario con una descripción (`desc`) y el comando (`run`).
+# Esto mejora la salida de `axes info` y `axes run` (sin argumentos).
+[scripts.seed_db]
+desc = "Rellena la base de datos con datos de prueba."
+run = [
+  "# Aplicando semillas a la base de datos...",
+  # `run` puede contener líneas multiplataforma. `axes` elegirá la correcta.
+  # Si la específica del SO no existe, recurre a `default`.
+  { windows = "psql.exe -U user -d webapp_db -f ./seed.sql", default = "psql -U user -d webapp_db -f ./seed.sql" }
+]
+
+# Script con un parámetro nombrado (`tag`) que tiene un valor por defecto.
+[scripts.build]
+desc = "Construye la imagen Docker local."
+run = "docker build . -t <vars::image_name>:<params::tag(default='latest')>"
+
+# Script que delega el análisis de argumentos al shell usando el prefijo '$'.
+# Permite pasar flags y argumentos directamente al comando subyacente.
+# Ejemplo de uso: `axes format --check .` se convierte en `poetry run ruff format .`
+[scripts.format]
+desc = "Formatea el código usando Ruff."
+run = "$ poetry run ruff format ."
+
+# Un script complejo que demuestra composición y modificadores de comando.
+[scripts.deploy]
+desc = "Construye y sube la imagen Docker de la API."
+run = [
+  "# Paso 1: Construir la imagen (ejecución silenciosa, el comando no se imprime).",
+  "@ <scripts::build>", # <-- Composición: llama a otro script de `axes`.
+
+  "# Paso 2: Etiquetar la imagen con el hash del commit (ignora errores si la etiqueta ya existe).",
+  "- docker tag <vars::image_name>:latest <vars::image_name>:<vars::git_hash>",
+
+  "# Paso 3: Subir ambas etiquetas en paralelo para máxima velocidad.",
+  "> docker push <vars::image_name>:latest", # <-- El prefijo `>` inicia un lote paralelo.
+  "> docker push <vars::image_name>:<vars::git_hash>"
+]
+
+
+# --- 5. Opciones de Sesión y Hooks ([options]) ---
 [options]
-# Se ejecuta al iniciar una sesión con `axes . start`
-at_start = "nvm use 18"
-# Se ejecuta al salir de la sesión
-at_exit = "echo 'Limpiando sesión...'"
 
-# Configuración para el comando `axes . open`
+# `at_start`: Se ejecuta una vez al iniciar una sesión con `axes start`.
+# Ideal para activar entornos virtuales, iniciar servicios, etc.
+at_start = "poetry install --no-root"
+
+# `at_exit`: Se ejecuta al salir de la sesión (con `exit`).
+# Ideal para detener servicios, limpiar archivos temporales, etc.
+at_exit = "# Saliendo de la sesión de la API..."
+
+# Configuración para el comando `axes open`.
 [options.open_with]
+# Define "atajos" para abrir el proyecto en diferentes aplicaciones.
+# `<path>` es un token especial que se resuelve a la ruta física del proyecto.
 editor = "code \"<path>\""
+terminal = { windows = "wt -d \"<path>\"", default = "gnome-terminal --working-directory=\"<path>\""}
+
+# `default` especifica qué atajo usar si `axes open` se ejecuta sin argumentos.
 default = "editor"
 ```
 
@@ -64,19 +134,19 @@ default = "editor"
 
 Estas claves son puramente informativas y ayudan a documentar tu proyecto.
 
-* `version`: La versión de tu proyecto (ej. `"1.0.0"`). Es accesible en los scripts a través del token `<version>`.
+* `version`: La versión de tu proyecto (ej. `"1.0.0"`). Es accesible en *scripts* a través del token `<version>`.
 * `description`: Una breve descripción de lo que hace el proyecto. Se muestra en comandos como `info`.
 
 ```toml
 version = "2.1.0-beta"
-description = "El servicio de autenticación principal."
+description = "Servicio principal de autenticación."
 ```
 
 ---
 
 ## 2. Variables de Interpolación `[vars]`
 
-La sección `[vars]` es tu mejor herramienta para seguir el principio **DRY (Don't Repeat Yourself)**. Define valores aquí una vez y reutilízalos en múltiples scripts.
+La sección `[vars]` es tu mejor herramienta para seguir el principio **DRY (Don't Repeat Yourself)**. Define valores aquí una vez y reutilízalos en múltiples *scripts*.
 
 **Definición:**
 
@@ -95,7 +165,7 @@ Para usar una variable, utiliza la sintaxis `<vars::nombre_variable>`. `axes` re
 build = "c++ <vars::compiler_flags> -o <vars::output_dir>/app main.cpp"
 ```
 
-Las variables también pueden componerse entre sí y usar otros tokens de `axes`:
+Las variables también pueden componerse entre sí y usar otros *tokens* de `axes`:
 
 ```toml
 [vars]
@@ -107,61 +177,52 @@ final_zip = "<vars::artifact_dir>/<name>.zip"
 
 ## 3. Scripts y Flujos de Trabajo `[scripts]`
 
-Esta es la sección principal de `axes`. Un "script" es un punto de entrada con nombre para una tarea que quieres realizar. Cada clave en la tabla `[scripts]` define un comando que puedes ejecutar con `axes <ctx> <nombre_script>`.
-
-`axes` ofrece una sintaxis increíblemente flexible, permitiéndote definir desde un simple alias hasta un flujo de trabajo multiplataforma complejo.
+Esta es la sección principal de `axes`. Un "*script*" es una entrada con nombre para una tarea que deseas realizar. Cada clave en la tabla `[scripts]` define un comando que puedes ejecutar con `axes <nombre_del_script>`.
 
 ### 3.1. Sintaxis de Comandos
 
-Puedes definir un comando de varias formas, desde la más simple a la más completa.
+Puedes definir un comando de varias maneras, desde la más simple hasta la más completa.
 
 #### **A. Comando Simple (String)**
 
-La forma más básica. `axes` lo tratará como el comando por defecto para tu sistema operativo actual.
+La forma más básica. `axes` la tratará como el comando por defecto para tu sistema operativo actual.
 
 ```toml
 [scripts]
-# Comprueba el código en busca de errores sin compilar.
 check = "cargo check"
-
-# Inicia un servidor de desarrollo simple.
 serve = "python -m http.server 8000"
 ```
 
 #### **B. Secuencia de Comandos (Array de Strings)**
 
-Para flujos de trabajo que requieren múltiples pasos, define el script como una lista de cadenas. `axes` ejecutará cada comando en orden y se detendrá si alguno de ellos falla (a menos que uses modificadores).
+Para flujos de trabajo que requieren múltiples pasos, define el *script* como una lista de cadenas. `axes` ejecutará cada comando en orden y se detendrá si alguno falla (a menos que uses un modificador de ejecución).
 
 ```toml
 [scripts]
-# Un flujo completo de construcción y despliegue para una aplicación web estática.
 deploy = [
-    "echo 'Limpiando compilaciones anteriores...'",
-    "rm -rf ./dist",
     "echo 'Construyendo la aplicación...'",
     "npm run build",
     "echo 'Desplegando en el servidor...'",
     "scp -r ./dist/* user@server:/var/www/my-app",
-    "echo '🚀 Despliegue completado!'"
 ]
 ```
 
 #### **C. Estructura Extendida (Tabla)**
 
-Para añadir una descripción o definir un comportamiento multiplataforma, usa una tabla TOML.
+Para añadir una descripción o definir comportamiento multiplataforma, usa una tabla TOML.
 
-* **Con descripción:**
+* **Con Descripción:**
 
     ```toml
     [scripts]
     lint = { desc = "Ejecuta el linter para encontrar problemas de estilo.", run = "eslint ." }
-    test = { desc = "Ejecuta la suite de tests completa.", run = ["npm run test:unit", "npm run test:e2e"] }
+    test = { desc = "Ejecuta la suite de pruebas completa.", run = ["npm run test:unit", "npm run test:e2e"] }
     ```
 
-    La `desc` se mostrará en comandos como `axes . info`. La clave `run` puede ser un string o un array, como en los casos anteriores.
+    La clave `desc` se mostrará en comandos como `axes <ctx> info`.
 
 * **Multiplataforma:**
-    Define un único script que se comporta de forma diferente según el sistema operativo. `axes` seleccionará automáticamente el comando correcto.
+    Define un único *script* que se comporte de manera diferente según el sistema operativo. `axes` seleccionará automáticamente el comando correcto.
 
     ```toml
     [scripts.browse]
@@ -169,206 +230,187 @@ Para añadir una descripción o definir un comportamiento multiplataforma, usa u
     windows = "start http://localhost:8080"
     macos = "open http://localhost:8080"
     linux = "xdg-open http://localhost:8080"
-    # `default` se usa si el SO actual no coincide con ninguno de los anteriores.
     default = "echo 'Visita http://localhost:8080 en tu navegador.'"
     ```
 
-### 3.2. Modificadores de Ejecución (`-` y `>`)
+### **3.2. Modificadores de Ejecución (Prefijos)**
 
-Puedes controlar cómo se ejecuta cada línea en una secuencia usando prefijos especiales.
+Puedes controlar cómo se ejecuta cada línea en una secuencia utilizando prefijos especiales. Se pueden combinar (ej. `>- @ my_command`).
 
-> **Regla Clave:** Los modificadores solo tienen efecto en la línea donde están escritos. **No se "heredan"** cuando un script es compuesto por otro. El control de la ejecución siempre pertenece al script "llamador".
+> **Regla Clave:** Los modificadores solo afectan a la línea donde están escritos. **No se "heredan"** cuando un *script* es compuesto por otro. El control de ejecución siempre pertenece al *script* "llamador".
 
-#### **Ignorar Errores con `-`**
+| Prefijo | Nombre                  | Descripción                                                                                                   |
+| :------ | :---------------------- | :------------------------------------------------------------------------------------------------------------ |
+| `-`     | **Ignorar Errores**     | `axes` continuará con el siguiente comando en una secuencia aunque este falle (salga con código distinto de cero). |
+| `>`     | **Ejecución Paralela**  | `axes` lanza este comando y continúa inmediatamente con el siguiente, sin esperar a que termine.                 |
+| `@`     | **Modo Silencioso**     | `axes` no imprimirá el comando (`→ my_command`) antes de ejecutarlo. Útil para una salida limpia.              |
+| `#`     | **Modo Eco**            | Toda la línea se trata como una cadena a imprimir en la consola, no como un comando a ejecutar.                 |
+| `\|`    | **Terminador**          | Indica explícitamente al *parser* de prefijos que se detenga. Útil para comandos que comienzan con un carácter especial. |
 
-Normalmente, si un comando en una secuencia falla, toda la secuencia se detiene. A veces, quieres que un comando se ejecute pero no te importa si falla. Prefija ese comando con `-` para que `axes` ignore su código de salida y continúe con el siguiente paso.
+#### **Ejemplos de Modificadores**
+
+**Ignorar Errores (`-`):**
 
 ```toml
 [scripts]
-# Intenta limpiar la caché, pero no falles si el directorio no existe.
+# Intenta limpiar la caché, pero no falla si el directorio no existe.
 build = [
     "-rm -rf .cache",
     "npm run build"
 ]
 ```
 
-Aquí, si `rm` falla, `axes` continuará y ejecutará `npm run build`.
-
-#### **Ejecución Paralela con `>`**
-
-Si prefijas un comando con `>` en una secuencia, `axes` lo lanza y continúa inmediatamente con el siguiente, sin esperar a que termine. Esto es ideal para iniciar procesos de larga duración como servidores de desarrollo o watchers.
+**Ejecución Paralela (`>`):**
 
 ```toml
 [scripts]
-# Inicia los servidores de backend y frontend simultáneamente.
+# Inicia el backend y el frontend simultáneamente.
 dev = [
     "> axes api dev",
     "> axes frontend dev"
 ]
 ```
 
-Al ejecutar `axes . dev`, `axes` lanzará el script `dev` de `api` y, un instante después, el script `dev` de `frontend`. `axes` esperará a que todos los procesos lanzados en paralelo terminen antes de dar por finalizada la tarea principal.
+**Modo Silencioso y Eco (`@`, `#`):**
+
+```toml
+[scripts]
+setup = [
+    "# --- Configurando entorno ---", # Esta línea se imprimirá.
+    "@source ./.env",                  # Este comando se ejecutará, pero no se mostrará.
+    "# Entorno listo."
+]
+```
+
+**Terminador (`|`):**
+
+```toml
+[scripts]
+# El `-v` es un flag para `my_tool`, no un modificador para `axes`.
+advanced = ">| -v --some-flag"
+```
 
 ### 3.3. Composición de Scripts: El Corazón de la Reutilización
 
-Una de las características más potentes de `axes` es la capacidad de construir scripts complejos a partir de piezas más pequeñas y reutilizables.
+Una de las características más potentes de `axes` es su capacidad para construir *scripts* complejos a partir de piezas más pequeñas reutilizables mediante la expansión de *tokens* **antes** de la ejecución.
 
 * **Sintaxis:** `<scripts::nombre_otro_script>`
 
-Cuando `axes` expande tus scripts, reemplazará este token con el **contenido de texto puro** del script referenciado.
+Cuando `axes` prepara tus *scripts*, **compone estructuralmente** los comandos. Si llamas a un *script* con múltiples líneas, sus comandos se insertan directamente en la lista de comandos del padre.
 
 **Ejemplo de un Flujo de Calidad de Código:**
 
 ```toml
-# en `mi-app/.axes/axes.toml` (el padre)
+# en `my-app/.axes/axes.toml` (el padre)
 [scripts]
 # Scripts base reutilizables
 lint = { desc = "Ejecuta el linter.", run = "ruff check ." }
-test = { desc = "Ejecuta los tests.", run = "pytest" }
+test = { desc = "Ejecuta la suite de pruebas.", run = ["pytest tests/unit", "pytest tests/integration"] }
 
 # Script compuesto que une los anteriores.
-# El control de ejecución (secuencial) pertenece a `quality`.
+# El control de ejecución (secuencial, paralelo) pertenece a `quality`.
 quality = [
-    "echo '🚀 Ejecutando todas las comprobaciones de calidad...'",
+    "# Ejecutando todas las comprobaciones de calidad...",
     "<scripts::lint>",
-    "<scripts::test>",
-    "echo '✅ Todo en orden!'"
+    "> <scripts::test>", # `test` en sí es secuencial, pero `quality` lo ejecuta en paralelo.
 ]
 ```
 
-Ahora, un simple `axes mi-app quality` ejecuta `ruff check .` y luego `pytest`. Si mañana decides que el `lint` debe ejecutarse en paralelo, modificarías `quality`:
+Ejecutar `axes quality` ejecutará `ruff check .`, y una vez que termine, lanzará ambos comandos `pytest` en paralelo.
 
-```toml
-# Modificando `quality` para que el `lint` no bloquee (ejemplo hipotético)
-quality = [
-    "> <scripts::lint>",
-    "<scripts::test>"
-]
-```
+## 4. El Motor de Expansión: Potenciando Tus Scripts
 
-El `>` se aplica al *resultado* de la expansión de `<scripts::lint>`. La definición original de `lint` no cambia y puede seguir siendo usada de forma secuencial en otros scripts.
+La característica que une todo es su motor de expansión de *tokens*. Cualquier valor de cadena en tu `axes.toml` puede contener *tokens* especiales en el formato `<...>` que `axes` procesará.
 
-## 4. El Motor de Expansión: Dando Superpoderes a tus Scripts
+La expansión ocurre de forma perezosa (lazy) y sus resultados se guardan como un Árbol de Sintaxis Abstracta (AST) puro en una caché binaria (`.axes/config.cache.bin`), haciendo que las ejecuciones posteriores sean extremadamente rápidas.
 
-La característica que une todo en `axes` es su motor de expansión de tokens. Cualquier valor de cadena en tu `axes.toml` (en `scripts`, `vars`, `options`, etc.) puede contener tokens especiales con el formato `<...>` que `axes` procesará antes de ejecutar el comando.
+### 4.1. Tokens de Valor Estático
 
-Este sistema te permite crear flujos de trabajo dinámicos, componibles y conscientes del contexto. La expansión ocurre de forma perezosa y sus resultados se guardan en un caché binario (`.axes/config.cache.bin`), haciendo que las ejecuciones subsecuentes sean extremadamente rápidas.
-
-### 4.1. Tokens Estáticos (Metadatos y Variables)
-
-Estos tokens se resuelven a valores de texto simples y se inyectan antes de cualquier otra cosa.
+Estos *tokens* se resuelven a sus valores finales durante la fase de expansión (compilación JIT).
 
 #### **Tokens de Metadatos del Proyecto**
 
-Estos tokens te dan acceso a la información intrínseca del proyecto.
-
-| Token             | Valor de Expansión                                                  | Ejemplo de Uso                                              |
-| :---------------- | :------------------------------------------------------------------ | :---------------------------------------------------------- |
-| `<name>`    | El nombre cualificado completo del proyecto.                        | `echo 'Construyendo <name>...'` -> `Construyendo mi-app/api...`             |
-| `<path>`    | La ruta física (absoluta y limpia) al directorio raíz del proyecto. | `docker build -t app . -f "<path>/Dockerfile"`                             |
-| `<uuid>`    | El identificador único universal del proyecto.                      | `aws s3 cp ... s3://bucket/<uuid>/`                                        |
-| `<version>` | La versión definida en el `axes.toml` del proyecto.                 | `echo 'Desplegando versión <version>'` -> `Desplegando versión 1.2.0-beta`         |
+| Token             | Valor de Expansión                                                  |
+| :---------------- | :------------------------------------------------------------------ |
+| `<name>`    | El nombre cualificado completo del proyecto (ej. `my-app/api`).        |
+| `<path>`    | La ruta física absoluta al directorio raíz del proyecto.             |
+| `<uuid>`    | El identificador único universal del proyecto.                        |
+| `<version>` | La versión definida en el `axes.toml` del proyecto.                   |
 
 #### **Tokens de Variables**
 
-Estos tokens te permiten inyectar los valores que has definido en las secciones `[vars]` y `[env]`.
-
-* **`<vars::nombre_variable>`:** Se expande al valor de la variable definida en la sección `[vars]`. `axes` buscará la variable en el `axes.toml` del proyecto actual y luego subirá por el árbol de herencia hasta que la encuentre.
-* **`<env::NOMBRE_VARIABLE>`:** Se expande al valor de la variable definida en `[env]`. Funciona igual que las `vars` a nivel de herencia.
+* **`<vars::nombre_variable>`:** Se expande al valor de la variable definida en la sección `[vars]`.
 
 **Ejemplo Combinado:**
 
 ```toml
-# en el `axes.toml` del padre `mi-app`
+# en el `axes.toml` padre de `my-app`
 [vars]
-docker_registry = "registry.example.com/mi-org"
+docker_registry = "registry.example.com/my-org"
 
-# en el `axes.toml` del hijo `mi-app/api`
+# en el `axes.toml` hijo de `my-app/api`
 [scripts]
-# Construye y etiqueta una imagen Docker con el nombre del proyecto y el registro del padre.
 docker_build = "docker build -t <vars::docker_registry>/<name>:<version> ."
 ```
 
-### 4.2. Tokens de Composición (Scripts y Variables Anidadas)
+### 4.2. Token de Ejecución Dinámica: `<run::(...)>`
 
-Esta es una de las características más potentes. Puedes construir flujos de trabajo complejos a partir de piezas más pequeñas.
+A veces, necesitas el **resultado** de un comando para usarlo en otro.
 
-* **`<scripts::nombre_otro_script>`:** `axes` reemplazará este token con el **contenido de texto puro** del script `nombre_otro_script` (ya resuelto para tu plataforma). Los prefijos de ejecución (`-`, `>`) del script anidado **no se heredan**; el control de la ejecución siempre pertenece al script que hace la llamada.
+* **Sintaxis:** `<run('comando_a_ejecutar')>`
+* **Comportamiento:** `axes` ejecuta `command_to_execute` **en tiempo de ejecución**, captura su salida estándar (stdout), la limpia (eliminando espacios en blanco finales) e inyecta el resultado en el comando principal.
 
-**Ejemplo de un Flujo de Calidad de Código:**
+> **Importante:** La salida de los *tokens* `run` **nunca** se almacena en caché para garantizar que los datos sean siempre frescos.
 
-```toml
-# en `mi-app/.axes/axes.toml` (el padre)
-[vars]
-python_files = "./src"
-
-[scripts]
-lint = "pylint <vars::python_files>"
-test = "pytest <vars::python_files>"
-
-# Script compuesto que une los anteriores.
-quality = [
-    "echo '🚀 Ejecutando todas las comprobaciones de calidad...'",
-    "<scripts::lint>",
-    "<scripts::test>",
-    "echo '✅ Todo en orden!'"
-]
-```
-
-Un simple `axes mi-app quality` ejecuta un flujo de trabajo completo. Si decides que el linter es opcional, solo modificas `quality`: `"-<scripts::lint>"`.
-
-### 4.3. Ejecución y Sustitución: `<run::...>`
-
-A veces, necesitas el **resultado** de un comando para usarlo en otro. El token `<run::...>` te permite hacer exactamente eso.
-
-* **`<run::comando_a_ejecutar>`:** `axes` ejecutará `comando_a_ejecutar`, capturará su salida estándar (stdout), la limpiará (eliminando espacios y saltos de línea al final), y la inyectará en el comando principal.
-
-**Ejemplo: Etiquetado de Docker con el Hash de Git:**
+**Ejemplo: Etiquetado de Docker con Hash de Git:**
 
 ```toml
 [scripts]
-# Un script privado para obtener la versión.
-_get_git_version = "git rev-parse --short HEAD"
-
-# Construye la imagen Docker, usando la salida del script anterior como tag.
-# Nota cómo componemos un <scripts::...> dentro de un <run::...>.
-build_and_tag = "docker build -t mi-app:<run::<scripts::_get_git_version>> ."
+tag_release = "docker tag my-app:latest my-app:<run('git rev-parse --short HEAD')>"
 ```
 
-Al ejecutar `axes . build_and_tag`:
+Al ejecutar `axes tag_release`:
 
-1. `axes` ve el token `<run::...>` y primero expande su contenido.
-2. `<scripts::_get_git_version>` se expande a `"git rev-parse --short HEAD"`.
-3. `axes` ejecuta `git rev-parse --short HEAD`.
+1. `axes` se prepara para ejecutar el *script* `tag_release`.
+2. Encuentra el *token* `<run::(...)>`.
+3. Ejecuta `git rev-parse --short HEAD`.
 4. La salida de git (ej. `a1b2c3d`) es capturada.
-5. El comando final se construye como `docker build -t mi-app:a1b2c3d .` y se ejecuta.
+5. El comando final se ensambla como `docker tag my-app:latest my-app:a1b2c3d` y luego se ejecuta.
+
+### 4.3. Tokens de Parámetros en Tiempo de Ejecución: `<params::...>`
+
+Esta familia de *tokens* especiales no se expande por adelantado. Son marcadores de posición que se resuelven en el último momento por el `task_executor`, utilizando los argumentos que proporcionas en la línea de comandos.
+
+(Esto se cubre en detalle en la siguiente sección).
 
 ## 5. Scripts como Funciones: El Sistema de Parámetros (`<params::...`)
 
-`axes` no solo ejecuta scripts; te permite definir verdaderas "funciones" de línea de comandos que aceptan argumentos de forma estructurada. Esto elimina la necesidad de escribir complejos scripts de `bash` para parsear flags y parámetros.
+`axes` no solo ejecuta *scripts*; te permite definir verdaderas "funciones" de línea de comandos que aceptan argumentos de manera estructurada.
 
-Toda la lógica de parámetros se controla a través del namespace `<params::...>` y sigue un **paradigma declarativo**: defines los parámetros que tu script espera, y `axes` valida la entrada del usuario **antes** de ejecutar nada.
+Esto elimina la necesidad de escribir *scripts* `bash` complejos para analizar flags y parámetros.
 
-> **Regla de Oro:** Si pasas argumentos a un script desde la línea de comandos (`axes . mi-script arg1 --flag`), el `axes.toml` de ese script **debe** usar tokens `<params::...>` para consumirlos. Si al final sobran argumentos que no fueron consumidos por ningún token (y no hay un `<params>` genérico), `axes` devolverá un error.
+Todos la lógica de parámetros se controla a través del *namespace* `<params::...>` y sigue un **paradigma declarativo**: defines los parámetros que espera tu *script*, y `axes` valida la entrada del usuario **antes** de ejecutar nada.
+
+> **Regla de Oro:** Si pasas argumentos a un *script* desde la línea de comandos (`axes mi-script arg1 --flag`), el `axes.toml` de ese *script* **debe** usar *tokens* `<params::...>` para consumirlos. Si quedan argumentos sin consumir por ningún token (y no hay un token genérico `<params>`), `axes` devolverá un error para prevenir un comportamiento inesperado.
 
 ### 5.1. Parámetros Posicionales
 
-Son los argumentos que se pasan sin un flag. Se acceden por su índice (empezando en 0).
+Estos son argumentos pasados sin un *flag*. Se accede a ellos por su índice (comenzando en `0`).
 
 * **Sintaxis Básica:** `<params::0>`, `<params::1>`, etc.
-* **Comportamiento:** Se reemplaza por el argumento posicional en ese índice. Si el argumento no existe y no es requerido ni tiene un `default`, se reemplaza por una cadena vacía.
+* **Comportamiento:** Se reemplazan por el argumento posicional en ese índice. Si el argumento no existe y no es `required` ni tiene un `default`, se reemplaza por una cadena vacía.
 
 #### **Modificadores para Posicionales `(...)`**
 
-* `required`: La ejecución falla si el argumento no se proporciona.
-* `default='valor'`: Proporciona un valor por defecto si el argumento no se pasa en la CLI.
-* `map='--nuevo-flag'`: Transforma el argumento posicional en un flag con valor. Si se proporciona `mi-valor`, el token se expande a `"--nuevo-flag mi-valor"`.
+* `required`: La ejecución falla si no se proporciona el argumento.
+* `default='value'`: Proporciona un valor por defecto si el argumento no se pasa en la CLI.
+* `map='--new-flag'`: Transforma el argumento posicional en un flag con valor. Si se escribe `my-value`, el *token* se expande a `"--new-flag my-value"`.
 
-**Ejemplo: Un script de `git commit` simplificado.**
+**Ejemplo: Un *script* simplificado de `git commit`.**
 
 ```toml
 [scripts]
-# Acepta un mensaje de commit como primer argumento posicional requerido.
+# Acepta el mensaje de commit como el primer argumento posicional requerido.
 commit = "git commit -m \"<params::0(required)>\""
 ```
 
@@ -376,90 +418,121 @@ commit = "git commit -m \"<params::0(required)>\""
 
 ```sh
 # El '0' se refiere a "Fix: ..."
-axes . commit "Fix: Corrige el bug de autenticación"
+axes commit "Fix: Fix authentication bug"
 
 # Comando ejecutado:
-# git commit -m "Fix: Corrige el bug de autenticación"
+# git commit -m "Fix: Fix authentication bug"
 
 # Falla si no se proporciona:
-axes . commit
-# -> Error: Positional argument at index 0 is required but was not provided.
+axes commit
+# -> Error: El argumento posicional en el índice 0 es requerido pero no fue proporcionado.
 ```
 
 ### 5.2. Parámetros Nombrados (Flags)
 
-Puedes hacer que tus scripts reaccionen a flags (`--nombre`) pasados desde la CLI.
+También puedes hacer que tus *scripts* reaccionen a *flags* (`--nombre`) pasados desde la CLI.
 
-* **Sintaxis Básica:** `<params::nombre-flag>`
-* **Comportamiento por Defecto (Pass-through):** El token busca el flag en la CLI y lo reinyecta tal cual, junto con su valor si lo tiene. Si no se encuentra, se expande a una cadena vacía.
+* **Sintaxis Básica:** `<params::nombre-del-flag>`
+* **Comportamiento por Defecto (Pase-a-través):** El *token* busca el *flag* en la CLI y lo reinjecta tal cual, junto con su valor si lo tiene. Si no se encuentra, se expande a una cadena vacía.
 
 #### **Modificadores para Flags `(...)`**
 
-* `required`: La ejecución falla si el flag (o su alias) no está presente.
-* `default='valor'`: Si el flag **no se proporciona en absoluto**, se usará este `default`. También se aplica si el flag se proporciona **sin un valor** (ej. `comando --mi-flag`).
-* `alias='-a'`: Permite que el flag sea reconocido por un alias corto. `axes` lanzará un error si el usuario proporciona tanto el nombre completo como el alias.
-* `map='--nuevo-nombre'`: Reemplaza el nombre del flag en la salida. Muy útil para abstraer las herramientas subyacentes.
-* `map=''`: Un caso especial. Indica que solo quieres inyectar el **valor** del flag, no el nombre del flag en sí. Ideal para inyectar valores en posiciones donde no se espera un flag.
+* `required`: Falla si el *flag* (o su alias) no está presente.
+* `default='value'`: Si el *flag* **no se proporciona en absoluto**, se usará este `default`. También se aplica si el *flag* se proporciona **sin valor** (ej. `command --my-flag`).
+* `alias='-a'`: Permite que el *flag* sea reconocido por un alias corto. `axes` lanzará un error si el usuario proporciona tanto el nombre completo como el alias.
+* `map='--new-name'`: Reemplaza el nombre del *flag* en la salida. Muy útil para abstraer herramientas subyacentes.
+* `map=' '`: Un caso especial. Indica que solo quieres inyectar el **valor** del *flag*, no el nombre del *flag* en sí. Ideal para inyectar valores en posiciones donde no se espera un *flag*.
 
-**Ejemplo: Un script de `test` que puede pasar un flag `--marker` a `pytest`.**
+**Ejemplo: Script `build` con modo `release` (Pase-a-través Simple):**
 
 ```toml
+# axes.toml
 [scripts]
-# Usa el pass-through por defecto con un alias.
+build = "cargo build <params::release>"
+```
+
+```sh
+axes . build            # -> cargo build
+axes . build --release  # -> cargo build --release
+axes . build --another-param  # -> Error: Se proporcionaron argumentos inesperados. El script no define un token `<params>` genérico para aceptarlos.
+#Argumentos no manejados proporcionados: --another-param
+```
+
+**Script `test` con alias:**
+
+```toml
+# axes.toml
+[scripts]
 test = "pytest <params::marker(alias='-m')>"
 ```
 
-**Ejecución:**
-
 ```sh
-# Ejecuta todos los tests
-axes . test
-# Comando ejecutado: `pytest`
-
-# Ejecuta solo los tests marcados como 'slow'
-axes . test --marker slow
-# Comando ejecutado: `pytest --marker slow`
-
-# Usa el alias
-axes . test -m smoke
-# Comando ejecutado: `pytest -m smoke`
+axes . test --marker slow   # -> pytest --marker slow
+axes . test -m smoke        # -> pytest --marker smoke
+axes . test -m smoke --marker slow # -> Error: Conflicto: Se proporcionaron tanto el flag '--marker' como su alias '-m'.
 ```
 
-**Ejemplo: Un script de `deploy` con `map` y `default`.**
+**Otro caso de uso posible, pero no recomendado porque generará conflictos:**
+
+```toml
+# axes.toml
+[scripts]
+copy-file = "rsync <params::files-from(alias='from', default='list.txt')> <params::copy-in(alias='in', required)>"
+```
+
+```sh
+axes . copy-file from file.txt in ./backup            # -> rsync --files-from file.txt --copy-in ./backup
+axes . copy-file in ./backup                          # -> rsync --files-from list.txt --copy-in ./backup
+axes . copy-file in ./backup --copy-in /another/place # -> Error: Conflicto: Se proporcionaron tanto el flag '--copy-in' como su alias 'in'.
+```
+
+**Script `deploy` con `map` y `required`:**
 
 ```toml
 # axes.toml
 [scripts]
 # El script interno espera --environment, pero exponemos --env al usuario.
-# Por defecto, se despliega en 'staging'.
-deploy = "terraform apply -var 'env=<params::env(map='', default='staging')>'"
+deploy = "terraform apply <params::env(map='--environment', required)>"
 ```
-
-**Ejecución:**
 
 ```sh
-# Usa el default
-axes . deploy
-# Comando ejecutado: terraform apply -var 'env=staging'
-
-# Especifica un entorno
-axes . deploy --env production
-# Comando ejecutado: terraform apply -var 'env=production'
+axes . deploy --env staging      # -> terraform apply --environment staging
+axes . deploy                    # -> Error: El flag '--env' es requerido pero no fue proporcionado.
 ```
 
-### 5.3. El Recolector Genérico: `<params>`
+**Script `docker` con `map=' '` para extracción de valor:**
+Este es un patrón avanzado para inyectar valores en lugares donde un flag no es válido.
 
-Este es el token "recolector". Es útil cuando quieres pasar un número variable de argumentos o flags a un comando subyacente sin tener que definirlos todos explícitamente.
+```toml
+# axes.toml
+[scripts]
+# La etiqueta de la imagen se pasa como un flag pero se inyecta como un valor posicional.
+docker_tag = "docker tag my-image:latest my-org/my-image:<params::tag(map='', default='latest')>"
+```
+
+```sh
+# Ejecución 1: Usa el valor por defecto
+axes docker_tag
+# Comando ejecutado: `docker tag my-image:latest my-org/my-image:latest`
+
+# Ejecución 2: Especifica la etiqueta
+axes docker_tag --tag v1.2.0
+# Comando ejecutado: `docker tag my-image:latest my-org/my-image:v1.2.0`
+```
+
+### 5.3. El Colector Genérico: `<params>`
+
+Este es el *token* "colector". Es útil cuando quieres pasar un número variable de argumentos o *flags* a un comando subyacente sin tener que definirlos todos explícitamente.
 
 * **Sintaxis:** `<params>`
-* **Comportamiento:** Se reemplaza por **todos los argumentos** (posicionales y nombrados) que **no fueron consumidos** por un token explícito (`::0`, `::flag`, etc.), manteniendo su orden original.
+* **Comportamiento:** Se reemplaza por **todos los argumentos** (posicionales y nombrados) que **no fueron consumidos** por un *token* explícito (`::0`, `::flag`, etc.), manteniendo su orden original.
 
-**Ejemplo: Un `wrapper` genérico para `npm install` que también define `--save-dev`.**
+**Ejemplo: Un `wrapper` genérico para `npm install`.**
 
 ```toml
 [scripts]
-# `add` pasa todos los argumentos restantes a `npm install`.
-# `add_dev` primero define `--save-dev`, y luego pasa el resto.
+# `add` pasa todos los argumentos restantes a `npm install`,
+# pero también maneja explícitamente un flag `--save-dev` con un alias `-D`.
 add = "npm install <params::save-dev(alias='-D')> <params>"
 ```
 
@@ -467,137 +540,70 @@ add = "npm install <params::save-dev(alias='-D')> <params>"
 
 ```sh
 # Instala una dependencia normal
-axes . add react
+axes add react
 # Comando ejecutado: `npm install react`
 
 # Instala una dependencia de desarrollo
-axes . add -D typescript
+axes add -D typescript
 # `-D` es consumido por <...::save-dev> y se expande a `--save-dev`.
-# `typescript` es consumido por <params>.
+# `typescript` no es consumido y es recogido por <params>.
 # Comando ejecutado: `npm install --save-dev typescript`
 
 # Instala múltiples dependencias con flags adicionales
-axes . add react react-dom --force
+axes add react react-dom --force
 # Comando ejecutado: `npm install react react-dom --force`
 ```
 
-Combinando estos patrones, puedes construir interfaces de línea de comandos increíblemente ricas y robustas para tus proyectos, todo dentro de la simplicidad de `axes.toml`.
+Al combinar estos patrones, puedes construir interfaces de línea de comandos increíblemente ricas y robustas para tus *scripts*, todo dentro de la sencillez de `axes.toml`.
+
+> Para una guía completa con ejemplos detallados de cada tipo de parámetro y modificador, por favor consulta la **[Guía del Sistema de Argumentos (`ARG_PARSER.md`)](./ARG_PARSER.md)**.
 
 ## 6. Opciones de Entorno y Hooks
 
-Además de los scripts, `axes` te permite definir configuraciones que afectan a cómo se ejecutan todos los comandos y cómo se comportan las sesiones interactivas.
-
 ### 6.1. Variables de Entorno `[env]`
 
-Cualquier par clave-valor que definas en la sección `[env]` se inyectará como una variable de entorno en el subproceso donde se ejecutan tus scripts. Esto es ideal para configurar credenciales, URLs de bases de datos, o flags de comportamiento para tus herramientas. Las variables de `[env]` se heredan y se fusionan de padres a hijos.
+Cualquier par clave-valor en `[env]` se inyecta como una variable de entorno en el subproceso del *script*. Se heredan y pueden ser sobrescritos.
 
 ```toml
-# en el `axes.toml` del proyecto raíz `mi-app`
 [env]
 DATABASE_URL = "postgres://user:pass@localhost/db"
 APP_ENV = "development"
-
-# en el `axes.toml` del hijo `mi-app/api-tests`
-[env]
-# Sobrescribe la variable del padre solo para este contexto de pruebas.
-APP_ENV = "testing"
 ```
 
-### 6.2. Opciones y Hooks de Sesión `[options]`
-
-La sección `[options]` te permite personalizar el comportamiento del comando `start` y `open`.
+### 6.2. Opciones de Sesión y Herramientas `[options]`
 
 #### **Hooks de Sesión: `at_start` y `at_exit`**
 
-Estos son scripts que se ejecutan automáticamente al entrar y salir de una sesión interactiva (`axes <ctx> start`).
+Son *scripts* completos que se ejecutan automáticamente al entrar y salir de una sesión interactiva (`axes <ctx> start`). Pueden aceptar parámetros pasados al comando `start`.
 
-* **`at_start`**: Un comando (o secuencia) que se ejecuta **antes** de que obtengas el control de la terminal en una sesión. Perfecto para activar entornos virtuales, establecer variables de sesión o iniciar servicios.
-* **`at_exit`**: Un comando (o secuencia) que se ejecuta **después** de que sales de la sesión. Ideal para tareas de limpieza.
-
-**Importante:** Desde la v0.1.8, `at_start` y `at_exit` son **scripts completos**. Pueden ser secuencias, tener descripciones y, lo más importante, **aceptar parámetros** pasados al comando `start`.
-
-#### **Ejemplo: Un Entorno de Python con Docker y Parámetros**
+**Ejemplo:**
 
 ```toml
 [options]
-at_start = { desc = "Activa el venv y levanta la DB.", run = [
+at_start = { desc = "Activa venv y levanta la DB.", run = [
     "source .venv/bin/activate",
     "docker-compose up -d <params::service(default='db')>"
 ]}
-at_exit = { desc = "Detiene y elimina los contenedores.", run = "docker-compose down" }
-```
-
-**Ejecución:**
-
-```sh
-# Inicia la sesión y levanta el servicio 'db' por defecto
-axes . start
-
-# Inicia la sesión y especifica qué servicio levantar
-axes . start --service web
-```
-
-#### **Personalización de la Shell: `shell`**
-
-Por defecto, `axes` intenta usar la shell predeterminada de tu sistema. Puedes forzar el uso de una shell específica para un proyecto.
-
-```toml
-[options]
-# Usa zsh para este proyecto.
-shell = "zsh"
+at_exit = "docker-compose down"
 ```
 
 #### **Configuración del Comando `open`: `[options.open_with]`**
 
-Esta sub-sección te permite definir los atajos para el comando `axes <ctx> open`. Al igual que los hooks de sesión, cada atajo es un **script completo** y puede aceptar parámetros.
+Define atajos para el comando `axes <ctx> open`. Cada entrada es un *script* completo y puede aceptar parámetros.
 
-**Ejemplo Completo:**
+**Ejemplo:**
 
 ```toml
 [options.open_with]
-# Atajo `edit` para abrir en VS Code.
-edit = { desc = "Abre el proyecto en VS Code.", run = "<vars::editor_cmd> \"<path>\"" }
-
-# Atajo `files` para el explorador de archivos.
-files = { desc = "Abre el directorio en el explorador de archivos.", run = "explorer \"<path>\"" } # `explorer` en Windows, `open` en macOS, `xdg-open` en Linux
-
-# Atajo `terminal` que acepta un parámetro para abrir una subcarpeta.
-terminal = "wt -d \"<path>/<params::0(default='.')>\"" # `wt` es Windows Terminal
-
-# Define `edit` como la acción por defecto al ejecutar `axes . open`.
+edit = { desc = "Abre el proyecto en VS Code.", run = "code \"<path>\"" }
+terminal = "wt -d \"<path>/<params::0(default='.')>\"" # Terminal de Windows en subcarpeta
 default = "edit"
-
-[vars]
-editor_cmd = "code"
 ```
-
-**Ejecución:**
-
-```sh
-# Abre el proyecto con el editor por defecto ('edit')
-axes . open
-
-# Abre el explorador de archivos
-axes . open files
-
-# Abre una nueva terminal en el subdirectorio 'src'
-axes . open terminal src
-```
-
-Con esta configuración en tu proyecto `global`, todos tus proyectos heredarán estos atajos de `open` muy útiles.
 
 ---
 
 ## Conclusión
 
-Ahora tienes el conocimiento completo para escribir archivos `axes.toml` potentes y bien estructurados. Has aprendido a:
+Ahora tienes una descripción completa del archivo `axes.toml`. Al combinar estas características, puedes construir flujos de trabajo potentes, portátiles y auto-documentados que potenciarán tu productividad de desarrollo.
 
-* Definir **variables** para reutilizar valores.
-* Crear **scripts** simples, secuenciales, y multiplataforma.
-* Usar el **motor de expansión `<...>`** para componer scripts y usar metadatos.
-* Crear **scripts parametrizables** que actúan como funciones de CLI.
-* Configurar el **entorno de ejecución** y los **hooks de sesión**.
-
-El siguiente paso es explorar la referencia de todos los comandos de la CLI para ver cómo interactúan con tus proyectos.
-
-➡️ **Siguiente Lectura Recomendada: [Referencia Completa de Comandos (`COMMANDS.md`)](./COMMANDS.md)**
+➡️ **Lectura Recomendada Siguiente: [Referencia Completa de Comandos (`COMMANDS.md`)](./COMMANDS.md)**
