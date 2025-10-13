@@ -53,6 +53,12 @@ blake3 = "1.8.2"
 toml = "0.9.5"
 serde = { version = "1.0.219", features = ["derive"] }
 
+[features]
+# By default, no extra languages are compiled, so it will fall back to English.
+default = []
+lang_en = []
+lang_es = []
+
 [profile.release]
 # This profile is optimized for maximum performance and minimum binary size for distribution.
 
