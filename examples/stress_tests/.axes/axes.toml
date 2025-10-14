@@ -10,13 +10,41 @@ _if_condition = """
 <params::high(map='', default='--warmup 10 --runs 100')>\
 """
 _defaults = """
+<params::axes-low(alias='-al', map='', default='axes ./low_test/script_90', literal)> \
+<params::axes-mid(alias='-am', map='', default='axes ./mid_test/script_900', literal)> \
+<params::axes-high(alias='-ah', map='', default='axes ./high_test/script_9000', literal)> \
+<params::axes-big(alias='-ab', map='', default='axes ./big_test/script_90000', literal)> \
+<params::axes-divided(alias='-ad', map='', default='axes ./big_divided_test/into/script_90000', literal)> \
+<params::just-low(alias='-jl', map='', default='just --justfile low_test/justfile script_90', literal)> \
+<params::just-mid(alias='-jm', map='', default='just --justfile mid_test/justfile script_900', literal)> \
+<params::just-high(alias='-jh', map='', default='just --justfile high_test/justfile script_9000', literal)> \
+<params::just-big(alias='-jb', map='', default='just --justfile big_test/justfile script_90000', literal)> \
+<params::make-low(alias='-ml', map='', default='make -f low_test/makefile.mk script_90', literal)> \
+<params::make-mid(alias='-mm', map='', default='make -f mid_test/makefile.mk script_900', literal)> \
+<params::make-high(alias='-mh', map='', default='make -f high_test/makefile.mk script_9000', literal)> \
+<params::make-big(alias='-mb', map='', default='make -f big_test/makefile.mk script_9000', literal)> \
 <params(literal)> \
-<params::axes-low(alias='-al', map='', default='axes ./low_test/script_0090', literal)> \
-<params::axes-divided(alias='-ad', map='', default='axes ./big_divided_test/into/script_49990', literal)> \
-<params::axes-big(alias='-ab', map='', default='axes ./big_test/script_49990', literal)> \
-<params::just-low(alias='-jl', map='', default='just --justfile low_test/justfile receta_0090', literal)>\
-<params::just-big(alias='-jb', map='', default='just --justfile big_test/justfile receta_49990', literal)> \
 """
+
+_time_defaults = """
+<params::axes-low(alias='-al', map='', default='axes ./low_test/script_90')> \
+<params::axes-mid(alias='-am', map='', default='axes ./mid_test/script_900')> \
+<params::axes-high(alias='-ah', map='', default='axes ./high_test/script_9000')> \
+<params::axes-big(alias='-ab', map='', default='axes ./big_test/script_90000')> \
+<params::axes-divided(alias='-ad', map='', default='axes ./big_divided_test/into/script_90000')> \
+<params::just-low(alias='-jl', map='', default='just --justfile low_test/justfile script_90')> \
+<params::just-mid(alias='-jm', map='', default='just --justfile mid_test/justfile script_900')> \
+<params::just-high(alias='-jh', map='', default='just --justfile high_test/justfile script_9000')> \
+<params::just-big(alias='-jb', map='', default='just --justfile big_test/justfile script_90000')> \
+<params::make-low(alias='-ml', map='', default='make -f low_test/makefile.mk script_90')> \
+<params::make-mid(alias='-mm', map='', default='make -f mid_test/makefile.mk script_900')> \
+<params::make-high(alias='-mh', map='', default='make -f high_test/makefile.mk script_9000')> \
+<params::make-big(alias='-mb', map='', default='make -f big_test/makefile.mk script_90000')> \
+<params(literal)> \
+"""
+
+[scripts]
+time = "/usr/bin/time -v <vars::_time_defaults>"
 
 [scripts.hyperfine]
 desc = "USE EXAMPLE: `axes hyperfine -ad -ab -jb --high -nc -exmk \"test_benchmark.md\"` Execute script 'hyperfine' with script test axes and just. Finally all has optional values."
