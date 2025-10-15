@@ -90,6 +90,7 @@ _options_hyperfine_intensity = """
 # The default value is a command that clears the `axes` cache, forcing
 # a "cold run" for the benchmark.
 [scripts._prepare_cache]
+desc = "Clears the project cache directory if the --no-cache flag is provided."
 windows = '''<params::no-cache(alias='-nc', map='--prepare ', default="cmd /c rmdir /s /q C:\\Users\\reyni\\AppData\\Local\\axes\\cache\\projects || exit /b 0", literal)>'''
 linux = "<params::no-cache(alias='-nc', map='--prepare ', default='rm -rf ~/.cache/axes/projects', literal)>"
 # ------------------------------------------------------------------------------
@@ -103,7 +104,7 @@ linux = "<params::no-cache(alias='-nc', map='--prepare ', default='rm -rf ~/.cac
 # ------------------------------------------------------------------------------
 [scripts.time]
 desc = "Run a single, detailed benchmark with `time -v`."
-linux = "/usr/bin/time -v <vars::_params_time>" 
+linux = "/usr/bin/time -v <vars::_params_time>"
 
 # ------------------------------------------------------------------------------
 # SCRIPT: hyperfine
@@ -111,8 +112,9 @@ linux = "/usr/bin/time -v <vars::_params_time>"
 # Purpose: Run statistical benchmarks with `hyperfine`. It is the main script
 # for obtaining comparative performance data.
 #
-# Usage: See the `BENCHMARK_TEST_USES.md` document for detailed examples.
+# Usage: `axes hyperfine -al -jl -ml --high` (runs the `axes-low`, `just-low`, `make-low` test, with configuration `--warmup 10 --runs 100`)
+#        `axes hyperfine -ab -jb "my custom command" -nc --mid` executes: hyperfine --shell=none "axes ./big_test/script_90000" "just --justfile big_test/justfile script_90000" "my custom command" --warmup 5 --runs 40 --prepare (and respective _prepare_cache in your current OS.)
 # ------------------------------------------------------------------------------
 [scripts.hyperfine]
-desc = "Run statistical benchmarks with `hyperfine`."
+desc = "Run statistical benchmarks with `hyperfine`. Usage example: `axes hyperfine -al -jl -ml --high`."
 run = 'hyperfine --shell=none <vars::_params_hyperfine> <vars::_options_hyperfine_intensity> <scripts::_prepare_cache> <params::output-mk(alias="-exmk", map="--export-markdown ")>'

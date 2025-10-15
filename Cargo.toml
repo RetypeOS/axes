@@ -46,6 +46,7 @@ tokio = { version = "1.47.1", features = ["rt-multi-thread", "process", "signal"
 
 # Hashing
 blake3 = "1.8.2"
+scopeguard = "1.2.0"
 
 # Pendient to order
 

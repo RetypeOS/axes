@@ -78,7 +78,11 @@ pub fn handle(_context: Option<String>, args: Vec<String>, index: &mut GlobalInd
     let mut project_config =
         ProjectConfig::new_for_init(&details.name, &details.version, &details.description);
     project_config.env.extend(details.env);
-    project_config.vars.extend(details.vars);
+    for (key, value) in details.vars {
+        project_config
+            .vars
+            .insert(key, crate::models::TomlVar::Simple(value));
+    }
 
     // 4. Perform filesystem and index operations.
     let (new_uuid, _) = index_manager::add_project_to_index(

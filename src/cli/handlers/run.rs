@@ -30,14 +30,9 @@ pub fn parse_script_path(full_path: &str) -> (Option<&str>, &str) {
     about = "Runs a script in the project's context. If no script is provided, lists available scripts."
 )]
 struct RunArgs {
-    /// The name of the script to run.
     script_name: Option<String>,
-
-    /// Display the execution plan without running any commands.
     #[arg(long, name = "dry-run")]
     dry_run: bool,
-
-    /// Parameters and flags to pass to the script.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     params: Vec<String>,
 }
@@ -51,13 +46,9 @@ pub fn handle(
     mut args: Vec<String>,
     index: &mut GlobalIndex,
 ) -> Result<()> {
-    // The dispatcher provides the script name as the first arg. We reconstruct a full
-    // argument vector to be parsed by our local `RunArgs` struct.
     let full_args = if args.is_empty() {
-        // Case: `axes run` (called explicitly with no script)
         vec![]
     } else {
-        // Case: `axes <script>` or `axes run <script>`
         let script_name = args.remove(0);
         let mut temp_args = vec![script_name];
         temp_args.extend(args);
@@ -69,8 +60,7 @@ pub fn handle(
 
     match run_args.script_name {
         Some(script_name) => {
-            // A script name was provided, so we either execute or dry-run it.
-            let task = config.get_script(&script_name, 0)?.ok_or_else(|| {
+            let task = config.get_script(&script_name)?.ok_or_else(|| {
                 anyhow!(
                     t!("run.error.not_found"),
                     script = script_name.cyan(),
@@ -78,16 +68,28 @@ pub fn handle(
                 )
             })?;
 
+            // The crucial new step: flatten the task before any further processing.
+            let flattened_task = config.flatten_task(&task)?;
+
             if run_args.dry_run {
-                dry_run_script(&script_name, &task, &config, &run_args.params, index)
+                dry_run_script(
+                    &script_name,
+                    &flattened_task,
+                    &config,
+                    &run_args.params,
+                    index,
+                )
             } else {
-                execute_script(&script_name, &task, &config, &run_args.params, index)
+                execute_script(
+                    &script_name,
+                    &flattened_task,
+                    &config,
+                    &run_args.params,
+                    index,
+                )
             }
         }
-        None => {
-            // No script name provided, so we list available scripts.
-            list_available_scripts(&config, index)
-        }
+        None => list_available_scripts(&config, index),
     }
 }
 
@@ -96,7 +98,6 @@ pub fn handle(
 /// Lists all available scripts for the current project context.
 fn list_available_scripts(config: &ResolvedConfig, index: &GlobalIndex) -> Result<()> {
     let scripts = config.get_all_scripts()?;
-
     println!(
         "\nAvailable scripts for '{}':",
         config.qualified_name.cyan()
@@ -114,7 +115,6 @@ fn list_available_scripts(config: &ResolvedConfig, index: &GlobalIndex) -> Resul
         let task = scripts.get(&script_name).unwrap();
         print!("  - {}", script_name.green());
 
-        // We can reuse the `find_task_source` function from the `info` handler.
         let source_project_name =
             crate::cli::handlers::info::find_task_source("scripts", &script_name, config, index)?;
         if source_project_name != config.qualified_name {
@@ -128,10 +128,10 @@ fn list_available_scripts(config: &ResolvedConfig, index: &GlobalIndex) -> Resul
             );
         }
 
-        if let Some(d) = &task.desc
-            && !d.trim().is_empty()
-        {
-            print!(": {}", d.dimmed());
+        if let Some(d) = &task.desc {
+            if !d.trim().is_empty() {
+                print!(": {}", d.dimmed());
+            }
         }
         println!();
     }
@@ -148,43 +148,55 @@ fn execute_script(
     params: &[String],
     index: &mut GlobalIndex,
 ) -> Result<()> {
-    let flattened_task = config.flatten_task(task)?;
-
-    if flattened_task.commands.is_empty() {
+    if task.commands.is_empty() {
         println!("{}", t!("run.info.empty_script").yellow());
         return Ok(());
     }
 
-    let all_definitions = commons::collect_parameter_defs_from_task(&flattened_task);
-    let has_generic_params = flattened_task.commands.iter().any(|cmd| {
-        let template = match &cmd.action {
-            CommandAction::Execute(t) | CommandAction::Print(t) => t,
-        };
-        template
-            .iter()
-            .any(|c| matches!(c, TemplateComponent::GenericParams { .. }))
+    let all_definitions = commons::collect_parameter_defs_from_task(task, config);
+
+    // FIX: Apply the same fix here
+    let has_generic_params = task.commands.iter().any(|plat_exec| {
+        [
+            plat_exec.default.as_ref(),
+            plat_exec.windows.as_ref(),
+            plat_exec.linux.as_ref(),
+            plat_exec.macos.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|cmd_exec| {
+            let template = match &cmd_exec.action {
+                CommandAction::Execute(t) | CommandAction::Print(t) => t,
+            };
+            template
+                .iter()
+                .any(|c| matches!(c, TemplateComponent::GenericParams { .. }))
+        })
     });
 
     let resolver = ArgResolver::new(&all_definitions, params, has_generic_params)?;
 
-    // [FINAL FIX] Check if every command in the flattened execution plan is silent.
-    let is_globally_silent = flattened_task.commands.iter().all(|cmd| cmd.silent_mode);
+    // Check if the script will be silent on the current platform
+    let is_globally_silent = task.commands.iter().all(|plat_exec| {
+        config
+            .select_platform_exec(plat_exec)
+            .map_or(true, |cmd| cmd.silent_mode)
+    });
 
-    // Only print the header if at least one command is not silent.
     if !is_globally_silent {
         let prefix_path = format_prefix_path(&config.qualified_name);
         println!("\n[{}:{}]", prefix_path.dimmed(), script_name.cyan());
     }
 
-    // Delegate the rest of the execution to the task executor.
-    task_executor::execute_task(&flattened_task, config, &resolver, index)?;
+    task_executor::execute_task(task, config, &resolver, index)?;
     Ok(())
 }
 
 /// Displays the fully-resolved execution plan for a script.
 fn dry_run_script(
     script_name: &str,
-    task: &Arc<Task>,
+    task: &Arc<Task>, // Receives the FLATTENED task
     config: &ResolvedConfig,
     params: &[String],
     index: &mut GlobalIndex,
@@ -196,62 +208,71 @@ fn dry_run_script(
         script_name.cyan()
     );
 
-    let flattened_task = config.flatten_task(task)?;
-    if flattened_task.commands.is_empty() {
+    if task.commands.is_empty() {
         println!("\n{}", t!("run.info.empty_script").yellow());
         return Ok(());
     }
 
-    let all_definitions = commons::collect_parameter_defs_from_task(&flattened_task);
-    let has_generic_params = flattened_task.commands.iter().any(|cmd| {
-        let template = match &cmd.action {
-            CommandAction::Execute(t) | CommandAction::Print(t) => t,
-        };
-        template
-            .iter()
-            .any(|c| matches!(c, TemplateComponent::GenericParams { .. }))
+    let all_definitions = commons::collect_parameter_defs_from_task(task, config);
+    let has_generic_params = task.commands.iter().any(|plat_exec| {
+        [
+            plat_exec.default.as_ref(),
+            plat_exec.windows.as_ref(),
+            plat_exec.linux.as_ref(),
+            plat_exec.macos.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|cmd_exec| {
+            let template = match &cmd_exec.action {
+                CommandAction::Execute(t) | CommandAction::Print(t) => t,
+            };
+            template
+                .iter()
+                .any(|c| matches!(c, TemplateComponent::GenericParams { .. }))
+        })
     });
-
     let resolver = ArgResolver::new(&all_definitions, params, has_generic_params)?;
 
     println!("---");
-    for command_exec in &flattened_task.commands {
-        let mut prefixes = String::new();
-        if command_exec.silent_mode {
-            prefixes.push('@');
-        }
-        if command_exec.ignore_errors {
-            prefixes.push('-');
-        }
-        if command_exec.run_in_parallel {
-            prefixes.push('>');
-        }
+    // Iterate over the universal AST, but only render the command for the current platform
+    for plat_exec in &task.commands {
+        if let Some(command_exec) = config.select_platform_exec(plat_exec) {
+            let mut prefixes = String::new();
+            if command_exec.silent_mode {
+                prefixes.push('@');
+            }
+            if command_exec.ignore_errors {
+                prefixes.push('-');
+            }
+            if command_exec.run_in_parallel {
+                prefixes.push('>');
+            }
 
-        let (action_prefix, template) = match &command_exec.action {
-            CommandAction::Print(t) => ("# ".dimmed(), t),
-            CommandAction::Execute(t) => ("".normal(), t),
-        };
+            let (action_prefix, template) = match &command_exec.action {
+                CommandAction::Print(t) => ("# ".dimmed(), t),
+                CommandAction::Execute(t) => ("".normal(), t),
+            };
 
-        let rendered_string =
-            task_executor::assemble_final_command(template, config, &resolver, index, 0)?;
+            let rendered_string =
+                task_executor::assemble_final_command(template, config, &resolver, index, 0)?;
 
-        if prefixes.is_empty() {
-            println!("{}{}", action_prefix, rendered_string.green());
-        } else {
-            println!(
-                "{} {}{}",
-                prefixes.dimmed(),
-                action_prefix,
-                rendered_string.green()
-            );
+            if prefixes.is_empty() {
+                println!("{}{}", action_prefix, rendered_string.green());
+            } else {
+                println!(
+                    "{} {}{}",
+                    prefixes.dimmed(),
+                    action_prefix,
+                    rendered_string.green()
+                );
+            }
         }
     }
     println!("---");
-
     Ok(())
 }
 
-/// Formats the project's qualified name for display in the command prefix.
 fn format_prefix_path(qualified_name: &str) -> String {
     let parts: Vec<&str> = qualified_name.split('/').collect();
     match parts.len() {

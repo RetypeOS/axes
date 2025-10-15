@@ -118,16 +118,27 @@ fn execute_open_command(
         .clone(); // Clone the Arc<Task>
 
     // 3. Collect parameter definitions using the new shared utility function.
-    let definitions = commons::collect_parameter_defs_from_task(&task);
+    let definitions = commons::collect_parameter_defs_from_task(&task, &config);
 
-    let has_generic_params =
-        task.commands
-            .iter()
-            .flat_map(|cmd| match &cmd.action {
+    let has_generic_params = task.commands.iter().any(|plat_exec| {
+        [
+            plat_exec.default.as_ref(),
+            plat_exec.windows.as_ref(),
+            plat_exec.linux.as_ref(),
+            plat_exec.macos.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|cmd_exec| {
+            let template = match &cmd_exec.action {
                 crate::models::CommandAction::Execute(t)
-                | crate::models::CommandAction::Print(t) => t.iter().collect::<Vec<_>>(),
-            })
-            .any(|c| matches!(c, crate::models::TemplateComponent::GenericParams { .. }));
+                | crate::models::CommandAction::Print(t) => t,
+            };
+            template
+                .iter()
+                .any(|c| matches!(c, crate::models::TemplateComponent::GenericParams { .. }))
+        })
+    });
 
     // 4. Create the argument resolver.
     let resolver = ArgResolver::new(&definitions, &open_args.params, has_generic_params)?;

@@ -207,7 +207,6 @@ fn run_cli(cli: Cli) -> Result<()> {
             params.extend(all_args.iter().skip(2).cloned());
             (
                 find_command("run").unwrap(),
-                // FIX: Convert Option<&str> to Option<String>
                 ctx_part.map(|s| s.to_string()),
                 params,
             )
@@ -228,7 +227,6 @@ fn run_cli(cli: Cli) -> Result<()> {
             params.extend(all_args.iter().skip(1).cloned());
             (
                 find_command("run").unwrap(),
-                // FIX: Convert Option<&str> to Option<String>
                 ctx_part.map(|s| s.to_string()),
                 params,
             )

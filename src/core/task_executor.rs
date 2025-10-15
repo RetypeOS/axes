@@ -1,5 +1,3 @@
-// EN: src/core/task_executor.rs (REBUILT FOR LAZY EXECUTION)
-
 use crate::{
     core::{color, commons::wrap_value, parameters::ArgResolver},
     models::{CommandAction, GlobalIndex, ResolvedConfig, RunSpec, Task, TemplateComponent},
@@ -20,24 +18,33 @@ pub fn execute_task(
     resolver: &ArgResolver,
     index: &mut GlobalIndex,
 ) -> Result<()> {
-    // Start the execution with an initial depth of 0.
     execute_task_inner(task, config, resolver, index, 0)
 }
 
 // --- Internal Recursive Executor ---
 
-/// Inner recursive function for task execution that carries the call stack.
 fn execute_task_inner(
     task: &Arc<Task>,
     config: &ResolvedConfig,
     resolver: &ArgResolver,
     index: &mut GlobalIndex,
-    depth: u32, // Add depth parameter
+    depth: u32,
 ) -> Result<()> {
     let mut parallel_batch: Vec<(String, bool, bool)> = Vec::new();
 
-    for command_exec in &task.commands {
-        // If the current command is sequential, execute any pending parallel batch first.
+    // The main loop now iterates over PlatformExecution blocks.
+    for plat_exec in &task.commands {
+        // Runtime platform selection
+        let command_exec = match config.select_platform_exec(plat_exec) {
+            Some(cmd) => cmd,
+            None => {
+                // If there's no command for the current platform (and no default),
+                // we just skip it. This allows for platform-specific optional steps.
+                log::debug!("Skipping command for current platform.");
+                continue;
+            }
+        };
+
         if !command_exec.run_in_parallel && !parallel_batch.is_empty() {
             execute_parallel_batch(&parallel_batch, config)?;
             parallel_batch.clear();
@@ -45,48 +52,28 @@ fn execute_task_inner(
 
         match &command_exec.action {
             CommandAction::Execute(template) => {
-                if template.len() == 1
-                    && let TemplateComponent::Script(script_name) = &template[0]
-                {
-                    let sub_task = config.get_script(script_name, depth + 1)?.ok_or_else(|| {
-                        anyhow!(
-                            "Composition Error: The script '<scripts::{}>' referenced for direct execution was not found in context '{}' or any of its ancestors.",
-                            script_name.cyan(),
-                            config.qualified_name.yellow()
-                        )
-                    })?;
-
-                    // Recursive call to execute the sub-task.
-                    execute_task_inner(&sub_task, config, resolver, index, depth + 1)?;
-                    continue; // Skip to the next command in the outer task.
-                }
-
-                // Not a pure composition, so assemble the command string.
+                // NOTE: Pure composition is now handled by `flatten_task` before execution.
+                // The executor only deals with commands that need to be rendered and run.
                 let rendered_string =
                     assemble_final_command(template, config, resolver, index, depth)?;
-                let trimmed_string = rendered_string.trim();
-
-                if trimmed_string.is_empty() {
-                    continue; // Skip empty shell commands.
-                }
-
-                if command_exec.run_in_parallel {
-                    parallel_batch.push((
-                        trimmed_string.to_string(),
-                        command_exec.ignore_errors,
-                        command_exec.silent_mode,
-                    ));
-                } else {
-                    execute_single_command(
-                        trimmed_string,
-                        command_exec.ignore_errors,
-                        command_exec.silent_mode,
-                        config,
-                    )?;
+                if !rendered_string.trim().is_empty() {
+                    if command_exec.run_in_parallel {
+                        parallel_batch.push((
+                            rendered_string,
+                            command_exec.ignore_errors,
+                            command_exec.silent_mode,
+                        ));
+                    } else {
+                        execute_single_command(
+                            rendered_string.trim(),
+                            command_exec.ignore_errors,
+                            command_exec.silent_mode,
+                            config,
+                        )?;
+                    }
                 }
             }
             CommandAction::Print(template) => {
-                // FIX: Pass current depth to `assemble_final_command`.
                 let rendered_string =
                     assemble_final_command(template, config, resolver, index, depth)?;
                 println!("{}", rendered_string);
@@ -94,7 +81,6 @@ fn execute_task_inner(
         }
     }
 
-    // Execute the final parallel batch if it exists.
     if !parallel_batch.is_empty() {
         execute_parallel_batch(&parallel_batch, config)?;
     }
@@ -104,8 +90,7 @@ fn execute_task_inner(
 
 // --- Command Assembly (Recursive String Renderer) ---
 
-/// "Renders" a template of components into a final, executable string.
-#[allow(clippy::only_used_in_recursion)]
+///// "Renders" a template of components into a final, executable string.
 pub fn assemble_final_command(
     template: &[TemplateComponent],
     config: &ResolvedConfig,
@@ -113,44 +98,42 @@ pub fn assemble_final_command(
     index: &mut GlobalIndex,
     depth: u32,
 ) -> Result<String> {
-    let mut final_command = String::new();
+    let mut final_command = String::with_capacity(template.len() * 50);
     for component in template {
         match component {
             TemplateComponent::Literal(s) => final_command.push_str(s),
-
             TemplateComponent::Parameter(def) => {
                 let value = resolver
                     .get_specific_value(&def.original_token)
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "Internal logic error: resolved value not found for token '{}'",
-                            def.original_token
-                        )
-                    })?;
-
+                    .unwrap_or_default();
                 final_command.push_str(value);
             }
-
             TemplateComponent::GenericParams { literal } => {
-                if *literal {
-                    let literal_args: Vec<String> = resolver
-                        .get_generic_values()
+                let values = resolver.get_generic_values();
+                let joined = if *literal {
+                    values
                         .iter()
                         .map(|arg| wrap_value(arg))
-                        .collect();
-                    final_command.push_str(&literal_args.join(" "));
+                        .collect::<Vec<_>>()
+                        .join(" ")
                 } else {
-                    final_command.push_str(&resolver.get_generic_values().join(" "));
-                }
+                    values.join(" ")
+                };
+                final_command.push_str(&joined);
             }
-            TemplateComponent::Color(color) => {
-                final_command.push_str(color::ansi_color_to_code(*color));
+            TemplateComponent::Color(c) => final_command.push_str(color::ansi_color_to_code(*c)),
+            TemplateComponent::Path => {
+                final_command.push_str(&config.project_root.to_string_lossy())
+            }
+            TemplateComponent::Name => final_command.push_str(&config.qualified_name),
+            TemplateComponent::Uuid => final_command.push_str(&config.uuid.to_string()),
+            TemplateComponent::Version => {
+                final_command.push_str(config.get_version()?.as_deref().unwrap_or(""))
             }
             TemplateComponent::Run(spec) => {
                 let command_to_run = match spec {
                     RunSpec::Literal(cmd) => {
                         let temp_template = vec![TemplateComponent::Literal(cmd.clone())];
-                        // Recursively assemble to expand tokens inside the `run` literal.
                         assemble_final_command(&temp_template, config, resolver, index, depth + 1)?
                     }
                 };
@@ -162,60 +145,20 @@ pub fn assemble_final_command(
                 )?;
                 final_command.push_str(output.trim());
             }
-            TemplateComponent::Path => {
-                final_command.push_str(&config.project_root.to_string_lossy())
-            }
-            TemplateComponent::Name => final_command.push_str(&config.qualified_name),
-            TemplateComponent::Uuid => final_command.push_str(&config.uuid.to_string()),
-            TemplateComponent::Version => {
-                // Lazily get the version by searching up the hierarchy.
-                final_command.push_str(config.get_version()?.as_deref().unwrap_or(""));
-            }
 
             // --- LAZY RESOLUTION OF SYMBOLIC REFERENCES ---
             TemplateComponent::Script(name) | TemplateComponent::Var(name) => {
-                let is_var = matches!(component, TemplateComponent::Var(_));
-                let token_type = if is_var { "vars" } else { "scripts" };
-                log::debug!("Resolving inline reference: '<{}::{}>'", token_type, name);
-
-                // Get the appropriate task (script or var)
-                let task_result = if is_var {
-                    config.get_var(name, depth + 1)
-                } else {
-                    config.get_script(name, depth + 1)
-                };
-
-                let task = task_result?.ok_or_else(|| {
-                    anyhow!(
-                        "Broken Reference: The {} '<{}::{}>' was not found in context '{}' or any of its ancestors.",
-                        if is_var { "variable" } else { "script" },
-                        token_type,
-                        name.cyan(),
-                        config.qualified_name.yellow()
-                    )
-                })?;
-
-                // The rest of the logic remains the same, but now operates on `task` which is guaranteed to exist.
-                if task.commands.len() > 1 {
-                    return Err(anyhow!(
-                        "Inline composition for '<{}::{}>' is not supported because it is a multi-line {}.",
-                        token_type,
-                        name,
-                        if is_var { "variable" } else { "script" }
-                    ));
-                }
-                if let Some(command) = task.commands.first() {
-                    let sub_template = match &command.action {
-                        CommandAction::Execute(t) | CommandAction::Print(t) => t,
-                    };
-                    final_command.push_str(&assemble_final_command(
-                        sub_template,
-                        config,
-                        resolver,
-                        index,
-                        depth + 1,
-                    )?);
-                }
+                // This logic is now handled by the flatten_template_recursive, which runs
+                // before assemble_final_command. If we encounter a Script or Var here, it's a logic error.
+                return Err(anyhow!(
+                    "Internal Compiler Error: Unflattened symbolic reference '<{}::{}>' found during final command assembly.",
+                    if matches!(component, TemplateComponent::Var(_)) {
+                        "vars"
+                    } else {
+                        "scripts"
+                    },
+                    name
+                ));
             }
         }
     }
@@ -243,7 +186,7 @@ fn execute_single_command(
 fn execute_parallel_batch(batch: &[(String, bool, bool)], config: &ResolvedConfig) -> Result<()> {
     let is_globally_silent = batch.iter().all(|(_, _, silent)| *silent);
     if !is_globally_silent {
-        let mut header_block = String::new();
+        let mut header_block = String::with_capacity(batch.len() * 80);
         writeln!(
             header_block,
             "{}",
@@ -259,8 +202,15 @@ fn execute_parallel_batch(batch: &[(String, bool, bool)], config: &ResolvedConfi
         print!("{}", header_block);
     }
 
+    if log::log_enabled!(log::Level::Trace) {
+        log::trace!("Executing parallel batch of {} commands.", batch.len());
+        for (i, (cmd, _, _)) in batch.iter().enumerate() {
+            log::trace!("  - Batch[{}]: {}", i, cmd);
+        }
+    }
+
     let env = config.get_env()?;
-    let results: Result<Vec<()>> = batch
+    let results: Vec<Result<(), anyhow::Error>> = batch
         .par_iter()
         .map(|(command_str, ignore_errors, _)| {
             executor::execute_command(command_str, *ignore_errors, &config.project_root, &env)
@@ -268,7 +218,33 @@ fn execute_parallel_batch(batch: &[(String, bool, bool)], config: &ResolvedConfi
         })
         .collect();
 
-    results.with_context(|| "A command in the parallel batch failed.")?;
+    let mut errors = Vec::new();
+    for (i, result) in results.into_iter().enumerate() {
+        if let Err(e) = result {
+            let failed_command = &batch[i].0;
+            log::trace!(
+                "Parallel command failed: '{}' with error: {}",
+                failed_command,
+                e
+            );
+            errors.push(anyhow!("Command '{}' failed: {}", failed_command.cyan(), e));
+        }
+    }
+
+    if !errors.is_empty() {
+        // Combine all errors into one final error.
+        return Err(anyhow!(
+            "{} command(s) in the parallel batch failed.",
+            errors.len()
+        ))
+        .context(
+            errors
+                .into_iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
 
     if !is_globally_silent {
         println!("{}", "└─ End batch.".dimmed());

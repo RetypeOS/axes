@@ -31,28 +31,24 @@ quality = { desc = "Runs all quality checks in sequence (fmt, check, lint, test)
     "<scripts::test>",
 ]}
 
-_flamgraph_exec = { windows = "start flamegraph.svg", macos = "open flamegraph.svg", linux = "xdg-open flamegraph.svg", default="echo 'Flamegraph generated at flamegraph.svg'" }
+##_flamgraph_exec = { windows = "start flamegraph.svg", macos = "open flamegraph.svg", linux = "xdg-open flamegraph.svg", default="echo 'Flamegraph generated at flamegraph.svg'" }
 
 # --- Artifacts & Distribution ---
 clean = { desc = "Removes the target directory and build artifacts.", run = "cargo clean <params>" }
 doc = { desc = "Builds and opens the project documentation in the browser.", run = "cargo doc --open <params>" }
 
+[scripts._save_install]
+windows = "powershell -Command \"New-Item -ItemType File -Path '<vars::install_path_win>' -Force | Out-Null; Copy-Item -Path '.\\target\\release\\axes.exe' -Destination '<vars::install_path_win>'\""
+default = "install -m 755 -D \"<path>/target/release/axes\" \"<vars::install_path_nix>\""
+
 # Builds and installs the artifact to a local path, showcasing a cross-platform script.
 [scripts.install]
 desc = "Builds in release and copies the artifact to a local installation path."
-windows = [
-    "# <vars::install_welcome>",
-    "<scripts::build_release>",
-    "powershell -Command \"New-Item -ItemType File -Path '<vars::install_path_win>' -Force | Out-Null; Copy-Item -Path '.\\target\\release\\axes.exe' -Destination '<vars::install_path_win>'\"",
+run = [
+    "# Installing <#green>'axes'<#reset> on: <#blue>'<vars::install_path_win>'<#reset>...",
+    "@<scripts::build_release>",
+    "@<scripts::_save_install>",
     "# Completed.!"
-]
-linux = [
-    "<scripts::build_release>",
-    "install -m 755 -D \"<path>/target/release/axes\" \"<vars::install_path_nix>\""
-]
-macos = [
-    "<scripts::build_release>",
-    "install -m 755 -D \"<path>/target/release/axes\" \"<vars::install_path_nix>\""
 ]
 
 # --- Performance Analysis ---
@@ -70,13 +66,11 @@ run = [
 # --- Installation Paths (User Configurable) ---
 # By default, install into a local './bin' directory. This is safe and portable.
 # A user can override this by creating a `.axes/axes.local.toml` file with:
-# [vars]
-install_welcome = "Installing <#green>'axes'<#reset> on: <#blue>'<vars::install_path_win>'<#reset>..."
 install_path_win = "<params::0(default='.\\bin\\axes.exe')>" 
 install_path_nix = "<params::0(default='./bin/axes')>"
 
 # === Environment Variables ===
-# Injected into every command executed by `axes`.
+# Injected into every command executed by `axes`.s
 [env]
 RUST_LOG = "debug"   # Set a sensible default log level for `axes run`.
 RUST_BACKTRACE = "1"  # Always show full backtraces in case of panic.
