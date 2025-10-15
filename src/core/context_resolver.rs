@@ -59,15 +59,11 @@ type ContextResult<T> = Result<T, ContextError>;
 /// The resolution follows a strict, multi-layered priority order to ensure
 /// predictable behavior both inside and outside of project sessions.
 pub fn resolve_context(context: &str, index: &mut GlobalIndex) -> ContextResult<(Uuid, String)> {
-    let context = if context.trim().is_empty() {
-        "."
-    } else {
-        context.trim()
-    };
+    let context = context.trim();
 
     let parts: Vec<&str> = context.split('/').collect();
 
-    let first_part = parts[0];
+    let first_part = if parts[0].trim().is_empty() { "." } else { parts[0] };
     let global_project_entry = index.projects.get(&GLOBAL_PROJECT_UUID).unwrap();
 
     // --- 1. DETERMINE THE STARTING POINT AND TRAVERSAL PARTS ---

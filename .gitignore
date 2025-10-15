@@ -38,4 +38,4 @@ flamegraph_old.html
 justfile
 Taskfile.yml
 src/axes_src.txt
-axes_docs.md
+axes_doc.txt

@@ -1,51 +1,118 @@
+# ==============================================================================
+# Benchmarking suite for measuring and comparing `axes` performance
+# against other task runners under different loads.
+#
+# Architecture: This file uses advanced `axes` features to create
+# a flexible and composable command-line interface for `hyperfine` and `time`.
+# ==============================================================================
+
 name = "stress_tests"
 version = "0.1.0"
 description = "Project charged to execute all stress and velocity tests."
 
 [vars]
-_if_prepare = '''<params::no-cache(alias='-nc', map='--prepare', default="cmd /c rmdir /s /q C:\\Users\\reyni\\AppData\\Local\\axes\\cache\\projects || exit /b 0", literal)>'''
-_if_condition = """
-<params::low(map='', default='--warmup 0 --runs 20')>\
-<params::mid(map='', default='--warmup 5 --runs 40')>\
-<params::high(map='', default='--warmup 10 --runs 100')>\
-"""
-_defaults = """
-<params::axes-low(alias='-al', map='', default='axes ./low_test/script_90', literal)> \
-<params::axes-mid(alias='-am', map='', default='axes ./mid_test/script_900', literal)> \
-<params::axes-high(alias='-ah', map='', default='axes ./high_test/script_9000', literal)> \
-<params::axes-big(alias='-ab', map='', default='axes ./big_test/script_90000', literal)> \
-<params::axes-divided(alias='-ad', map='', default='axes ./big_divided_test/into/script_90000', literal)> \
-<params::just-low(alias='-jl', map='', default='just --justfile low_test/justfile script_90', literal)> \
-<params::just-mid(alias='-jm', map='', default='just --justfile mid_test/justfile script_900', literal)> \
-<params::just-high(alias='-jh', map='', default='just --justfile high_test/justfile script_9000', literal)> \
-<params::just-big(alias='-jb', map='', default='just --justfile big_test/justfile script_90000', literal)> \
-<params::make-low(alias='-ml', map='', default='make -f low_test/makefile.mk script_90', literal)> \
-<params::make-mid(alias='-mm', map='', default='make -f mid_test/makefile.mk script_900', literal)> \
-<params::make-high(alias='-mh', map='', default='make -f high_test/makefile.mk script_9000', literal)> \
-<params::make-big(alias='-mb', map='', default='make -f big_test/makefile.mk script_9000', literal)> \
-<params(literal)> \
+# ------------------------------------------------------------------------------
+# SECTION 1: Parameter Collections
+#
+# Parameter collections that scripts (`time`, `hyperfine`) can consume are defined.
+# Each parameter represents a specific benchmark command and is activated by an alias.
+# ------------------------------------------------------------------------------
+
+# --- Parameters for `hyperfine` ---
+# It is CRUCIAL to use the `(literal)` modifier here. `hyperfine` requires that each
+# command to be executed is a single string argument. The `(literal)` modifier
+# wraps the parameter value in double quotes (e.g., "axes ./low_test/script_90"),
+# ensuring that `hyperfine` interprets it correctly.
+_params_hyperfine = """
+<params::axes-low(      alias='-al', map=' ', default='axes ./low_test/script_90',                      literal )>\
+<params::axes-mid(      alias='-am', map=' ', default='axes ./mid_test/script_900',                     literal )>\
+<params::axes-high(     alias='-ah', map=' ', default='axes ./high_test/script_9000',                   literal )>\
+<params::axes-big(      alias='-ab', map=' ', default='axes ./big_test/script_90000',                   literal )>\
+<params::axes-divided(  alias='-ad', map=' ', default='axes ./big_divided_test/into/script_90000',      literal )>\
+<params::just-low(      alias='-jl', map=' ', default='just --justfile low_test/justfile script_90',    literal )>\
+<params::just-mid(      alias='-jm', map=' ', default='just --justfile mid_test/justfile script_900',   literal )>\
+<params::just-high(     alias='-jh', map=' ', default='just --justfile high_test/justfile script_9000', literal )>\
+<params::just-big(      alias='-jb', map=' ', default='just --justfile big_test/justfile script_90000', literal )>\
+<params::make-low(      alias='-ml', map=' ', default='make -f low_test/makefile.mk script_90',         literal )>\
+<params::make-mid(      alias='-mm', map=' ', default='make -f mid_test/makefile.mk script_900',        literal )>\
+<params::make-high(     alias='-mh', map=' ', default='make -f high_test/makefile.mk script_9000',      literal )>\
+<params::make-big(      alias='-mb', map=' ', default='make -f big_test/makefile.mk script_90000',      literal )>\
+<params(literal)>\
 """
 
-_time_defaults = """
-<params::axes-low(alias='-al', map='', default='axes ./low_test/script_90')> \
-<params::axes-mid(alias='-am', map='', default='axes ./mid_test/script_900')> \
-<params::axes-high(alias='-ah', map='', default='axes ./high_test/script_9000')> \
-<params::axes-big(alias='-ab', map='', default='axes ./big_test/script_90000')> \
-<params::axes-divided(alias='-ad', map='', default='axes ./big_divided_test/into/script_90000')> \
-<params::just-low(alias='-jl', map='', default='just --justfile low_test/justfile script_90')> \
-<params::just-mid(alias='-jm', map='', default='just --justfile mid_test/justfile script_900')> \
-<params::just-high(alias='-jh', map='', default='just --justfile high_test/justfile script_9000')> \
-<params::just-big(alias='-jb', map='', default='just --justfile big_test/justfile script_90000')> \
-<params::make-low(alias='-ml', map='', default='make -f low_test/makefile.mk script_90')> \
-<params::make-mid(alias='-mm', map='', default='make -f mid_test/makefile.mk script_900')> \
-<params::make-high(alias='-mh', map='', default='make -f high_test/makefile.mk script_9000')> \
-<params::make-big(alias='-mb', map='', default='make -f big_test/makefile.mk script_90000')> \
-<params(literal)> \
+# --- Parameters for `time` ---
+# NOTE ON DUPLICATION:
+# The command strings in `_params_time` are identical to those in `_params_hyperfine`.
+# This duplication is currently necessary because `axes` (v0.2.6) does not support
+# nested composition (e.g., using `<vars::...>` inside a parameter's `default`).
+# The only functional difference is the ABSENCE of the `(literal)` modifier, as
+# the `time` command does not require it.
+_params_time = """
+<params::axes-low(      alias='-al', map=' ', default='axes ./low_test/script_90'                      )>\
+<params::axes-mid(      alias='-am', map=' ', default='axes ./mid_test/script_900'                     )>\
+<params::axes-high(     alias='-ah', map=' ', default='axes ./high_test/script_9000'                    )>\
+<params::axes-big(      alias='-ab', map=' ', default='axes ./big_test/script_90000'                   )>\
+<params::axes-divided(  alias='-ad', map=' ', default='axes ./big_divided_test/into/script_90000'       )>\
+<params::just-low(      alias='-jl', map=' ', default='just --justfile low_test/justfile script_90'    )>\
+<params::just-mid(      alias='-jm', map=' ', default='just --justfile mid_test/justfile script_900'   )>\
+<params::just-high(     alias='-jh', map=' ', default='just --justfile high_test/justfile script_9000' )>\
+<params::just-big(      alias='-jb', map=' ', default='just --justfile big_test/justfile script_90000' )>\
+<params::make-low(      alias='-ml', map=' ', default='make -f low_test/makefile.mk script_90'         )>\
+<params::make-mid(      alias='-mm', map=' ', default='make -f mid_test/makefile.mk script_900'        )>\
+<params::make-high(     alias='-mh', map=' ', default='make -f high_test/makefile.mk script_9000'      )>\
+<params::make-big(      alias='-mb', map=' ', default='make -f big_test/makefile.mk script_90000'      )>\
+<params>\
+"""
+
+# ------------------------------------------------------------------------------
+# SECTION 2: Conditional Options
+#
+# Variables that inject additional arguments based on flags.
+# ------------------------------------------------------------------------------
+
+# Injects the `--prepare` command if the `-nc` (`--no-cache`) flag is passed.
+# The default value is a command that clears the `axes` cache, forcing
+# a "cold run" for the benchmark.
+
+# Injects the `hyperfine` parameters for benchmark intensity.
+# The pattern is subtle: if a flag like `--low` is passed, its default value
+# (`--warmup 0 --runs 20`) is injected. Other flags are not passed, so
+# their values are not injected. `hyperfine` will use the last flag it receives.
+_options_hyperfine_intensity = """
+<params::low(   map=' ', default='--warmup 0 --runs 20'   )>\
+<params::mid(   map=' ', default='--warmup 5 --runs 40'   )>\
+<params::high(  map=' ', default='--warmup 10 --runs 100' )>\
 """
 
 [scripts]
-time = "/usr/bin/time -v <vars::_time_defaults>"
 
+# Injects the `--prepare` command if the `-nc` (`--no-cache`) flag is passed.
+# The default value is a command that clears the `axes` cache, forcing
+# a "cold run" for the benchmark.
+[scripts._prepare_cache]
+windows = '''<params::no-cache(alias='-nc', map='--prepare ', default="cmd /c rmdir /s /q C:\\Users\\reyni\\AppData\\Local\\axes\\cache\\projects || exit /b 0", literal)>'''
+linux = "<params::no-cache(alias='-nc', map='--prepare ', default='rm -rf ~/.cache/axes/projects', literal)>"
+# ------------------------------------------------------------------------------
+# SCRIPT: time
+#
+# Purpose: Execute a single command with `/usr/bin/time -v` to get
+# a detailed analysis of a single run (memory, page faults, etc.).
+#
+# Usage: `axes time -al` (runs the `axes-low` test)
+#        `axes time "my custom command"`
+# ------------------------------------------------------------------------------
+[scripts.time]
+desc = "Run a single, detailed benchmark with `time -v`."
+linux = "/usr/bin/time -v <vars::_params_time>" 
+
+# ------------------------------------------------------------------------------
+# SCRIPT: hyperfine
+#
+# Purpose: Run statistical benchmarks with `hyperfine`. It is the main script
+# for obtaining comparative performance data.
+#
+# Usage: See the `BENCHMARK_TEST_USES.md` document for detailed examples.
+# ------------------------------------------------------------------------------
 [scripts.hyperfine]
-desc = "USE EXAMPLE: `axes hyperfine -ad -ab -jb --high -nc -exmk \"test_benchmark.md\"` Execute script 'hyperfine' with script test axes and just. Finally all has optional values."
-run = 'hyperfine --shell=none <vars::_defaults> <vars::_if_condition> <vars::_if_prepare> <params::output-mk(alias="-exmk", map="--export-markdown ", default="benchmark_results.md")>'
+desc = "Run statistical benchmarks with `hyperfine`."
+run = 'hyperfine --shell=none <vars::_params_hyperfine> <vars::_options_hyperfine_intensity> <scripts::_prepare_cache> <params::output-mk(alias="-exmk", map="--export-markdown ")>'
