@@ -1,11 +1,9 @@
-// src/core/mod.rs
-
 pub mod arg_parser;
 pub mod cache;
 pub mod color;
 pub mod commons;
+pub mod compiler;
 pub mod config_loader;
-pub mod config_resolver;
 pub mod context_resolver;
 pub mod graph_display;
 pub mod index_manager;

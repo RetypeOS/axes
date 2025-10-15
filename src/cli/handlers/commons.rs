@@ -450,10 +450,27 @@ pub fn validate_project_name(raw_name: &str) -> Result<String> {
 }
 
 /// This is a shared utility for handlers like `open`, `run`, and `start`.
-pub fn collect_parameter_defs_from_task(task: &Arc<Task>) -> Vec<ParameterDef> {
+/// It now traverses the platform-agnostic AST to find all possible parameter definitions.
+pub fn collect_parameter_defs_from_task(
+    task: &Arc<Task>,
+    _config: &crate::models::ResolvedConfig, // _config is unused for now but kept for API consistency
+) -> Vec<ParameterDef> {
     task.commands
         .iter()
-        .flat_map(|cmd| match &cmd.action {
+        // Iterate over each PlatformExecution block
+        .flat_map(|plat_exec| {
+            // FIX: Create an array of the Option<T>s themselves, then call iter().flatten().
+            // This turns an iterator of Option<T> into an iterator of T.
+            [
+                plat_exec.default.as_ref(),
+                plat_exec.windows.as_ref(),
+                plat_exec.linux.as_ref(),
+                plat_exec.macos.as_ref(),
+            ]
+            .into_iter()
+            .flatten()
+        })
+        .flat_map(|cmd_exec| match &cmd_exec.action {
             CommandAction::Execute(t) | CommandAction::Print(t) => t.clone(),
         })
         .filter_map(|component| match component {

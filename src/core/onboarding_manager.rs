@@ -1,5 +1,3 @@
-// src/core/onboarding_manager.rs (FULL IMPLEMENTATION)
-
 use crate::{
     cli::handlers::commons,
     core::index_manager::{self, GLOBAL_PROJECT_UUID},
@@ -121,7 +119,7 @@ pub fn register_project(
         ));
     }
 
-    // 2. RESOLUTION: Determine final names, parents, and UUIDs for each candidate.
+    // 2. Determine final names, parents, and UUIDs for each candidate.
     resolve_candidates(&mut candidates, index, options)?;
 
     // Filter out candidates that were invalidated during resolution.
@@ -149,7 +147,6 @@ pub fn register_project(
             candidate.resolved_parent_uuid.unwrap(),
         );
 
-        // Update or insert into the main projects map.
         let new_entry = IndexEntry {
             name: name.clone(),
             path: candidate.path.clone(),
@@ -158,7 +155,6 @@ pub fn register_project(
         };
         index.projects.insert(uuid, new_entry);
 
-        // Write the definitive `project_ref.bin` back to disk.
         let new_ref = ProjectRef {
             self_uuid: uuid,
             parent_uuid: Some(parent_uuid),
@@ -173,7 +169,6 @@ pub fn register_project(
         "{}",
         format!(t!("register.success.header"), count = registered_count).green()
     );
-
     Ok(())
 }
 
@@ -190,23 +185,36 @@ fn discover_candidates(
         return Ok(vec![]);
     }
 
+    // Pre-calculate a HashSet of existing paths for O(1) lookups.
+    let existing_paths: HashSet<_> = index.projects.values().map(|p| &p.path).collect();
+
     let mut to_scan = vec![main_candidate.path.clone()];
     let mut seen_paths = HashSet::new();
     seen_paths.insert(main_candidate.path.clone());
     candidates.push(main_candidate);
 
     while let Some(path) = to_scan.pop() {
-        for entry in fs::read_dir(path)?.filter_map(Result::ok) {
-            let child_path = entry.path();
-            // Check if it's a directory, not already seen, and not already in the index.
-            if child_path.is_dir()
-                && seen_paths.insert(child_path.clone())
-                && !index.projects.values().any(|p| p.path == child_path)
-            {
-                let candidate = OnboardingCandidate::new(&child_path)?;
-                if candidate.should_register {
-                    to_scan.push(child_path);
-                    candidates.push(candidate);
+        // Use `read_dir` in a way that gracefully skips directories it can't access.
+        if let Ok(entries) = fs::read_dir(path) {
+            for entry in entries.filter_map(Result::ok) {
+                let child_path = entry.path();
+                // Check if it's a directory, not already seen, and not already in the index.
+                if child_path.is_dir()
+                    && !existing_paths.contains(&child_path)
+                    && seen_paths.insert(child_path.clone())
+                {
+                    match OnboardingCandidate::new(&child_path) {
+                        Ok(candidate) if candidate.should_register => {
+                            to_scan.push(child_path);
+                            candidates.push(candidate);
+                        }
+                        Ok(_) => {} // Not a valid candidate, just ignore.
+                        Err(e) => log::warn!(
+                            "Could not process potential project at '{}': {}",
+                            child_path.display(),
+                            e
+                        ),
+                    }
                 }
             }
         }
@@ -222,40 +230,39 @@ fn resolve_candidates(
     index: &mut GlobalIndex,
     options: &OnboardingOptions,
 ) -> OnboardingResult<()> {
-    // [CORRECTED] Use an indexed loop to avoid borrow checker conflicts.
+    // This prevents two new projects in the same batch from colliding with each other.
+    let mut pending_names: HashSet<(Uuid, String)> = HashSet::new();
+
     for i in 0..candidates.len() {
         if !candidates[i].should_register {
             continue;
         }
 
-        // --- Phase 2.1: Resolve UUID and Name (Scoped Write) ---
-        // We scope this block to contain the mutable borrow.
+        // --- Phase 2.1: Resolve UUID and Name ---
         {
             let candidate = &mut candidates[i];
             match &candidate.identity_source {
                 IdentitySource::ProjectRef(pref) => {
-                    if let Some(existing) = index.projects.get(&pref.self_uuid)
-                        && existing.path != candidate.path
-                    {
-                        return Err(OnboardingError::UuidCollision(
-                            pref.self_uuid,
-                            existing.path.display().to_string(),
-                        ));
+                    if let Some(existing) = index.projects.get(&pref.self_uuid) {
+                        if existing.path != candidate.path {
+                            return Err(OnboardingError::UuidCollision(
+                                pref.self_uuid,
+                                existing.path.display().to_string(),
+                            ));
+                        } else {
+                            // Project is already registered at the correct path. Mark to skip.
+                            candidate.should_register = false;
+                        }
                     }
-                    candidate.resolved_uuid = Some(pref.self_uuid);
-                    candidate.resolved_name = Some(pref.name.clone());
+                    if candidate.should_register {
+                        candidate.resolved_uuid = Some(pref.self_uuid);
+                        candidate.resolved_name = Some(pref.name.clone());
+                    }
                 }
                 IdentitySource::TomlOnly => {
                     if options.autosolve {
                         candidate.should_register = false;
-                        println!(
-                            "{}",
-                            format!(
-                                "Warning: Project at '{}' has no identity and was skipped in --autosolve mode.",
-                                candidate.path.display()
-                            )
-                            .yellow()
-                        );
+                        println!("{}", format!("Warning: Project at '{}' has no identity and was skipped in --autosolve mode.", candidate.path.display()).yellow());
                     } else {
                         println!(
                             "{}",
@@ -272,12 +279,22 @@ fn resolve_candidates(
                             .unwrap_or_default()
                             .to_string_lossy()
                             .to_string();
-                        candidate.resolved_name = Some(
-                            Input::with_theme(&ColorfulTheme::default())
+
+                        // Loop to validate the name interactively
+                        loop {
+                            let input_name = Input::with_theme(&ColorfulTheme::default())
                                 .with_prompt(name_prompt)
-                                .default(default_name)
-                                .interact_text()?,
-                        );
+                                .default(default_name.clone())
+                                .interact_text()?;
+
+                            match commons::validate_project_name(&input_name) {
+                                Ok(name) => {
+                                    candidate.resolved_name = Some(name);
+                                    break;
+                                }
+                                Err(e) => println!("{}", format!("  Error: {}", e).red()),
+                            }
+                        }
                         candidate.resolved_uuid = Some(Uuid::new_v4());
                     }
                 }
@@ -285,14 +302,13 @@ fn resolve_candidates(
                     candidate.should_register = false;
                 }
             }
-        } // Mutable borrow of `candidates[i]` ends here.
+        }
 
         if !candidates[i].should_register {
             continue;
         }
 
-        // --- Phase 2.2: Resolve Parent UUID (Read-only Phase) ---
-        // Now we can read from the whole `candidates` slice without conflict.
+        // --- Phase 2.2: Resolve Parent UUID ---
         let pref_parent_uuid = if let IdentitySource::ProjectRef(p) = &candidates[i].identity_source
         {
             p.parent_uuid
@@ -301,15 +317,10 @@ fn resolve_candidates(
         };
 
         let is_pref_parent_valid = if let Some(p_uuid) = pref_parent_uuid {
-            let in_index = index.projects.contains_key(&p_uuid);
-            let in_batch = candidates.iter().any(|c| {
-                if let (true, Some(resolved_uuid)) = (c.should_register, c.resolved_uuid) {
-                    resolved_uuid == p_uuid
-                } else {
-                    false
-                }
-            });
-            in_index || in_batch
+            index.projects.contains_key(&p_uuid)
+                || candidates
+                    .iter()
+                    .any(|c| c.should_register && c.resolved_uuid == Some(p_uuid))
         } else {
             false
         };
@@ -349,6 +360,8 @@ fn resolve_candidates(
 
             let name = candidate.resolved_name.as_ref().unwrap();
             let parent = candidate.resolved_parent_uuid.unwrap();
+
+            // Check for collision with projects already in the index.
             if index
                 .projects
                 .values()
@@ -356,7 +369,12 @@ fn resolve_candidates(
             {
                 return Err(OnboardingError::NameCollision(name.clone()));
             }
-        } // Final mutable borrow ends here.
+
+            // ROBUSTNESS: Check for collision with projects in the current onboarding batch.
+            if !pending_names.insert((parent, name.clone())) {
+                return Err(OnboardingError::NameCollision(name.clone()));
+            }
+        }
     }
     Ok(())
 }

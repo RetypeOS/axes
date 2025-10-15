@@ -1,4 +1,4 @@
-// EN: src/cli/handlers/register.rs
+// EN: src/cli/handlers/register.rs (RESTORED)
 
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
@@ -11,7 +11,6 @@ use crate::{
 };
 
 // --- Command Argument Parsing ---
-// The struct now only defines flags, as the positional path is handled manually.
 #[derive(Parser, Debug, Default)]
 #[command(
     no_binary_name = true,
@@ -20,11 +19,9 @@ use crate::{
 pub struct RegisterArgs {
     /// The path to the project to register. Defaults to the current directory.
     pub path: Option<String>,
-
     /// The context of the project that should become the parent of the new project.
     #[arg(long)]
     pub parent: Option<String>,
-
     /// Do not ask for user input; fail on any conflict.
     #[arg(long)]
     pub autosolve: bool,
@@ -37,16 +34,13 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
         return Err(anyhow!(t!("register.error.in_session")));
     }
 
-    // Now, parse the REMAINING arguments for flags like --parent.
     let register_args = RegisterArgs::try_parse_from(&args)?;
 
-    // Priority: 1. `register_args.path` | 2. `dispatcher_context` | 3. CWD
     let initial_path = match register_args.path.or(context) {
         Some(p) => PathBuf::from(p),
         None => env::current_dir()?,
     };
 
-    // 2. Resolve parent and options (no change from previous correct version).
     let suggested_parent_uuid = if let Some(parent_context) = &register_args.parent {
         let (uuid, name) = crate::core::context_resolver::resolve_context(parent_context, index)?;
         println!("Using '{}' as the suggested parent.", name.cyan());
@@ -60,7 +54,6 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
         suggested_parent_uuid,
     };
 
-    // 3. Run the onboarding manager.
     onboarding_manager::register_project(&initial_path, index, &options)
         .with_context(|| format!(t!("register.error.failed"), path = initial_path.display()))?;
 

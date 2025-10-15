@@ -1,7 +1,5 @@
 // EN: src/cli/handlers/mod.rs
 
-// This module will contain the logic for each CLI action.
-
 pub mod alias;
 pub mod commons;
 pub mod debug_cache;

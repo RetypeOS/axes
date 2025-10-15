@@ -63,7 +63,11 @@ pub fn resolve_context(context: &str, index: &mut GlobalIndex) -> ContextResult<
 
     let parts: Vec<&str> = context.split('/').collect();
 
-    let first_part = if parts[0].trim().is_empty() { "." } else { parts[0] };
+    let first_part = if parts[0].trim().is_empty() {
+        "."
+    } else {
+        parts[0]
+    };
     let global_project_entry = index.projects.get(&GLOBAL_PROJECT_UUID).unwrap();
 
     // --- 1. DETERMINE THE STARTING POINT AND TRAVERSAL PARTS ---

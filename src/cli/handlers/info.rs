@@ -45,13 +45,13 @@ pub fn handle(
 
     print_metadata(&config, index)?;
     print_options(&config)?;
-    print_task_map(
-        "scripts",
-        t!("info.label.available_scripts"),
-        &config,
-        index,
-    )?;
-    print_task_map("vars", t!("info.label.vars"), &config, index)?;
+    //print_task_map(
+    //    "scripts",
+    //    t!("info.label.available_scripts"),
+    //    &config,
+    //    index,
+    //)?;
+    //print_task_map("vars", t!("info.label.vars"), &config, index)?;
     print_env(&config)?;
 
     println!("\n---------------------------------");
@@ -142,61 +142,61 @@ fn print_options(config: &ResolvedConfig) -> Result<()> {
 
 /// [REFACTORED] A generic function to print a map of Tasks (like `scripts` or `vars`).
 /// It now indicates the source of inherited items.
-fn print_task_map(
-    key: &str,
-    title: &str,
-    config: &ResolvedConfig,
-    index: &GlobalIndex,
-) -> Result<()> {
-    let tasks = if key == "scripts" {
-        config.get_all_scripts()?
-    } else {
-        config.get_all_vars()?
-    };
-
-    if tasks.is_empty() {
-        if key == "scripts" {
-            println!("\n  {}", t!("info.label.no_scripts").dimmed());
-        }
-        return Ok(());
-    }
-
-    println!("\n  {}:", title.blue());
-    let mut sorted_keys: Vec<_> = tasks.keys().cloned().collect();
-    sorted_keys.sort();
-
-    for task_name in sorted_keys {
-        let task = tasks.get(&task_name).unwrap(); // Safe
-        print!("    - {}", task_name.cyan());
-
-        // [NEW] Find and display the source of the task for inherited items.
-        let source_project_name = find_task_source(key, &task_name, config, index)?;
-        if source_project_name != config.qualified_name {
-            print!(
-                " {}",
-                format!(
-                    "[{}]",
-                    format_args!(t!("common.label.inherited"), from = source_project_name)
-                )
-                .dimmed()
-            );
-        }
-
-        if let Some(d) = &task.desc
-            && !d.trim().is_empty()
-        {
-            print!(": {}", d.dimmed());
-        }
-
-        // For `vars`, we also display the rendered value.
-        if key == "vars" {
-            let display_val = render_task_to_string(task);
-            print!(" = {}", format_args!("\"{}\"", display_val));
-        }
-        println!();
-    }
-    Ok(())
-}
+//fn print_task_map(
+//    key: &str,
+//    title: &str,
+//    config: &ResolvedConfig,
+//    index: &GlobalIndex,
+//) -> Result<()> {
+//    let tasks = if key == "scripts" {
+//        config.get_all_scripts()?
+//    } else {
+//        config.get_all_vars()?
+//    };
+//
+//    if tasks.is_empty() {
+//        if key == "scripts" {
+//            println!("\n  {}", t!("info.label.no_scripts").dimmed());
+//        }
+//        return Ok(());
+//    }
+//
+//    println!("\n  {}:", title.blue());
+//    let mut sorted_keys: Vec<_> = tasks.keys().cloned().collect();
+//    sorted_keys.sort();
+//
+//    for task_name in sorted_keys {
+//        let task = tasks.get(&task_name).unwrap(); // Safe
+//        print!("    - {}", task_name.cyan());
+//
+//        // [NEW] Find and display the source of the task for inherited items.
+//        let source_project_name = find_task_source(key, &task_name, config, index)?;
+//        if source_project_name != config.qualified_name {
+//            print!(
+//                " {}",
+//                format!(
+//                    "[{}]",
+//                    format_args!(t!("common.label.inherited"), from = source_project_name)
+//                )
+//                .dimmed()
+//            );
+//        }
+//
+//        if let Some(d) = &task.desc
+//            && !d.trim().is_empty()
+//        {
+//            print!(": {}", d.dimmed());
+//        }
+//
+//        // For `vars`, we also display the rendered value.
+//        if key == "vars" {
+//            let display_val = render_task_to_string(task);
+//            print!(" = {}", format_args!("\"{}\"", display_val));
+//        }
+//        println!();
+//    }
+//    Ok(())
+//}
 
 /// Prints all merged environment variables.
 fn print_env(config: &ResolvedConfig) -> Result<()> {
@@ -225,18 +225,18 @@ fn render_template_to_string(template: &[TemplateComponent]) -> String {
 }
 
 /// Renders a single Task back to its most representative string form.
-fn render_task_to_string(task: &Arc<Task>) -> String {
-    task.commands
-        .iter()
-        .map(|cmd| {
-            let template = match &cmd.action {
-                CommandAction::Execute(t) | CommandAction::Print(t) => t,
-            };
-            render_template_to_string(template)
-        })
-        .collect::<Vec<_>>()
-        .join(" && ")
-}
+//fn render_task_to_string(task: &Arc<Task>) -> String {
+//    task.commands
+//        .iter()
+//        .map(|cmd| {
+//            let template = match &cmd.action {
+//                CommandAction::Execute(t) | CommandAction::Print(t) => t,
+//            };
+//            render_template_to_string(template)
+//        })
+//        .collect::<Vec<_>>()
+//        .join(" && ")
+//}
 
 /// Renders a single TemplateComponent to its string representation.
 fn render_component_to_string(component: &TemplateComponent) -> String {
@@ -265,19 +265,20 @@ fn render_component_to_string(component: &TemplateComponent) -> String {
 
 /// [NEW] Traverses the hierarchy to find which project a script/var originates from.
 pub(crate) fn find_task_source(
-    key: &str,
+    key: &str, // "scripts" or "vars"
     task_name: &str,
     config: &ResolvedConfig,
     index: &GlobalIndex,
 ) -> Result<String> {
     for uuid in config.hierarchy.iter() {
         let layer = config.get_layer(*uuid)?;
-        let tasks = if key == "scripts" {
-            &layer.scripts
+        let tasks_exist = if key == "scripts" {
+            layer.scripts.contains_key(task_name)
         } else {
-            &layer.vars
+            layer.vars.contains_key(task_name)
         };
-        if tasks.contains_key(task_name) {
+
+        if tasks_exist {
             return Ok(index_manager::build_qualified_name(*uuid, index)
                 .unwrap_or_else(|| "unknown".to_string()));
         }

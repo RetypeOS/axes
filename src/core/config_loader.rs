@@ -1,13 +1,12 @@
-// EN: src/core/config_loader.rs (FINAL VERSION)
-
 use crate::{
-    core::config_resolver,
-    models::{GlobalIndex, LayerPromise, LayerResult, ResolvedConfig},
+    core::compiler,
+    models::{GlobalIndex, LayerPromise, ResolvedConfig},
 };
 use anyhow::{Result, anyhow};
 use log;
+use rayon::prelude::*;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock}; // Import Mutex
+use std::sync::{Arc, Mutex, OnceLock};
 use uuid::Uuid;
 
 /// Orchestrates the loading of configuration layers for a project hierarchy.
@@ -26,16 +25,19 @@ impl<'a> ConfigLoader<'a> {
     pub fn resolve(&mut self, uuid: Uuid) -> Result<ResolvedConfig> {
         log::debug!("ConfigLoader resolving UUID: {}", uuid);
 
-        // 1. Determine the full inheritance hierarchy (unchanged).
+        // 1. Determine the full inheritance hierarchy.
         let mut hierarchy = Vec::new();
         let mut current_uuid = Some(uuid);
         while let Some(id) = current_uuid {
             hierarchy.push(id);
-            let entry = self
-                .index
-                .projects
-                .get(&id)
-                .ok_or_else(|| anyhow!("Broken parent link in hierarchy for UUID {}", id))?;
+            let entry = self.index.projects.get(&id).ok_or_else(|| {
+                let child_uuid = hierarchy.get(hierarchy.len().saturating_sub(2)).unwrap_or(&uuid);
+                anyhow!(
+                    "Data Integrity Error: Project UUID '{}' lists a parent with UUID '{}', but no such project exists in the index.",
+                    child_uuid,
+                    id
+                )
+            })?;
             current_uuid = entry.parent;
         }
 
@@ -47,58 +49,46 @@ impl<'a> ConfigLoader<'a> {
 
         let index_updates = Arc::new(Mutex::new(Vec::new()));
 
-        let index_ref = &*self.index;
+        // Create an immutable reference to the index to share across threads.
+        let index_ref: &GlobalIndex = self.index;
 
-        rayon::scope(|s| {
-            for &layer_uuid in &hierarchy {
-                let promise = layer_promises.get(&layer_uuid).unwrap().clone();
-                let updates_clone = index_updates.clone();
+        hierarchy.par_iter().for_each(|&layer_uuid| {
+            let promise = layer_promises.get(&layer_uuid).unwrap();
 
-                s.spawn(move |_| {
-                    log::trace!("Spawned load task for UUID: {}", layer_uuid);
-                    // Llama a la tarea de carga
-                    let task_result = config_resolver::load_layer_task(layer_uuid, index_ref);
+            log::trace!("Executing load task for UUID: {}", layer_uuid);
+            let task_result = compiler::load_layer_task(layer_uuid, index_ref);
 
-                    // --- CORRECTED LOGIC ---
-                    // Ahora manejamos el resultado explícitamente y llenamos la promesa
-                    // con el tipo correcto `LayerResult`.
+            // The result that will be stored in the promise.
+            // We simplify the match logic to be more direct.
+            let layer_result_for_promise = match task_result {
+                Ok((layer_arc, Some(update))) => {
+                    index_updates.lock().unwrap().push(update);
+                    Ok(layer_arc)
+                }
+                Ok((layer_arc, None)) => Ok(layer_arc),
+                Err(e) => Err(e),
+            };
 
-                    let layer_result_for_promise: LayerResult;
-
-                    match task_result {
-                        Ok((layer_arc, Some(update))) => {
-                            // Carga exitosa, con actualización de índice
-                            layer_result_for_promise = Ok(layer_arc);
-                            updates_clone.lock().unwrap().push(update);
-                        }
-                        Ok((layer_arc, None)) => {
-                            // Carga exitosa, sin actualización
-                            layer_result_for_promise = Ok(layer_arc);
-                        }
-                        Err(e) => {
-                            // La tarea de carga falló
-                            layer_result_for_promise = Err(e);
-                        }
-                    }
-
-                    // `set` solo puede fallar si la celda ya está llena, lo cual es imposible aquí.
-                    if promise.set(layer_result_for_promise).is_err() {
-                        log::error!("CRITICAL: LayerPromise for {} was set twice.", layer_uuid);
-                    }
-                });
+            // `set` can only fail if the cell is already full, which is impossible in this
+            // single-producer logic, but we log a critical error just in case.
+            if promise.set(layer_result_for_promise).is_err() {
+                log::error!(
+                    "CRITICAL: LayerPromise for {} was set twice. This indicates a logic error.",
+                    layer_uuid
+                );
             }
         });
 
-        // 4. Apply all collected index updates sequentially (unchanged).
-        // By this point, all spawned tasks in the scope have completed.
+        // 4. Apply all collected index updates sequentially.
+        // This part runs after the parallel section is fully completed.
         let updates_to_apply = Arc::try_unwrap(index_updates)
-            .expect("Mutex should not be locked elsewhere")
+            .expect("Mutex should not be locked elsewhere at this point")
             .into_inner()
             .unwrap();
 
         if !updates_to_apply.is_empty() {
             log::debug!(
-                "Applying {} updates to the global index.",
+                "Applying {} cache metadata updates to the global index.",
                 updates_to_apply.len()
             );
             for update in updates_to_apply {
@@ -109,8 +99,8 @@ impl<'a> ConfigLoader<'a> {
             }
         }
 
-        // 5. Construct and return the lazy facade (unchanged).
-        let primary_entry = self.index.projects.get(&uuid).unwrap();
+        // 5. Construct and return the lazy facade.
+        let primary_entry = self.index.projects.get(&uuid).unwrap(); // Safe due to hierarchy check
         let qualified_name = crate::core::index_manager::build_qualified_name(uuid, self.index)
             .unwrap_or_else(|| primary_entry.name.clone());
 

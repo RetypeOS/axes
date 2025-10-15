@@ -1,5 +1,3 @@
-// src/core/index_manager.rs
-
 use crate::constants::PROJECT_REF_FILENAME;
 use crate::core::paths;
 use crate::models::{GlobalIndex, IndexEntry, ProjectRef};
@@ -251,61 +249,47 @@ pub fn link_project(
     project_to_move_uuid: Uuid,
     new_parent_uuid: Uuid,
 ) -> IndexResult<()> {
-    // 1. A project cannot be moved to itself or to `global` arbitrarily if it is already a child of `global`.
     if project_to_move_uuid == new_parent_uuid {
         return Err(IndexError::CircularDependency {
             cycle_node_uuid: project_to_move_uuid,
         });
     }
-    // A project cannot be its own parent.
 
-    // 2. Anti-Cycle Validation
-    // We create a temporary copy of the index with the proposed change to test the cycle.
-    let mut temp_index_for_cycle_check = index.clone(); // Needs `Clone` for GlobalIndex
-    if let Some(entry_to_modify) = temp_index_for_cycle_check
-        .projects
-        .get_mut(&project_to_move_uuid)
-    {
-        entry_to_modify.parent = Some(new_parent_uuid);
-    } else {
-        return Err(IndexError::ProjectNotFoundInIndex {
-            uuid: project_to_move_uuid,
+    // --- OPTIMIZATION: Anti-Cycle Validation without cloning the index ---
+    // A cycle occurs if the `new_parent_uuid` is a descendant of `project_to_move_uuid`.
+    // We can check this by traversing *down* from the project to move.
+    let descendants = get_all_descendants(index, project_to_move_uuid);
+    if descendants.contains(&new_parent_uuid) {
+        return Err(IndexError::CircularDependency {
+            // The cycle is formed because the new parent is already a child.
+            cycle_node_uuid: new_parent_uuid,
         });
     }
 
-    if let Some(cycle_node_uuid) =
-        find_cycle_from_node(project_to_move_uuid, &temp_index_for_cycle_check)?
-    {
-        return Err(IndexError::CircularDependency { cycle_node_uuid });
-    }
-
-    // 3. Sibling Name Collision Validation
-    let project_to_move_entry = index.projects.get(&project_to_move_uuid).ok_or({
-        IndexError::ProjectNotFoundInIndex {
+    // --- Sibling Name Collision Validation (can be made more efficient) ---
+    let project_name_to_move = index
+        .projects
+        .get(&project_to_move_uuid)
+        .ok_or(IndexError::ProjectNotFoundInIndex {
             uuid: project_to_move_uuid,
-        }
-    })?;
+        })?
+        .name
+        .clone(); // Clone the name here to release the borrow on `index`
 
-    let sibling_name_exists = index.projects.iter().any(|(uuid, entry)| {
-        *uuid != project_to_move_uuid && // It is not the project we are moving
-        entry.parent == Some(new_parent_uuid) && // It is a child of the new parent
-        entry.name == project_to_move_entry.name // And has the same name
-    });
-
-    if sibling_name_exists {
+    if is_sibling_name_taken(
+        index,
+        new_parent_uuid,
+        &project_name_to_move,
+        Some(project_to_move_uuid),
+    ) {
         return Err(IndexError::NameAlreadyExists {
-            name: project_to_move_entry.name.clone(),
+            name: project_name_to_move,
         });
     }
 
     // 4. If all validations pass, make the change in the actual index.
-    if let Some(entry_to_modify) = index.projects.get_mut(&project_to_move_uuid) {
-        entry_to_modify.parent = Some(new_parent_uuid);
-    } else {
-        return Err(IndexError::ProjectNotFoundInIndex {
-            uuid: project_to_move_uuid,
-        });
-    }
+    let entry_to_modify = index.projects.get_mut(&project_to_move_uuid).unwrap();
+    entry_to_modify.parent = Some(new_parent_uuid);
 
     Ok(())
 }
@@ -353,14 +337,14 @@ pub fn get_or_create_project_ref(
     }
 }
 
-/// Deletes a project from the index. Re-parents its direct children to 'global'.
-pub fn delete_project_entry(index: &mut GlobalIndex, target_uuid: Uuid) -> Option<IndexEntry> {
+/// Removes a project entry from the index, reparenting its direct children to the global project.
+pub fn unregister_project_entry(index: &mut GlobalIndex, target_uuid: Uuid) -> Option<IndexEntry> {
     if target_uuid == GLOBAL_PROJECT_UUID {
-        log::error!("No se puede eliminar el proyecto 'global'.");
-        return None; // Cannot delete the global project
+        log::error!("Attempted to unregister the 'global' project, which is not allowed.");
+        return None;
     }
 
-    // Find all direct children of the node to be deleted
+    // The current approach is clear and works on stable Rust.
     let children_to_reparent: Vec<Uuid> = index
         .projects
         .iter()
@@ -368,14 +352,18 @@ pub fn delete_project_entry(index: &mut GlobalIndex, target_uuid: Uuid) -> Optio
         .map(|(uuid, _)| *uuid)
         .collect();
 
-    // Re-parent them to `global`
     for child_uuid in children_to_reparent {
         if let Some(child_entry) = index.projects.get_mut(&child_uuid) {
+            log::debug!(
+                "Reparenting child '{}' ({}) to global project.",
+                child_entry.name,
+                child_uuid
+            );
             child_entry.parent = Some(GLOBAL_PROJECT_UUID);
         }
     }
 
-    // Finally, delete the project entry
+    // Finally, remove the project entry
     index.projects.remove(&target_uuid)
 }
 
@@ -421,50 +409,66 @@ pub fn reparent_children(
     old_parent_uuid: Uuid,
     new_parent_uuid: Uuid,
 ) -> Result<Vec<String>, IndexError> {
-    let mut warnings = Vec::new();
-    let old_parent_name = index.projects.get(&old_parent_uuid).unwrap().name.clone();
+    // Handle case where a project is reparented to itself (no-op).
+    if old_parent_uuid == new_parent_uuid {
+        return Ok(Vec::new());
+    }
 
-    // Collect children to avoid borrowing issues
-    let children_uuids: Vec<Uuid> = index
+    let mut warnings = Vec::new();
+    let old_parent_name = index
         .projects
-        .values()
-        .filter(|e| e.parent == Some(old_parent_uuid))
-        .map(|e| index.projects.iter().find(|(_, val)| *val == e).unwrap().0) // Find UUID for entry
-        .cloned()
+        .get(&old_parent_uuid)
+        .ok_or(IndexError::ProjectNotFoundInIndex {
+            uuid: old_parent_uuid,
+        })?
+        .name
+        .clone();
+
+    // Collect (uuid, name) tuples directly to avoid repeated lookups.
+    let children_to_move: Vec<(Uuid, String)> = index
+        .projects
+        .iter()
+        .filter(|(_, entry)| entry.parent == Some(old_parent_uuid))
+        .map(|(uuid, entry)| (*uuid, entry.name.clone()))
         .collect();
 
-    for child_uuid in children_uuids {
-        let mut child_name = index.projects.get(&child_uuid).unwrap().name.clone();
+    if children_to_move.is_empty() {
+        return Ok(warnings);
+    }
 
-        // Check for initial collision
-        let sibling_names: HashSet<String> = index
-            .projects
-            .values()
-            .filter(|e| e.parent == Some(new_parent_uuid))
-            .map(|e| e.name.clone())
-            .collect();
+    // Pre-calculate sibling names at the destination once.
+    let new_sibling_names: HashSet<String> = index
+        .projects
+        .values()
+        .filter(|e| e.parent == Some(new_parent_uuid))
+        .map(|e| e.name.clone())
+        .collect();
 
-        if sibling_names.contains(&child_name) {
+    for (child_uuid, original_child_name) in children_to_move {
+        let mut final_child_name = original_child_name.clone();
+
+        if new_sibling_names.contains(&final_child_name) {
             // Collision detected, try automatic rename
-            let new_child_name = format!("{}_{}", old_parent_name, child_name);
-            if sibling_names.contains(&new_child_name) {
-                // Automatic rename also fails, abort entire operation
+            let suggested_name = format!("{}_{}", old_parent_name, final_child_name);
+            if new_sibling_names.contains(&suggested_name) || 
+               // Also check against other children being moved in the same batch
+               index.projects.get(&child_uuid).unwrap().name != final_child_name
+            {
                 return Err(IndexError::NameAlreadyExists {
-                    name: new_child_name,
+                    name: suggested_name,
                 });
             }
 
-            // Automatic rename is safe, update name and add a warning
             warnings.push(format!(
                 "Child '{}' was automatically renamed to '{}' to avoid collision.",
-                child_name, new_child_name
+                final_child_name, suggested_name
             ));
-            child_name = new_child_name;
+            final_child_name = suggested_name;
         }
 
         // Apply changes
         let child_entry = index.projects.get_mut(&child_uuid).unwrap();
-        child_entry.name = child_name;
+        child_entry.name = final_child_name;
         child_entry.parent = Some(new_parent_uuid);
     }
 
@@ -473,19 +477,18 @@ pub fn reparent_children(
 
 /// Reconstructs a project's qualified name by traversing up the parent tree.
 pub fn build_qualified_name(start_uuid: Uuid, index: &GlobalIndex) -> Option<String> {
-    let mut parts = Vec::new();
+    let mut parts = Vec::with_capacity(8);
     let mut current_uuid = Some(start_uuid);
 
     while let Some(uuid) = current_uuid {
+        if uuid == GLOBAL_PROJECT_UUID {
+            break;
+        }
+
         if let Some(entry) = index.projects.get(&uuid) {
-            parts.push(entry.name.clone());
+            parts.push(entry.name.as_str());
             current_uuid = entry.parent;
-            // If parent is `None`, we have reached the root of the `axes` tree.
-            if entry.parent.is_none() {
-                break;
-            }
         } else {
-            // Broken link, unable to build full name.
             return None;
         }
     }
