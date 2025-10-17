@@ -1,50 +1,56 @@
 use crate::{
     core::{color, commons::wrap_value, parameters::ArgResolver},
-    models::{CommandAction, GlobalIndex, ResolvedConfig, RunSpec, Task, TemplateComponent},
+    models::{CommandAction, GlobalIndex, PlatformSpecializedTask, ResolvedConfig, RunSpec, TemplateComponent},
     system::executor,
 };
 use anyhow::{Context, Result, anyhow};
 use colored::*;
 use rayon::prelude::*;
-use std::{fmt::Write, sync::Arc};
+use std::{fmt::Write};
 
 // --- Main Public Function ---
 
-/// Executes a complete `Task` object, handling sequential, parallel, and composed commands.
-/// This is the entry point for running a script.
+/// Executes a platform-specialized task. This is the hot path for script execution.
 pub fn execute_task(
-    task: &Arc<Task>,
+    specialized_task: &PlatformSpecializedTask,
     config: &ResolvedConfig,
     resolver: &ArgResolver,
     index: &mut GlobalIndex,
 ) -> Result<()> {
-    execute_task_inner(task, config, resolver, index, 0)
+    execute_task_inner(specialized_task, config, resolver, index, 0)
 }
 
 // --- Internal Recursive Executor ---
 
+/// The internal, recursive executor for a platform-specialized task.
+///
+/// This function is on the "hot path" for script execution. It is highly optimized to simply
+/// iterate over a flat list of `CommandExecution`s, render their templates, and dispatch them
+/// sequentially or in parallel batches. All complex logic like platform selection and composition
+/// has already been handled before this function is called.
+///
+/// # Arguments
+/// * `specialized_task` - A task that has been pre-processed for the current platform.
+/// * `config` - The fully resolved project configuration facade.
+/// * `resolver` - The argument resolver containing values for parameter tokens.
+/// * `index` - The global index, passed down for `<run(...)>` substitutions.
+/// * `depth` - The current recursion depth, to prevent infinite loops from `<run(...)>` tokens.
 fn execute_task_inner(
-    task: &Arc<Task>,
+    specialized_task: &PlatformSpecializedTask,
     config: &ResolvedConfig,
     resolver: &ArgResolver,
     index: &mut GlobalIndex,
     depth: u32,
 ) -> Result<()> {
+    // A batch of commands to be executed in parallel.
+    // Storing `String` is necessary as `assemble_final_command` returns an owned string.
     let mut parallel_batch: Vec<(String, bool, bool)> = Vec::new();
 
-    // The main loop now iterates over PlatformExecution blocks.
-    for plat_exec in &task.commands {
-        // Runtime platform selection
-        let command_exec = match config.select_platform_exec(plat_exec) {
-            Some(cmd) => cmd,
-            None => {
-                // If there's no command for the current platform (and no default),
-                // we just skip it. This allows for platform-specific optional steps.
-                log::debug!("Skipping command for current platform.");
-                continue;
-            }
-        };
-
+    // --- OPTIMIZED HOT LOOP ---
+    // This loop iterates over a simple, flat `Vec<CommandExecution>`.
+    // There are no branches for platform selection, making it extremely fast.
+    for command_exec in &specialized_task.commands {
+        // If the current command is sequential, execute any pending parallel batch first.
         if !command_exec.run_in_parallel && !parallel_batch.is_empty() {
             execute_parallel_batch(&parallel_batch, config)?;
             parallel_batch.clear();
@@ -52,18 +58,21 @@ fn execute_task_inner(
 
         match &command_exec.action {
             CommandAction::Execute(template) => {
-                // NOTE: Pure composition is now handled by `flatten_task` before execution.
-                // The executor only deals with commands that need to be rendered and run.
+                // Render the final command string from the template components.
                 let rendered_string =
                     assemble_final_command(template, config, resolver, index, depth)?;
+
+                // Skip execution if the rendered command is empty after trimming whitespace.
                 if !rendered_string.trim().is_empty() {
                     if command_exec.run_in_parallel {
+                        // Add the owned string and its modifiers to the parallel batch.
                         parallel_batch.push((
-                            rendered_string,
+                            rendered_string, // Move the owned string
                             command_exec.ignore_errors,
                             command_exec.silent_mode,
                         ));
                     } else {
+                        // Execute sequentially. We can pass a `&str` slice to avoid allocations.
                         execute_single_command(
                             rendered_string.trim(),
                             command_exec.ignore_errors,
@@ -81,6 +90,7 @@ fn execute_task_inner(
         }
     }
 
+    // Execute any remaining commands in the final parallel batch.
     if !parallel_batch.is_empty() {
         execute_parallel_batch(&parallel_batch, config)?;
     }

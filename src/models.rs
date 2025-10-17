@@ -255,6 +255,16 @@ pub struct Task {
     pub commands: Vec<PlatformExecution>,
 }
 
+/// Represents a `Task` that has been "specialized" for the current platform.
+/// It contains a simple, flat list of commands to be executed, removing the need
+/// for runtime platform selection in the hot loop of the executor.
+/// This is a performance optimization structure.
+#[derive(Debug, Clone, Default)]
+pub struct PlatformSpecializedTask {
+    pub desc: Option<String>,
+    pub commands: Vec<CommandExecution>,
+}
+
 /// The new, platform-agnostic AST representation of a variable. It contains a single
 /// `PlatformExecution` block, enforcing the "single value" semantic.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -623,10 +633,31 @@ impl ResolvedConfig {
 
     // --- TASK FLATTENING LOGIC ---
 
+    /// This function iterates through the `PlatformExecution` blocks of a universal task
+    /// and selects the appropriate `CommandExecution` for the current operating system.
+    /// The result is a flat, simple list of commands, ready for the fastest possible execution,
+    /// eliminating the need for platform checks in the executor's hot loop.
+    pub fn specialize_task_for_platform(
+        &self,
+        universal_task: &Arc<Task>,
+    ) -> PlatformSpecializedTask {
+        let specialized_commands: Vec<CommandExecution> = universal_task
+            .commands
+            .iter()
+            .filter_map(|plat_exec| self.select_platform_exec(plat_exec).cloned())
+            .collect();
+
+        PlatformSpecializedTask {
+            desc: universal_task.desc.clone(),
+            commands: specialized_commands,
+        }
+    }
+
     pub fn flatten_task(&self, top_level_task: &Arc<Task>) -> Result<Arc<Task>> {
         let mut call_stack = HashSet::new();
         self.flatten_task_recursive(top_level_task, &mut call_stack)
     }
+
     fn flatten_task_recursive(
         &self,
         task: &Arc<Task>,

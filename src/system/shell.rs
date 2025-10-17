@@ -65,12 +65,10 @@ pub fn launch_session(
         .ok_or_else(|| ShellError::ShellNotDefined(shell_name.clone()))?;
 
     // 2. If an `at_start` task exists, render its commands into a script.
+    // Esta lógica es especial y no usa `execute_task`, por lo que se mantiene.
     let at_start_final_commands = if let Some(task) = &task_start {
-        println!(
-            "\n{}",
-            format!(t!("start.info.preparing_hook"), hook = "at_start").dimmed()
-        );
-
+        println!("\n{}", format!(t!("start.info.preparing_hook"), hook = "at_start").dimmed());
+        
         let mut commands = Vec::new();
         for plat_exec in &task.commands {
             if let Some(cmd_exec) = config.select_platform_exec(plat_exec) {
@@ -79,9 +77,7 @@ pub fn launch_session(
                         task_executor::assemble_final_command(template, config, resolver, index, 0)?
                     }
                     CommandAction::Print(template) => {
-                        let text = task_executor::assemble_final_command(
-                            template, config, resolver, index, 0,
-                        )?;
+                        let text = task_executor::assemble_final_command(template, config, resolver, index, 0)?;
                         format!("echo \"{}\"", text.replace('"', "\\\""))
                     }
                 };
@@ -167,13 +163,16 @@ pub fn launch_session(
     let _ = fs::remove_file(&temp_script_path);
 
     // 5. Execute the `at_exit` task if it exists.
-    if let Some(task) = &task_exit {
-        println!(
-            "\n{}",
-            format!(t!("start.info.executing_hook"), hook = "at_exit").dimmed()
-        );
-        task_executor::execute_task(task, config, resolver, index)?;
+    if let Some(task_universal) = &task_exit {
+        println!("\n{}", format!(t!("start.info.executing_hook"), hook = "at_exit").dimmed());
+        
+        // Specialize the `at_exit` task for the current platform before execution.
+        let task_specialized = config.specialize_task_for_platform(task_universal);
+        
+        // Pass the optimized, specialized task to the executor.
+        task_executor::execute_task(&task_specialized, config, resolver, index)?;
     }
+
 
     Ok(())
 }
