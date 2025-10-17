@@ -170,42 +170,6 @@ pub fn write_project_ref(project_root: &Path, project_ref: &ProjectRef) -> Index
     Ok(())
 }
 
-pub fn rename_project(
-    index: &mut GlobalIndex,
-    target_uuid: Uuid,
-    new_name: &str,
-) -> IndexResult<()> {
-    // 1. Get the entry. Robust. `ok_or_else` prevents a panic if the UUID is invalid.
-    let target_entry = index
-        .projects
-        .get(&target_uuid)
-        .ok_or(IndexError::ProjectNotFoundInIndex { uuid: target_uuid })?;
-
-    let parent_uuid = target_entry.parent;
-
-    // 2. Collision validation. Robust. The logic with `.any()` is correct and efficient.
-    // The `*uuid != target_uuid` ensures we don't compare ourselves to ourselves.
-    let sibling_name_exists = index.projects.iter().any(|(uuid, entry)| {
-        *uuid != target_uuid && entry.parent == parent_uuid && entry.name == new_name
-    });
-
-    if sibling_name_exists {
-        return Err(IndexError::NameAlreadyExists {
-            name: new_name.to_string(),
-        });
-    }
-
-    // 3. Modification. Robust. `get_mut` is the correct way to modify a value in a HashMap.
-    // The `else` with `Err` is an extra layer of security, although theoretically unreachable.
-    if let Some(entry_to_modify) = index.projects.get_mut(&target_uuid) {
-        entry_to_modify.name = new_name.to_string();
-    } else {
-        return Err(IndexError::ProjectNotFoundInIndex { uuid: target_uuid });
-    }
-
-    Ok(())
-}
-
 pub fn find_cycle_from_node(
     start_node_uuid: Uuid,
     index: &GlobalIndex,
@@ -244,37 +208,70 @@ pub fn find_cycle_from_node(
     Ok(None) // The loop never executed (start_node_uuid was None) or no cycle was found.
 }
 
+/// Atomically links a project to a new parent within the index.
+///
+/// This operation is "transactional" in nature and performs several critical steps:
+/// 1.  **Safety Checks:** It validates that the link operation is valid by checking for:
+///     -   Attempts to link a project to itself.
+///     -   Circular dependencies (e.g., attempting to make a parent a child of its own descendant).
+///     -   Name collisions under the new parent.
+/// 2.  **In-Memory Index Update:** If all checks pass, it modifies the `parent` UUID of the
+///     project's `IndexEntry` within the `GlobalIndex`.
+/// 3.  **Local State Synchronization:** It immediately updates the `.axes/project_ref.bin` file
+///     of the moved project to reflect the new parentage.
+///
+/// If updating the local `project_ref.bin` fails, an error is logged, but the in-memory
+/// change is *not* rolled back. This maintains consistency with the principle that the in-memory
+/// index is the source of truth for the current session, and discrepancies can be fixed
+/// with the `axes repair` command.
+///
+/// # Arguments
+/// * `index` - A mutable reference to the `GlobalIndex`.
+/// * `project_to_move_uuid` - The `Uuid` of the project being moved.
+/// * `new_parent_uuid` - The `Uuid` of the new parent project.
+///
+/// # Errors
+/// Returns an `IndexError` if any safety check fails.
 pub fn link_project(
     index: &mut GlobalIndex,
     project_to_move_uuid: Uuid,
     new_parent_uuid: Uuid,
 ) -> IndexResult<()> {
+    // --- 1. Pre-flight Safety Checks ---
+
+    // A project cannot be its own parent.
     if project_to_move_uuid == new_parent_uuid {
         return Err(IndexError::CircularDependency {
             cycle_node_uuid: project_to_move_uuid,
         });
     }
 
-    // --- OPTIMIZATION: Anti-Cycle Validation without cloning the index ---
-    // A cycle occurs if the `new_parent_uuid` is a descendant of `project_to_move_uuid`.
-    // We can check this by traversing *down* from the project to move.
+    // Anti-Cycle Validation: A cycle is created if the new parent is already a
+    // descendant of the project we are trying to move.
     let descendants = get_all_descendants(index, project_to_move_uuid);
     if descendants.contains(&new_parent_uuid) {
+        log::error!(
+            "Link operation aborted: circular dependency detected. Cannot make project {} a child of its own descendant {}.",
+            project_to_move_uuid,
+            new_parent_uuid
+        );
         return Err(IndexError::CircularDependency {
-            // The cycle is formed because the new parent is already a child.
             cycle_node_uuid: new_parent_uuid,
         });
     }
 
-    // --- Sibling Name Collision Validation (can be made more efficient) ---
-    let project_name_to_move = index
-        .projects
-        .get(&project_to_move_uuid)
-        .ok_or(IndexError::ProjectNotFoundInIndex {
-            uuid: project_to_move_uuid,
-        })?
-        .name
-        .clone(); // Clone the name here to release the borrow on `index`
+    // Sibling Name Collision Validation: Check if another child with the same name
+    // already exists under the new parent.
+    let project_to_move_entry =
+        index
+            .projects
+            .get(&project_to_move_uuid)
+            .ok_or(IndexError::ProjectNotFoundInIndex {
+                uuid: project_to_move_uuid,
+            })?;
+
+    let project_name_to_move = project_to_move_entry.name.clone();
+    let project_root = project_to_move_entry.path.clone();
 
     if is_sibling_name_taken(
         index,
@@ -287,9 +284,46 @@ pub fn link_project(
         });
     }
 
-    // 4. If all validations pass, make the change in the actual index.
+    // --- 2. Execute Transactional Update ---
+
+    // Step 2a: Modify the in-memory index. This is the primary state change.
+    // We can safely unwrap here because we've already fetched the entry above.
     let entry_to_modify = index.projects.get_mut(&project_to_move_uuid).unwrap();
     entry_to_modify.parent = Some(new_parent_uuid);
+    log::debug!(
+        "Updated parent of project {} to {} in memory.",
+        project_to_move_uuid,
+        new_parent_uuid
+    );
+
+    // Step 2b: Synchronize the change to the local `.axes/project_ref.bin`.
+    log::debug!(
+        "Updating local project_ref.bin for linked project {}",
+        project_to_move_uuid
+    );
+    match get_or_create_project_ref(&project_root, project_to_move_uuid, index) {
+        Ok(mut project_ref) => {
+            project_ref.parent_uuid = Some(new_parent_uuid);
+            if let Err(e) = write_project_ref(&project_root, &project_ref) {
+                // This is a non-fatal error for the operation itself, but critical to log.
+                // It indicates a desynchronization between the global index and the local state.
+                log::error!(
+                    "Failed to update project_ref.bin for '{}' at '{}': {}. The global index is now ahead of the local ref. Run 'axes repair' to fix.",
+                    project_name_to_move,
+                    project_root.display(),
+                    e
+                );
+            }
+        }
+        Err(e) => {
+            log::error!(
+                "Could not read or create project_ref.bin for '{}' at '{}': {}. Local ref is out of sync.",
+                project_name_to_move,
+                project_root.display(),
+                e
+            );
+        }
+    }
 
     Ok(())
 }
@@ -450,9 +484,9 @@ pub fn reparent_children(
         if new_sibling_names.contains(&final_child_name) {
             // Collision detected, try automatic rename
             let suggested_name = format!("{}_{}", old_parent_name, final_child_name);
-            if new_sibling_names.contains(&suggested_name) || 
-               // Also check against other children being moved in the same batch
-               index.projects.get(&child_uuid).unwrap().name != final_child_name
+            // Also check against other children being moved in the same batch
+            if new_sibling_names.contains(&suggested_name)
+                || index.projects.get(&child_uuid).unwrap().name != final_child_name
             {
                 return Err(IndexError::NameAlreadyExists {
                     name: suggested_name,
@@ -477,18 +511,33 @@ pub fn reparent_children(
 
 /// Reconstructs a project's qualified name by traversing up the parent tree.
 pub fn build_qualified_name(start_uuid: Uuid, index: &GlobalIndex) -> Option<String> {
+    // --- SPECIAL CASE: Handle the global project itself ---
+    if start_uuid == GLOBAL_PROJECT_UUID {
+        // The qualified name of the global project is just its name.
+        return index
+            .projects
+            .get(&GLOBAL_PROJECT_UUID)
+            .map(|e| e.name.clone());
+    }
+
     let mut parts = Vec::with_capacity(8);
-    let mut current_uuid = Some(start_uuid);
+    let mut current_uuid_opt = Some(start_uuid);
 
-    while let Some(uuid) = current_uuid {
-        if uuid == GLOBAL_PROJECT_UUID {
-            break;
-        }
-
-        if let Some(entry) = index.projects.get(&uuid) {
+    while let Some(current_uuid) = current_uuid_opt {
+        if let Some(entry) = index.projects.get(&current_uuid) {
+            // Stop traversing upwards when we reach a direct child of 'global'.
+            // We add its name, but then we stop, to avoid the "global/" prefix.
             parts.push(entry.name.as_str());
-            current_uuid = entry.parent;
+            if entry.parent == Some(GLOBAL_PROJECT_UUID) {
+                break;
+            }
+            current_uuid_opt = entry.parent;
         } else {
+            // Broken parent link in the hierarchy.
+            log::warn!(
+                "Broken parent link detected while building qualified name for UUID: {}",
+                start_uuid
+            );
             return None;
         }
     }
@@ -520,4 +569,81 @@ pub fn is_sibling_name_taken(
     index.projects.iter().any(|(uuid, entry)| {
         entry.parent == Some(parent_uuid) && entry.name == name && (self_uuid != Some(*uuid))
     })
+}
+
+/// Atomically renames a project in the index and synchronizes its local `project_ref.bin`.
+///
+/// This function ensures that both the in-memory global index and the on-disk local
+/// project identity are updated as a single logical operation.
+///
+/// # Arguments
+/// * `index` - A mutable reference to the `GlobalIndex`.
+/// * `target_uuid` - The `Uuid` of the project to rename.
+/// * `new_name` - The new simple name for the project.
+///
+/// # Errors
+/// Returns an `IndexError` if the project is not found or if the new name
+/// collides with an existing sibling project.
+pub fn rename_project(
+    index: &mut GlobalIndex,
+    target_uuid: Uuid,
+    new_name: &str,
+) -> IndexResult<()> {
+    // 1. Get the entry and check for name collisions.
+    let target_entry = index
+        .projects
+        .get(&target_uuid)
+        .ok_or(IndexError::ProjectNotFoundInIndex { uuid: target_uuid })?;
+
+    if is_sibling_name_taken(
+        index,
+        target_entry.parent.unwrap_or(GLOBAL_PROJECT_UUID),
+        new_name,
+        Some(target_uuid),
+    ) {
+        return Err(IndexError::NameAlreadyExists {
+            name: new_name.to_string(),
+        });
+    }
+
+    let project_root = target_entry.path.clone();
+
+    // 2. Modify the in-memory index.
+    // We can unwrap here because we've already confirmed the entry exists.
+    let entry_to_modify = index.projects.get_mut(&target_uuid).unwrap();
+    entry_to_modify.name = new_name.to_string();
+    log::debug!(
+        "Renamed project {} to '{}' in memory.",
+        target_uuid,
+        new_name
+    );
+
+    // 3. Synchronize the change to the local `project_ref.bin`.
+    log::debug!(
+        "Updating local project_ref.bin for renamed project {}",
+        target_uuid
+    );
+    match get_or_create_project_ref(&project_root, target_uuid, index) {
+        Ok(mut project_ref) => {
+            project_ref.name = new_name.to_string();
+            if let Err(e) = write_project_ref(&project_root, &project_ref) {
+                log::error!(
+                    "Failed to update project_ref.bin for '{}' at '{}': {}. Run 'axes repair' to fix.",
+                    new_name,
+                    project_root.display(),
+                    e
+                );
+            }
+        }
+        Err(e) => {
+            log::error!(
+                "Could not read/create project_ref.bin for '{}' at '{}': {}. Local ref is out of sync.",
+                new_name,
+                project_root.display(),
+                e
+            );
+        }
+    }
+
+    Ok(())
 }

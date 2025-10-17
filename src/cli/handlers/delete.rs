@@ -1,5 +1,3 @@
-// src/cli/handlers/delete.rs
-
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use colored::*;
@@ -28,25 +26,23 @@ struct DeleteArgs {
 }
 
 pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
-    // 1. Parse arguments and resolve the target project lazily.
+    // 1. Parse arguments and resolve target project.
     let delete_args = DeleteArgs::try_parse_from(&args)?;
     let context_str =
         context.ok_or_else(|| anyhow!(t!("error.context_required"), command = "delete"))?;
-
-    // Use the correct, lazy config resolver.
     let config = commons::resolve_config_for_context(Some(context_str), index)?;
 
-    // Safety check: prevent deleting the global project.
     if config.uuid == index_manager::GLOBAL_PROJECT_UUID {
         return Err(anyhow!(t!("delete.error.cannot_delete_global")));
     }
 
-    // 2. Prepare the operational plan. This is a "dry run".
-    let plan = commons::prepare_deletion_plan(
+    // 2. [REFACTORED] Prepare the operational plan using the unified function.
+    let plan = commons::prepare_operation_plan(
         index,
         &config,
         delete_args.recursive,
         delete_args.reparent_to.clone(),
+        true, // is_destructive = true
     )?;
 
     // 3. Present the destructive plan to the user for confirmation.
@@ -63,36 +59,27 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
         }
     }
 
-    // 4. Get confirmation. Add an EXTRA layer of safety for recursive deletes.
-    if delete_args.recursive {
-        let project_name = config.qualified_name.split('/').next_back().unwrap_or("");
-        let prompt = format!(t!("delete.prompt.recursive_confirm"), name = project_name);
-
-        let confirmation: String = Input::with_theme(&ColorfulTheme::default())
-            .with_prompt(prompt)
-            .interact_text()?;
-
-        if confirmation.trim() != project_name {
-            println!("\n{}", t!("common.info.operation_cancelled"));
-            return Ok(());
-        }
-    } else if !Confirm::with_theme(&ColorfulTheme::default())
-        .with_prompt(t!("delete.prompt.are_you_sure"))
-        .default(false)
-        .interact()?
-    {
-        println!("\n{}", t!("common.info.operation_cancelled"));
+    // 4. Get confirmation.
+    if !confirm_delete_operation(&config, delete_args.recursive)? {
         return Ok(());
     }
 
     // 5. EXECUTE PLAN - DESTRUCTIVE PART FIRST (FILE SYSTEM)
+    log::info!(
+        "Executing deletion plan for project '{}' ({})",
+        config.qualified_name,
+        config.uuid
+    );
     let mut purged_count = 0;
     for project_root in &plan.paths_to_purge {
         let axes_dir = project_root.join(crate::constants::AXES_DIR);
         if axes_dir.exists() {
+            log::debug!("Purging directory: {}", axes_dir.display());
             fs::remove_dir_all(&axes_dir)
-                .with_context(|| format!("Failed to delete: {}", axes_dir.display()))?;
+                .with_context(|| format!("Failed to delete directory: {}", axes_dir.display()))?;
             purged_count += 1;
+        } else {
+            log::trace!("Skipping non-existent directory: {}", axes_dir.display());
         }
     }
 
@@ -138,7 +125,43 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
         );
     }
 
-    // CRITICAL: No `save_global_index` call. `main` handles this.
-
     Ok(())
+}
+
+/// Encapsulates the logic for user confirmation.
+fn confirm_delete_operation(
+    config: &crate::models::ResolvedConfig,
+    is_recursive: bool,
+) -> Result<bool> {
+    if is_recursive {
+        // Extra safety for recursive delete: user must type the project's simple name.
+        let project_name = config.qualified_name.split('/').next_back().unwrap_or("");
+        if project_name.is_empty() {
+            // This is a safeguard against a panic if qualified_name is weird.
+            return Err(anyhow!(
+                "Could not determine project name for recursive delete confirmation."
+            ));
+        }
+        let prompt = format!(t!("delete.prompt.recursive_confirm"), name = project_name);
+
+        let confirmation: String = Input::with_theme(&ColorfulTheme::default())
+            .with_prompt(prompt)
+            .interact_text()?;
+
+        if confirmation.trim() != project_name {
+            println!("\n{}", t!("common.info.operation_cancelled"));
+            return Ok(false);
+        }
+    } else {
+        // Standard confirmation for non-recursive delete.
+        if !Confirm::with_theme(&ColorfulTheme::default())
+            .with_prompt(t!("delete.prompt.are_you_sure"))
+            .default(false)
+            .interact()?
+        {
+            println!("\n{}", t!("common.info.operation_cancelled"));
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }

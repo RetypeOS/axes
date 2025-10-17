@@ -8,7 +8,7 @@ use anyhow::{Context, Result, anyhow};
 use colored::*;
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap};
 
 lazy_static! {
     static ref PARAMETER_TOKEN_CONTENT_RE: Regex =
@@ -36,27 +36,25 @@ pub enum PreComponent<'a> {
 }
 
 /// Representa un único argumento de la CLI con su estado de consumo.
-#[derive(Debug, Clone)]
-pub struct CliArgument {
-    /// Some(v) para `--k v` y posicionales.
-    /// None para flags booleanos como `--k`.
-    pub value: Option<String>,
+#[derive(Debug, Clone, Copy)]
+pub struct CliArgument<'a> {
+    pub value: Option<&'a str>,
     pub consumed: bool,
 }
 
 /// Contiene y gestiona el estado de todos los argumentos pasados por la CLI.
 /// Esta estructura es mutable y se modifica durante el proceso de resolución.
 #[derive(Debug, Clone)]
-pub struct CliInputState {
-    positional: Vec<CliArgument>,
-    named: HashMap<String, CliArgument>,
+pub struct CliInputState<'a> {
+    positional: Vec<CliArgument<'a>>,
+    named: HashMap<&'a str, CliArgument<'a>>,
 }
 
 /// El orquestador que valida y resuelve los parámetros.
-pub struct ArgResolver {
+pub struct ArgResolver<'a> {
     /// Mapa del token original a su valor final resuelto.
     resolved_values: HashMap<String, String>,
-    unclaimed_args: Vec<String>,
+    unclaimed_args: Vec<&'a str>,
 }
 
 // --- PARSER DE DEFINICIONES (DE FASE 1) ---
@@ -161,19 +159,18 @@ pub fn parse_parameter_modifiers_from_str(s: &str) -> Result<ParameterModifiers>
 
 // --- IMPLEMENTACIÓN DEL ESTADO DE LA CLI (FASE 2) ---
 
-impl CliInputState {
-    /// Parsea los `Vec<String>` crudos y construye el estado inicial.
-    pub fn new(cli_params: &[String]) -> Result<Self> {
+impl<'a> CliInputState<'a> {
+    /// Parses a raw string slice and builds the initial state without cloning any strings.
+    pub fn new(cli_params: &'a [String]) -> Result<Self> {
         let mut positional = Vec::new();
         let mut named = HashMap::new();
-        let mut params_iter = cli_params.iter().peekable();
+        let mut params_iter = cli_params.iter().map(String::as_str).peekable();
 
         while let Some(param) = params_iter.next() {
             if let Some(name) = param.strip_prefix("--") {
-                // This is a long flag, like `--verbose`. The key is `verbose`.
                 let value = if let Some(next_param) = params_iter.peek() {
                     if !next_param.starts_with('-') {
-                        Some(params_iter.next().unwrap().clone())
+                        Some(params_iter.next().unwrap())
                     } else {
                         None
                     }
@@ -181,18 +178,16 @@ impl CliInputState {
                     None
                 };
                 named.insert(
-                    name.to_string(),
+                    name,
                     CliArgument {
                         value,
                         consumed: false,
                     },
                 );
             } else if param.starts_with('-') {
-                // This is a short flag or an alias, like `-v` or `-ab`.
-                // The key is the full string, e.g., `-v` or `-ab`.
                 let value = if let Some(next_param) = params_iter.peek() {
                     if !next_param.starts_with('-') {
-                        Some(params_iter.next().unwrap().clone())
+                        Some(params_iter.next().unwrap())
                     } else {
                         None
                     }
@@ -200,16 +195,15 @@ impl CliInputState {
                     None
                 };
                 named.insert(
-                    param.clone(),
+                    param,
                     CliArgument {
                         value,
                         consumed: false,
                     },
                 );
             } else {
-                // This is a positional argument.
                 positional.push(CliArgument {
-                    value: Some(param.clone()),
+                    value: Some(param),
                     consumed: false,
                 });
             }
@@ -217,28 +211,27 @@ impl CliInputState {
         Ok(Self { positional, named })
     }
 
-    /// Intenta consumir un argumento posicional por su índice.
-    pub fn consume_positional(&mut self, index: usize) -> Option<String> {
+    /// Tries to consume a positional argument by its index, returning a `&str`.
+    pub fn consume_positional(&mut self, index: usize) -> Option<&'a str> {
         if let Some(arg) = self.positional.get_mut(index)
             && !arg.consumed
         {
             arg.consumed = true;
-            return arg.value.clone();
+            return arg.value;
         }
         None
     }
 
-    /// Intenta consumir un argumento nombrado, considerando su alias.
-    /// Devuelve `Result` para manejar el caso de conflicto.
+    /// Tries to consume a named argument, considering its alias.
     pub fn consume_named(
         &mut self,
         name: &str,
         alias: Option<&str>,
-    ) -> Result<Option<Option<String>>> {
+    ) -> Result<Option<Option<&'a str>>> {
         let name_present = self.named.contains_key(name);
-        let alias_present = alias.is_some_and(|a| self.named.contains_key(a));
+        let alias_key = alias.and_then(|a| self.named.keys().find(|&&k| k == a));
 
-        if name_present && alias_present {
+        if name_present && alias_key.is_some() {
             return Err(anyhow!(
                 "Conflict: Both flag '{}' and its alias '{}' were provided.",
                 format!("--{}", name).cyan(),
@@ -246,42 +239,40 @@ impl CliInputState {
             ));
         }
 
-        let (_key_to_use, arg) = if name_present {
-            (name, self.named.get_mut(name).unwrap())
-        } else if alias_present {
-            (alias.unwrap(), self.named.get_mut(alias.unwrap()).unwrap())
+        let key_to_use = if name_present {
+            Some(name)
         } else {
-            return Ok(None); // Ni el nombre ni el alias fueron provistos.
+            alias_key.copied()
         };
 
-        if !arg.consumed {
+        if let Some(key) = key_to_use
+            && let Some(arg) = self.named.get_mut(key)
+            && !arg.consumed
+        {
             arg.consumed = true;
-            Ok(Some(arg.value.clone()))
-        } else {
-            // Este caso es teóricamente imposible en un flujo lineal, pero es bueno tenerlo.
-            Ok(None)
+            return Ok(Some(arg.value));
         }
+        Ok(None)
     }
 
-    /// Recolecta todos los argumentos no consumidos y los formatea en un string.
-    /// A diferencia de `consume_...`, esta función no cambia el estado `consumed`.
-    pub fn get_unconsumed_values(&self) -> (Vec<String>, bool) {
-        let mut parts: Vec<String> = Vec::new();
+    /// Collects all unconsumed arguments into a Vec<&'a str>.
+    pub fn get_unconsumed_values(&self) -> (Vec<&'a str>, bool) {
+        let mut parts = Vec::new();
         let mut had_unconsumed = false;
 
         for arg in self.positional.iter().filter(|a| !a.consumed) {
-            parts.push(arg.value.as_ref().unwrap().clone());
+            parts.push(arg.value.unwrap());
             had_unconsumed = true;
         }
 
-        let mut sorted_named_keys: Vec<_> = self.named.keys().collect();
+        let mut sorted_named_keys: Vec<_> = self.named.keys().copied().collect();
         sorted_named_keys.sort();
 
         for key in sorted_named_keys {
             if let Some(arg) = self.named.get(key).filter(|a| !a.consumed) {
-                parts.push(format!("--{}", key));
-                if let Some(val) = &arg.value {
-                    parts.push(val.clone());
+                parts.push(key);
+                if let Some(val) = arg.value {
+                    parts.push(val);
                 }
                 had_unconsumed = true;
             }
@@ -290,155 +281,129 @@ impl CliInputState {
     }
 }
 
-impl ArgResolver {
-    /// The constructor validates the entire user input against the script's contract
-    /// and pre-calculates the value for every parameter definition. It does not
-    /// "consume" CLI arguments, allowing multiple parameters to reference the same input.
+impl<'a> ArgResolver<'a> {
+    /// The constructor validates the entire user input against the script's contract (definitions)
+    /// and pre-calculates the final string value for every parameter token.
+    ///
+    /// # Performance
+    /// This implementation is heavily optimized to avoid string allocations. It operates on string
+    /// slices (`&'a str`) borrowed from the original command-line arguments. It only allocates new
+    /// strings when a default value is used, or when formatting is required (e.g., for `map` or literal wrapping).
+    /// The `Cow<'a, str>` enum is used extensively to handle values that can be either borrowed or owned.
     pub fn new(
         definitions: &[ParameterDef],
-        cli_params: &[String],
+        cli_params: &'a [String],
         has_generic_params: bool,
     ) -> Result<Self> {
+        // CliInputState now operates on slices, performing zero allocations.
         let mut cli_state = CliInputState::new(cli_params)?;
-        let mut resolved_values = HashMap::new();
+        let mut resolved_values = HashMap::with_capacity(definitions.len());
 
-        // --- Upfront Validation ---
+        // --- 1. Upfront Validation for Conflicting Flags ---
+        // This check prevents logic errors later on.
         for def in definitions {
-            if let ParameterKind::Positional { index } = def.kind
-                && index == usize::MAX
-            {
-                continue;
-            } // Skip generic params def
             if let ParameterKind::Named { name } = &def.kind
                 && let Some(alias) = &def.modifiers.alias
-                && cli_state.named.contains_key(name)
-                && cli_state.named.contains_key(alias)
+                && cli_state.named.contains_key(name.as_str())
+                && cli_state.named.contains_key(alias.as_str())
             {
                 return Err(anyhow!(
-                    "Conflict: Both flag '--{}' and its alias '-{}' were provided.",
+                    "Conflict: Both flag '--{}' and its alias '{}' were provided.",
                     name.cyan(),
                     alias.cyan()
                 ));
             }
         }
 
-        // --- Resolution Loop ---
+        // --- 2. Resolution Loop for Each Parameter Definition ---
         for def in definitions {
-            if resolved_values.contains_key(&def.original_token) {
-                continue;
-            }
-
-            // Skip the special generic params def in this main loop
-            if let ParameterKind::Positional { index } = def.kind
-                && index == usize::MAX
+            // Skip generic <params> definition and already resolved tokens.
+            if (matches!(def.kind, ParameterKind::Positional { index } if index == usize::MAX))
+                || resolved_values.contains_key(&def.original_token)
             {
                 continue;
             }
 
-            let mut final_string = String::new();
-
-            match &def.kind {
+            let final_string: String = match &def.kind {
                 ParameterKind::Positional { index } => {
-                    let cli_value = cli_state
-                        .positional
-                        .get(*index)
-                        .and_then(|arg| arg.value.clone());
-                    let is_provided = cli_value.is_some();
-
-                    if is_provided && let Some(arg) = cli_state.positional.get_mut(*index) {
-                        arg.consumed = true;
-                    }
-
-                    if def.modifiers.required && !is_provided {
+                    let cli_value = cli_state.consume_positional(*index);
+                    if def.modifiers.required && cli_value.is_none() {
                         return Err(anyhow!(
                             "Positional argument at index {} is required but was not provided.",
                             index
                         ));
                     }
 
-                    let final_value = cli_value.or_else(|| def.modifiers.default_value.clone());
+                    // Use Cow to represent a value that is either borrowed from the CLI or owned by the default.
+                    let final_value: Option<Cow<'a, str>> =
+                        cli_value.map(Cow::Borrowed).or_else(|| {
+                            def.modifiers
+                                .default_value
+                                .as_ref()
+                                .map(|s| Cow::Owned(s.clone()))
+                        });
 
-                    if let Some(val) = final_value {
-                        final_string = if def.modifiers.literal {
+                    final_value.map_or(String::new(), |val| {
+                        if def.modifiers.literal {
                             wrap_value(&val)
                         } else {
-                            val
-                        };
-                    }
+                            val.into_owned()
+                        }
+                    })
                 }
                 ParameterKind::Named { name } => {
-                    let alias = def.modifiers.alias.as_deref();
-                    // This part remains the same
-                    let is_provided = cli_state.named.contains_key(name)
-                        || alias.is_some_and(|a| cli_state.named.contains_key(a));
-
-                    if def.modifiers.required && !is_provided {
+                    let cli_value_opt =
+                        cli_state.consume_named(name, def.modifiers.alias.as_deref())?;
+                    if def.modifiers.required && cli_value_opt.is_none() {
                         return Err(anyhow!(
                             "Flag '--{}' is required but was not provided.",
                             name
                         ));
                     }
 
-                    if is_provided {
-                        // Get CLI value and apply default if necessary (logic is the same)
-                        let cli_value = if let Some(arg) = cli_state.named.get(name) {
-                            arg.value.clone()
-                        } else if let Some(a) = alias {
-                            cli_state.named.get(a).and_then(|arg| arg.value.clone())
-                        } else {
-                            None
-                        };
+                    if let Some(cli_value) = cli_value_opt {
+                        let final_value: Option<Cow<'a, str>> =
+                            cli_value.map(Cow::Borrowed).or_else(|| {
+                                def.modifiers
+                                    .default_value
+                                    .as_ref()
+                                    .map(|s| Cow::Owned(s.clone()))
+                            });
 
-                        let final_value = cli_value.or_else(|| def.modifiers.default_value.clone());
-
-                        // Apply literal wrapping if needed (logic is the same)
                         let final_value_maybe_wrapped = if def.modifiers.literal {
-                            final_value.as_deref().map(wrap_value)
+                            final_value.as_ref().map(|v| Cow::Owned(wrap_value(v)))
                         } else {
                             final_value
                         };
 
                         if let Some(map_str) = &def.modifiers.map {
-                            // --- Case 1: `map` is defined ---
-                            // This implements the new literal concatenation behavior.
                             if map_str.is_empty() {
-                                // Special case: map="" (or map=''), just extract the value.
-                                final_string = final_value_maybe_wrapped.unwrap_or_default();
+                                final_value_maybe_wrapped
+                                    .unwrap_or(Cow::Borrowed(""))
+                                    .into_owned()
                             } else {
-                                // Standard case: `map` is a literal prefix.
-                                // The user must include a space in `map_str` if they want one.
-                                final_string = format!(
+                                format!(
                                     "{}{}",
                                     map_str,
-                                    final_value_maybe_wrapped.unwrap_or_default()
-                                );
+                                    final_value_maybe_wrapped.unwrap_or(Cow::Borrowed(""))
+                                )
                             }
                         } else {
-                            // --- Case 2: `map` is NOT defined ---
-                            // This preserves the default "pass-through" behavior with a space.
                             let flag_name = format!("--{}", name);
-                            final_string = match final_value_maybe_wrapped {
+                            match final_value_maybe_wrapped {
                                 Some(val) => format!("{} {}", flag_name, val),
                                 None => flag_name,
-                            };
+                            }
                         }
-
-                        // Mark as consumed
-                        if let Some(arg) = cli_state.named.get_mut(name) {
-                            arg.consumed = true;
-                        } else if let Some(alias) = &def.modifiers.alias
-                            && let Some(arg) = cli_state.named.get_mut(alias)
-                        {
-                            arg.consumed = true;
-                        }
+                    } else {
+                        String::new() // Flag was not provided, resolves to an empty string.
                     }
                 }
-            }
-
+            };
             resolved_values.insert(def.original_token.clone(), final_string);
         }
 
-        // --- Handle Unconsumed/Leftover Arguments ---
+        // --- 3. Handle Unconsumed Arguments for the generic `<params>` token ---
         let (unclaimed_args, had_unconsumed) = cli_state.get_unconsumed_values();
         if had_unconsumed && !has_generic_params {
             return Err(anyhow!(
@@ -454,12 +419,14 @@ impl ArgResolver {
         })
     }
 
-    // This function is now a simple HashMap lookup.
+    /// Retrieves the final, resolved string for a specific parameter token (e.g., `<params::0>`).
     pub fn get_specific_value(&self, original_token: &str) -> Option<&str> {
-        self.resolved_values.get(original_token).map(|s| s.as_str())
+        self.resolved_values.get(original_token).map(String::as_str)
     }
 
-    pub fn get_generic_values(&self) -> &[String] {
+    /// Retrieves a slice of all unconsumed arguments, to be used by the generic `<params>` token.
+    /// This is a zero-copy operation.
+    pub fn get_generic_values(&self) -> &[&'a str] {
         &self.unclaimed_args
     }
 }

@@ -1,15 +1,20 @@
-// EN: src/cli/handlers/info.rs (REFACTORED FOR CLARITY AND COMPLETENESS)
+// EN: src/cli/handlers/info.rs (FULLY RESTORED AND OPTIMIZED FOR V0.3)
 
 use crate::{
     cli::handlers::commons,
     constants::{AXES_DIR, PROJECT_CONFIG_FILENAME},
-    core::{color, index_manager},
-    models::{CommandAction, GlobalIndex, ResolvedConfig, RunSpec, Task, TemplateComponent},
+    core::index_manager,
+    models::{
+        CachedVar, CommandAction, GlobalIndex, PlatformExecution, ResolvedConfig, RunSpec,
+        TemplateComponent,
+    },
 };
 use anyhow::Result;
 use clap::Parser;
 use colored::*;
 use std::sync::Arc;
+
+// --- Command Argument Parsing ---
 
 #[derive(Parser, Debug, Default)]
 #[command(
@@ -21,6 +26,8 @@ struct InfoArgs {
     context: Option<String>,
 }
 
+// --- Main Handler ---
+
 /// The main handler for the `info` command.
 /// Displays detailed, lazily-resolved information about a project, including its inheritance.
 pub fn handle(
@@ -28,35 +35,30 @@ pub fn handle(
     args: Vec<String>,
     index: &mut GlobalIndex,
 ) -> Result<()> {
-    // 1. Parse all handler-specific arguments using clap.
+    // 1. Parse all handler-specific arguments.
     let info_args = InfoArgs::try_parse_from(&args)?;
 
-    // 2. Determine the definitive context with clear priority.
-    //    - Priority 1: An explicit context argument passed to `info` (e.g., `axes info my-app`).
-    //    - Priority 2: A context from the main dispatcher (e.g., `axes my-app info`).
-    //    - Priority 3: Default to the current project context (`.`).
+    // 2. Determine the definitive context with clear priority: cli arg > dispatcher context > cwd.
     let final_context = info_args
         .context
         .or(dispatcher_context)
         .unwrap_or_else(|| ".".to_string());
 
-    // 3. Proceed with the handler's logic.
+    // 3. Lazily resolve the full configuration for the context.
     let config = commons::resolve_config_for_context(Some(final_context), index)?;
 
+    // 4. Print each section of the configuration.
     print_metadata(&config, index)?;
     print_options(&config)?;
-    //print_task_map(
-    //    "scripts",
-    //    t!("info.label.available_scripts"),
-    //    &config,
-    //    index,
-    //)?;
-    //print_task_map("vars", t!("info.label.vars"), &config, index)?;
+    print_scripts_map(&config, index)?;
+    print_vars_map(&config, index)?;
     print_env(&config)?;
 
     println!("\n---------------------------------");
     Ok(())
 }
+
+// --- Display Functions for Each Section ---
 
 /// Prints the core metadata of the project, including its inheritance chain.
 fn print_metadata(config: &ResolvedConfig, index: &GlobalIndex) -> Result<()> {
@@ -83,16 +85,13 @@ fn print_metadata(config: &ResolvedConfig, index: &GlobalIndex) -> Result<()> {
         config_file_path.display()
     );
 
-    // [NEW] Display the full inheritance hierarchy for clarity.
+    // Display the full inheritance hierarchy for clarity.
     let hierarchy_names: Vec<String> = config
         .hierarchy
         .iter()
         .map(|uuid| {
-            index
-                .projects
-                .get(uuid)
-                .map(|e| e.name.clone())
-                .unwrap_or_else(|| "unknown".to_string())
+            index_manager::build_qualified_name(*uuid, index)
+                .unwrap_or_else(|| format!("<unknown: {}>", uuid))
         })
         .collect();
     println!(
@@ -110,18 +109,21 @@ fn print_metadata(config: &ResolvedConfig, index: &GlobalIndex) -> Result<()> {
     Ok(())
 }
 
-/// [NEW] Prints the resolved [options] section.
+/// Prints the resolved `[options]` section.
 fn print_options(config: &ResolvedConfig) -> Result<()> {
     let options = config.get_options()?;
     let mut entries = Vec::new();
 
-    if let Some(shell) = options.shell {
+    if let Some(shell) = &options.shell {
         entries.push(format!("{}: '{}'", "shell".cyan(), shell));
     }
-    if let Some(cache_dir) = options.cache_dir {
+    if let Some(prompt) = &options.prompt {
+        entries.push(format!("{}: '{}'", "prompt".cyan(), prompt));
+    }
+    if let Some(cache_dir) = &options.cache_dir {
         entries.push(format!("{}: '{}'", "cache_dir".cyan(), cache_dir));
     }
-    if let Some(default_open) = options.open_with.default {
+    if let Some(default_open) = &options.open_with.default {
         entries.push(format!(
             "{}: '{}'",
             "open_with.default".cyan(),
@@ -140,63 +142,91 @@ fn print_options(config: &ResolvedConfig) -> Result<()> {
     Ok(())
 }
 
-/// [REFACTORED] A generic function to print a map of Tasks (like `scripts` or `vars`).
-/// It now indicates the source of inherited items.
-//fn print_task_map(
-//    key: &str,
-//    title: &str,
-//    config: &ResolvedConfig,
-//    index: &GlobalIndex,
-//) -> Result<()> {
-//    let tasks = if key == "scripts" {
-//        config.get_all_scripts()?
-//    } else {
-//        config.get_all_vars()?
-//    };
-//
-//    if tasks.is_empty() {
-//        if key == "scripts" {
-//            println!("\n  {}", t!("info.label.no_scripts").dimmed());
-//        }
-//        return Ok(());
-//    }
-//
-//    println!("\n  {}:", title.blue());
-//    let mut sorted_keys: Vec<_> = tasks.keys().cloned().collect();
-//    sorted_keys.sort();
-//
-//    for task_name in sorted_keys {
-//        let task = tasks.get(&task_name).unwrap(); // Safe
-//        print!("    - {}", task_name.cyan());
-//
-//        // [NEW] Find and display the source of the task for inherited items.
-//        let source_project_name = find_task_source(key, &task_name, config, index)?;
-//        if source_project_name != config.qualified_name {
-//            print!(
-//                " {}",
-//                format!(
-//                    "[{}]",
-//                    format_args!(t!("common.label.inherited"), from = source_project_name)
-//                )
-//                .dimmed()
-//            );
-//        }
-//
-//        if let Some(d) = &task.desc
-//            && !d.trim().is_empty()
-//        {
-//            print!(": {}", d.dimmed());
-//        }
-//
-//        // For `vars`, we also display the rendered value.
-//        if key == "vars" {
-//            let display_val = render_task_to_string(task);
-//            print!(" = {}", format_args!("\"{}\"", display_val));
-//        }
-//        println!();
-//    }
-//    Ok(())
-//}
+/// Prints a map of available scripts, indicating their source.
+fn print_scripts_map(config: &ResolvedConfig, index: &GlobalIndex) -> Result<()> {
+    let scripts = config.get_all_scripts()?;
+    if scripts.is_empty() {
+        println!("\n  {}", t!("info.label.no_scripts").dimmed());
+        return Ok(());
+    }
+
+    println!("\n  {}:", t!("info.label.available_scripts").blue());
+    let mut sorted_keys: Vec<_> = scripts.keys().collect();
+    sorted_keys.sort();
+
+    for script_name in sorted_keys {
+        let task = scripts.get(script_name).unwrap();
+        print!("    - {}", script_name.cyan());
+
+        let source_project_name = find_task_source("scripts", script_name, config, index)?;
+        if source_project_name != config.qualified_name {
+            print!(
+                " {}",
+                format!(
+                    "[{}]",
+                    format_args!(t!("common.label.inherited"), from = source_project_name)
+                )
+                .dimmed()
+            );
+        }
+
+        if let Some(d) = &task.desc
+            && !d.trim().is_empty()
+        {
+            print!(": {}", d.dimmed());
+        }
+        println!();
+    }
+    Ok(())
+}
+
+/// Prints a map of available variables, indicating their source and description or value.
+fn print_vars_map(config: &ResolvedConfig, index: &GlobalIndex) -> Result<()> {
+    let vars = config.get_all_vars()?;
+    if vars.is_empty() {
+        return Ok(());
+    }
+
+    println!("\n  {}:", t!("info.label.vars").blue());
+    let mut sorted_keys: Vec<_> = vars.keys().collect();
+    sorted_keys.sort();
+
+    for var_name in sorted_keys {
+        let var = vars.get(var_name).unwrap();
+        print!("    - {}", var_name.cyan());
+
+        let source_project_name = find_task_source("vars", var_name, config, index)?;
+        if source_project_name != config.qualified_name {
+            print!(
+                " {}",
+                format!(
+                    "[{}]",
+                    format_args!(t!("common.label.inherited"), from = source_project_name)
+                )
+                .dimmed()
+            );
+        }
+
+        // --- CORRECTED LOGIC ---
+        // Priority: 1. Description, 2. Rendered value.
+        if let Some(d) = &var.desc {
+            if !d.trim().is_empty() {
+                print!(": {}", d.dimmed());
+            } else {
+                // Description is present but empty, show the value instead.
+                let display_val = render_var_to_string(var, config);
+                print!(" = {}", format_args!("\"{}\"", display_val));
+            }
+        } else {
+            // No description, show the value.
+            let display_val = render_var_to_string(var, config);
+            print!(" = {}", format_args!("\"{}\"", display_val));
+        }
+
+        println!();
+    }
+    Ok(())
+}
 
 /// Prints all merged environment variables.
 fn print_env(config: &ResolvedConfig) -> Result<()> {
@@ -206,11 +236,11 @@ fn print_env(config: &ResolvedConfig) -> Result<()> {
     }
 
     println!("\n  {}:", t!("info.label.env").blue());
-    let mut sorted_keys: Vec<_> = env.keys().cloned().collect();
+    let mut sorted_keys: Vec<_> = env.keys().collect();
     sorted_keys.sort();
 
     for k in sorted_keys {
-        if let Some(val) = env.get(&k) {
+        if let Some(val) = env.get(k) {
             println!("    - {} = {}", k.cyan(), format_args!("\"{}\"", val));
         }
     }
@@ -219,24 +249,45 @@ fn print_env(config: &ResolvedConfig) -> Result<()> {
 
 // --- Helper Functions ---
 
+/// Traverses the hierarchy to find which project a script/var originates from.
+pub(crate) fn find_task_source(
+    key: &str,
+    task_name: &str,
+    config: &ResolvedConfig,
+    index: &GlobalIndex,
+) -> Result<String> {
+    for uuid in config.hierarchy.iter() {
+        let layer = config.get_layer(*uuid)?;
+        let task_exists = if key == "scripts" {
+            layer.scripts.contains_key(task_name)
+        } else {
+            layer.vars.contains_key(task_name)
+        };
+
+        if task_exists {
+            return Ok(index_manager::build_qualified_name(*uuid, index)
+                .unwrap_or_else(|| format!("<unknown: {}>", uuid)));
+        }
+    }
+    Ok(config.qualified_name.clone()) // Fallback to current project name
+}
+
+/// Selects the appropriate command template for the current platform from a PlatformExecution block.
+fn get_template_for_platform<'a>(
+    plat_exec: &'a PlatformExecution,
+    config: &'a ResolvedConfig,
+) -> Option<&'a [TemplateComponent]> {
+    config
+        .select_platform_exec(plat_exec)
+        .map(|cmd_exec| match &cmd_exec.action {
+            CommandAction::Execute(t) | CommandAction::Print(t) => t.as_slice(),
+        })
+}
+
 /// Renders a template AST back into a representative string for display.
 fn render_template_to_string(template: &[TemplateComponent]) -> String {
     template.iter().map(render_component_to_string).collect()
 }
-
-/// Renders a single Task back to its most representative string form.
-//fn render_task_to_string(task: &Arc<Task>) -> String {
-//    task.commands
-//        .iter()
-//        .map(|cmd| {
-//            let template = match &cmd.action {
-//                CommandAction::Execute(t) | CommandAction::Print(t) => t,
-//            };
-//            render_template_to_string(template)
-//        })
-//        .collect::<Vec<_>>()
-//        .join(" && ")
-//}
 
 /// Renders a single TemplateComponent to its string representation.
 fn render_component_to_string(component: &TemplateComponent) -> String {
@@ -250,7 +301,7 @@ fn render_component_to_string(component: &TemplateComponent) -> String {
                 "<params>".to_string()
             }
         }
-        TemplateComponent::Color(color) => format!("<#{}>", color::ansi_color_to_code(*color)),
+        TemplateComponent::Color(color) => format!("<#{:?}>", color).to_lowercase(),
         TemplateComponent::Run(spec) => match spec {
             RunSpec::Literal(cmd) => format!("<run('{}')>", cmd),
         },
@@ -263,25 +314,9 @@ fn render_component_to_string(component: &TemplateComponent) -> String {
     }
 }
 
-/// [NEW] Traverses the hierarchy to find which project a script/var originates from.
-pub(crate) fn find_task_source(
-    key: &str, // "scripts" or "vars"
-    task_name: &str,
-    config: &ResolvedConfig,
-    index: &GlobalIndex,
-) -> Result<String> {
-    for uuid in config.hierarchy.iter() {
-        let layer = config.get_layer(*uuid)?;
-        let tasks_exist = if key == "scripts" {
-            layer.scripts.contains_key(task_name)
-        } else {
-            layer.vars.contains_key(task_name)
-        };
-
-        if tasks_exist {
-            return Ok(index_manager::build_qualified_name(*uuid, index)
-                .unwrap_or_else(|| "unknown".to_string()));
-        }
-    }
-    Ok(config.qualified_name.clone()) // Fallback to current project name
+/// Renders the representative string for a single-value `CachedVar`.
+fn render_var_to_string(var: &Arc<CachedVar>, config: &ResolvedConfig) -> String {
+    get_template_for_platform(&var.value, config)
+        .map(render_template_to_string)
+        .unwrap_or_else(|| "<no value for this platform>".dimmed().to_string())
 }

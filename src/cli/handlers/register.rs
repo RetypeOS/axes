@@ -1,5 +1,3 @@
-// EN: src/cli/handlers/register.rs (RESTORED)
-
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use colored::*;
@@ -36,10 +34,20 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
 
     let register_args = RegisterArgs::try_parse_from(&args)?;
 
-    let initial_path = match register_args.path.or(context) {
+    // Determine the initial path to scan from.
+    let path_arg = register_args.path.or(context);
+    let initial_path_unresolved = match path_arg {
         Some(p) => PathBuf::from(p),
         None => env::current_dir()?,
     };
+
+    // This prevents ambiguity with relative paths like `.` or `../`.
+    let initial_path = dunce::canonicalize(&initial_path_unresolved).with_context(|| {
+        format!(
+            "Failed to resolve path: {}",
+            initial_path_unresolved.display()
+        )
+    })?;
 
     let suggested_parent_uuid = if let Some(parent_context) = &register_args.parent {
         let (uuid, name) = crate::core::context_resolver::resolve_context(parent_context, index)?;

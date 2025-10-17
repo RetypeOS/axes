@@ -1,12 +1,12 @@
 use crate::{
     core::{parameters::ArgResolver, task_executor},
-    models::{CommandAction, GlobalIndex, ResolvedConfig, ShellConfig, ShellsConfig, Task},
+    models::{CommandAction, GlobalIndex, ResolvedConfig, Task},
     system::shells_config,
 };
 use anyhow::Result;
 use colored::Colorize;
 use std::fmt::Write;
-use std::{collections::HashMap, env, fs, path::PathBuf, process::Command, sync::Arc};
+use std::{fs, process::Command, sync::Arc};
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
@@ -93,6 +93,16 @@ pub fn launch_session(
         Vec::new()
     };
 
+    let rendered_prompt = if let Some(prompt_template) = &options.prompt {
+        // We can create a temporary template to pass to our powerful assembler.
+        let template = crate::core::compiler::tokenize_string(prompt_template)?;
+        Some(task_executor::assemble_final_command(
+            &template, config, resolver, index, 0,
+        )?)
+    } else {
+        None
+    };
+
     // 3. Create the temporary initialization script using a scope guard for robust cleanup.
     let is_windows_shell = shell_name == "cmd" || shell_name == "powershell";
     let script_extension = if is_windows_shell { "bat" } else { "sh" };
@@ -100,7 +110,12 @@ pub fn launch_session(
     // Create a named temp file that will persist.
     let temp_script_file = NamedTempFile::with_prefix("axes-init-")?;
     let temp_script_path = temp_script_file.path().with_extension(script_extension);
-    let script_content = build_init_script(config, &at_start_final_commands, is_windows_shell)?;
+    let script_content = build_init_script(
+        config,
+        &at_start_final_commands,
+        &shell_name,
+        rendered_prompt.as_deref(),
+    )?;
     fs::write(&temp_script_path, &script_content)?;
 
     // This guard ensures the temp file is deleted when `launch_session` returns,
@@ -177,19 +192,25 @@ fn escape_for_cmd_set(value: &str) -> String {
 fn build_init_script(
     config: &ResolvedConfig,
     at_start_commands: &[String],
-    is_windows: bool,
+    shell_name: &str,
+    prompt: Option<&str>,
 ) -> Result<String> {
+    // Determine the shell family for easier logic branching.
+    let is_cmd = shell_name == "cmd";
+    let is_posix = shell_name == "bash" || shell_name == "zsh";
+
     let mut script = String::with_capacity(256 + at_start_commands.len() * 128);
 
-    if is_windows {
+    if is_cmd {
         writeln!(script, "@echo off")?;
     }
 
     for (key, value) in &*config.get_env()? {
-        if is_windows {
+        if is_cmd {
             let escaped_value = escape_for_cmd_set(value);
             writeln!(script, "set \"{}={}\"", key, escaped_value)?;
         } else {
+            // Assume POSIX-like escaping for PowerShell, Bash, Zsh etc.
             let escaped_value = value.replace('\'', "'\\''");
             writeln!(script, "export {}='{}'", key, escaped_value)?;
         }
@@ -202,10 +223,44 @@ fn build_init_script(
         }
     }
 
+    if let Some(prompt_str) = prompt {
+        match shell_name {
+            "bash" | "zsh" => {
+                let escaped = prompt_str
+                    .replace('\\', "\\\\")
+                    .replace('$', "\\$")
+                    .replace('`', "\\`");
+                writeln!(script, "\nexport PS1='{}'", escaped)?;
+            }
+            "cmd" => {
+                let escaped = prompt_str.replace('$', "$$");
+                writeln!(script, "\nPROMPT {}", escaped)?;
+            }
+            "powershell" => {
+                let escaped = prompt_str.replace('\'', "''");
+                writeln!(
+                    script,
+                    "\nfunction prompt {{ Write-Host -NoNewline '{}'; return ' ' }}",
+                    escaped
+                )?;
+            }
+            _ => {
+                log::warn!(
+                    "Prompt customization is not supported for shell '{}'.",
+                    shell_name
+                );
+            }
+        }
+    }
+
     let exit_message = "--- Type 'exit' to leave. ---";
-    if is_windows {
+    if is_cmd {
         writeln!(script, "\necho.\necho {}\necho.", exit_message)?;
+    } else if is_posix {
+        // POSIX shells can use echo with single quotes.
+        writeln!(script, "\necho ''\necho '{}'\necho ''", exit_message)?;
     } else {
+        // PowerShell handles echo differently, but simple echo works.
         writeln!(script, "\necho ''\necho '{}'\necho ''", exit_message)?;
     }
     Ok(script)

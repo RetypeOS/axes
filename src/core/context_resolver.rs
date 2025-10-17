@@ -1,5 +1,3 @@
-// src/core/context_resolver.rs
-
 use crate::models::{GlobalIndex, IndexEntry};
 use dialoguer::{Error as DialoguerError, Select, theme::ColorfulTheme};
 use std::{env, path::Path};
@@ -152,7 +150,7 @@ pub fn resolve_context(context: &str, index: &mut GlobalIndex) -> ContextResult<
         current_uuid = next_uuid;
     }
 
-    // --- 3. Finalize and Return (Unchanged) ---
+    // --- 3. Finalize and Return ---
     update_last_used_caches(current_uuid, index)?;
     let final_qualified_name = index_manager::build_qualified_name(current_uuid, index)
         .ok_or(ContextError::AliasResolutionError)?;
@@ -162,29 +160,36 @@ pub fn resolve_context(context: &str, index: &mut GlobalIndex) -> ContextResult<
 
 /// Resolves '*' for a child, with interactive fallback.
 fn resolve_last_used_child(
-    parent_uuid: Uuid, // No longer needed directly, but kept for context
+    parent_uuid: Uuid,
     parent_entry: &IndexEntry,
     index: &GlobalIndex,
 ) -> ContextResult<Uuid> {
-    // Read directly from the parent's in-memory index entry.
+    // 1. Check cached `last_used_child` and VALIDATE that it still exists and is a child.
     if let Some(uuid) = parent_entry.last_used_child {
-        log::debug!(
-            "Last used child '{}' found in index for parent '{}'.",
-            uuid,
+        if let Some(child_entry) = index.projects.get(&uuid)
+            && child_entry.parent == Some(parent_uuid)
+        {
+            log::debug!(
+                "Validated last used child '{}' for parent '{}'.",
+                uuid,
+                parent_entry.name
+            );
+            return Ok(uuid);
+        }
+
+        // If the check fails, the cache is stale. Proceed to fallback.
+        log::warn!(
+            "Stale 'last_used_child' cache for parent '{}'. Re-evaluating.",
             parent_entry.name
         );
-        return Ok(uuid);
     }
 
-    // Fallback: no cache or empty. Ask the user.
-    log::warn!(
-        "No last used child cache found for '{}'. Initiating interactive fallback.",
-        parent_entry.name
-    );
-    let children: Vec<_> = index
+    // 2. Fallback: No valid cache. Find children and ask user if interactive.
+    let mut children: Vec<(Uuid, &str)> = index
         .projects
-        .values()
-        .filter(|e| e.parent == Some(parent_uuid))
+        .iter()
+        .filter(|(_, e)| e.parent == Some(parent_uuid))
+        .map(|(uuid, e)| (*uuid, e.name.as_str()))
         .collect();
 
     if children.is_empty() {
@@ -193,11 +198,15 @@ fn resolve_last_used_child(
         });
     }
 
-    let child_names: Vec<_> = children.iter().map(|e| e.name.as_str()).collect();
+    // Sort for deterministic selection in tests and UI.
+    children.sort_by_key(|(_, name)| *name);
+
     println!(
         "Project '{}' has no recently used child.",
         parent_entry.name
     );
+    let child_names: Vec<_> = children.iter().map(|(_, name)| *name).collect();
+
     let selection = Select::with_theme(&ColorfulTheme::default())
         .with_prompt("Please select a child to continue:")
         .items(&child_names)
@@ -205,8 +214,7 @@ fn resolve_last_used_child(
         .interact_opt()?
         .ok_or(ContextError::Cancelled)?;
 
-    let selected_name = child_names[selection];
-    find_child_by_name(parent_uuid, parent_entry, selected_name, index)
+    Ok(children[selection].0) // Return the UUID directly from the collected tuple.
 }
 
 /// Finds a project's UUID by searching from a file system path.
@@ -266,32 +274,29 @@ fn find_child_by_name(
 
 /// Updates `last_used` information directly in the mutable GlobalIndex.
 pub fn update_last_used_caches(final_uuid: Uuid, index: &mut GlobalIndex) -> ContextResult<()> {
-    // 1. Update the global `last_used` for the `**` token.
+    // 1. Update global `last_used`.
     index.last_used = Some(final_uuid);
 
-    // 2. Update the parent's `last_used_child` for the `*` token by traversing up.
-    let mut current_entry = match index.projects.get(&final_uuid) {
-        Some(entry) => entry.clone(), // Clone to avoid borrow checker issues
-        None => return Ok(()),
-    };
+    // 2. Update parent's `last_used_child` by traversing up.
     let mut child_uuid_to_save = final_uuid;
+    let mut current_uuid_opt = index
+        .projects
+        .get(&child_uuid_to_save)
+        .and_then(|e| e.parent);
 
-    while let Some(parent_uuid) = current_entry.parent {
-        if let Some(parent_entry) = index.projects.get_mut(&parent_uuid) {
-            log::debug!(
-                "Updating 'last_used_child' for parent '{}' to '{}'",
-                parent_entry.name,
-                child_uuid_to_save
-            );
-            // Mutate the parent entry in the index directly.
-            parent_entry.last_used_child = Some(child_uuid_to_save);
+    while let Some(parent_uuid) = current_uuid_opt {
+        let parent_entry = index.projects.get_mut(&parent_uuid).unwrap();
 
-            // Prepare for the next iteration up the tree.
-            child_uuid_to_save = parent_uuid;
-            current_entry = parent_entry.clone();
-        } else {
-            break; // Broken parent link, stop traversal.
-        }
+        log::debug!(
+            "Updating 'last_used_child' for parent '{}' to '{}'",
+            parent_entry.name,
+            child_uuid_to_save
+        );
+        parent_entry.last_used_child = Some(child_uuid_to_save);
+
+        // Prepare for the next iteration up the tree.
+        child_uuid_to_save = parent_uuid;
+        current_uuid_opt = parent_entry.parent;
     }
 
     Ok(())

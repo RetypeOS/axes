@@ -133,6 +133,8 @@ pub struct OptionsConfig {
     pub open_with: TomlOpenWithConfig,
     #[serde(default)]
     pub cache_dir: Option<String>,
+    #[serde(default)]
+    pub prompt: Option<String>,
 }
 
 /// Represents the direct, top-level structure of an `axes.toml` file.
@@ -209,7 +211,7 @@ pub enum TemplateComponent {
     Name,
     Uuid,
     Version,
-    Color(AnsiColor),
+    Color(AnsiStyle),
     Script(String),
     Var(String),
 }
@@ -280,6 +282,8 @@ pub struct CachedOptionsConfig {
     pub open_with: CachedOpenWithConfig,
     #[serde(default)]
     pub cache_dir: Option<String>,
+    #[serde(default)]
+    pub prompt: Option<String>,
 }
 
 /// Represents the pre-compiled content of a single `axes.toml` file.
@@ -311,6 +315,7 @@ pub struct ResolvedOptionsConfig {
     pub shell: Option<String>,
     pub open_with: ResolvedOpenWithConfig,
     pub cache_dir: Option<String>,
+    pub prompt: Option<String>,
 }
 
 /// A thread-safe, shareable container for a fully merged environment map.
@@ -365,11 +370,12 @@ impl ResolvedConfig {
     /// Lazily finds and returns a script's AST by name, searching up the inheritance chain.
     pub fn get_script(&self, name: &str) -> Result<Option<Arc<Task>>> {
         let mut guard = self.memoized_scripts.lock().unwrap();
-        if let Some(cache) = &*guard {
-            if let Some(cached_result) = cache.get(name) {
-                return Ok(cached_result.clone());
-            }
+        if let Some(cache) = &*guard
+            && let Some(cached_result) = cache.get(name)
+        {
+            return Ok(cached_result.clone());
         }
+
         let mut result = None;
         for &uuid in self.hierarchy.iter() {
             let layer = self.get_layer(uuid)?;
@@ -387,11 +393,12 @@ impl ResolvedConfig {
     /// Lazily finds and returns a variable's AST by name.
     pub fn get_var(&self, name: &str) -> Result<Option<Arc<CachedVar>>> {
         let mut guard = self.memoized_vars.lock().unwrap();
-        if let Some(cache) = &*guard {
-            if let Some(cached_result) = cache.get(name) {
-                return Ok(cached_result.clone());
-            }
+        if let Some(cache) = &*guard
+            && let Some(cached_result) = cache.get(name)
+        {
+            return Ok(cached_result.clone());
         }
+
         let mut result = None;
         for &uuid in self.hierarchy.iter() {
             let layer = self.get_layer(uuid)?;
@@ -473,12 +480,16 @@ impl ResolvedConfig {
         }
 
         let mut final_options = ResolvedOptionsConfig::default();
+        let mut cache_dir_template: Option<String> = None;
         let mut at_start_found = false;
         let mut at_exit_found = false;
 
         // Iterate from child to parent (normal order) to find first-defined hooks
         for &uuid in self.hierarchy.iter() {
             let layer = self.get_layer(uuid)?;
+            if cache_dir_template.is_none() && layer.options.cache_dir.is_some() {
+                cache_dir_template = layer.options.cache_dir.clone();
+            }
             let layer_options = &layer.options;
 
             if !at_start_found && layer_options.at_start.is_some() {
@@ -490,6 +501,28 @@ impl ResolvedConfig {
                 at_exit_found = true;
             }
         }
+
+        // --- Resolve the cache_dir template ---
+        let final_cache_root_string = match cache_dir_template {
+            Some(template) => {
+                // expand_path_template returns a PathBuf, convert it back to a string for storage.
+                let path = crate::core::paths::expand_path_template(&template)?;
+                path.to_string_lossy().into_owned()
+            }
+            None => {
+                let path = crate::core::paths::get_default_cache_root()?;
+                path.to_string_lossy().into_owned()
+            }
+        };
+
+        // The final path for THIS project's cache, as a String.
+        // We construct a PathBuf temporarily to join, then convert back.
+        let final_path_for_project = PathBuf::from(&final_cache_root_string)
+            .join("projects")
+            .join(self.uuid.to_string());
+        final_options.cache_dir = Some(final_path_for_project.to_string_lossy().into_owned());
+
+        // --- Pass 2: Merge overriding values (parent-to-child) ---
 
         // Iterate in reverse (child overrides parent) for merge-able options
         for &uuid in self.hierarchy.iter().rev() {
@@ -504,6 +537,9 @@ impl ResolvedConfig {
             }
             if layer_options.open_with.default.is_some() {
                 final_options.open_with.default = layer_options.open_with.default.clone();
+            }
+            if layer_options.prompt.is_some() {
+                final_options.prompt = layer_options.prompt.clone();
             }
 
             final_options.open_with.commands.extend(
@@ -585,10 +621,8 @@ impl ResolvedConfig {
         }
     }
 
-    // --- TASK FLATTENING LOGIC (REBUILT FOR V0.3) ---
+    // --- TASK FLATTENING LOGIC ---
 
-    // ... (la implementación de flatten_task, etc., que ya corregimos, va aquí)
-    // ... (placeholder for unchanged flatten logic)
     pub fn flatten_task(&self, top_level_task: &Arc<Task>) -> Result<Arc<Task>> {
         let mut call_stack = HashSet::new();
         self.flatten_task_recursive(top_level_task, &mut call_stack)
@@ -620,17 +654,18 @@ impl ResolvedConfig {
                 let flattened_sub_task = self.flatten_task_recursive(&sub_task, call_stack)?;
                 let mut inherited_commands = flattened_sub_task.commands.clone();
                 for sub_plat_exec in &mut inherited_commands {
-                    for opt_cmd_exec in [
+                    for cmd_exec in [
                         &mut sub_plat_exec.default,
                         &mut sub_plat_exec.windows,
                         &mut sub_plat_exec.linux,
                         &mut sub_plat_exec.macos,
-                    ] {
-                        if let Some(cmd_exec) = opt_cmd_exec {
-                            cmd_exec.ignore_errors |= parent_cmd_exec.ignore_errors;
-                            cmd_exec.run_in_parallel |= parent_cmd_exec.run_in_parallel;
-                            cmd_exec.silent_mode |= parent_cmd_exec.silent_mode;
-                        }
+                    ]
+                    .into_iter()
+                    .flatten()
+                    {
+                        cmd_exec.ignore_errors |= parent_cmd_exec.ignore_errors;
+                        cmd_exec.run_in_parallel |= parent_cmd_exec.run_in_parallel;
+                        cmd_exec.silent_mode |= parent_cmd_exec.silent_mode;
                     }
                 }
                 new_commands.extend(inherited_commands);
@@ -722,13 +757,13 @@ impl ResolvedConfig {
                                 name
                             ));
                         }
-                        if let Some(plat_exec) = script.commands.first() {
-                            if let Some(cmd_exec) = self.select_platform_exec(plat_exec) {
-                                let (CommandAction::Execute(tpl) | CommandAction::Print(tpl)) =
-                                    &cmd_exec.action;
-                                final_components
-                                    .extend(self.flatten_template_recursive(tpl, call_stack)?);
-                            }
+                        if let Some(plat_exec) = script.commands.first()
+                            && let Some(cmd_exec) = self.select_platform_exec(plat_exec)
+                        {
+                            let (CommandAction::Execute(tpl) | CommandAction::Print(tpl)) =
+                                &cmd_exec.action;
+                            final_components
+                                .extend(self.flatten_template_recursive(tpl, call_stack)?);
                         }
                     }
                     call_stack.remove(&key);
@@ -792,8 +827,15 @@ pub struct ShellsConfig {
 
 /// Enum for supported ANSI colors, used by the `<#color>` token.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AnsiColor {
+pub enum AnsiStyle {
+    // --- Attributes ---
     Reset,
+    Bold,
+    Dim,
+    Italic,
+    Underline,
+
+    // --- Standard Colors ---
     Black,
     Red,
     Green,
@@ -802,6 +844,16 @@ pub enum AnsiColor {
     Magenta,
     Cyan,
     White,
+
+    // --- Bright (Intense) Colors ---
+    BrightBlack, // Often rendered as Gray
+    BrightRed,
+    BrightGreen,
+    BrightYellow,
+    BrightBlue,
+    BrightMagenta,
+    BrightCyan,
+    BrightWhite,
 }
 
 // =========================================================================
@@ -891,6 +943,7 @@ impl ProjectConfig {
             scripts: HashMap::new(),
             options: OptionsConfig {
                 open_with: open_with_config,
+                prompt: Some("(axes: <#cyan><name><#reset>) $ ".to_string()),
                 ..Default::default()
             },
             vars: vars_defaults,

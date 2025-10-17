@@ -1,9 +1,7 @@
-// EN: src/cli/handlers/run.rs (FINALIZED FOR CLEAN UX)
-
 use crate::{
     cli::handlers::commons,
-    core::{parameters::ArgResolver, task_executor},
-    models::{CommandAction, GlobalIndex, ResolvedConfig, Task, TemplateComponent},
+    core::task_executor,
+    models::{CommandAction, GlobalIndex, ResolvedConfig, Task},
 };
 use anyhow::{Result, anyhow};
 use clap::Parser;
@@ -30,9 +28,14 @@ pub fn parse_script_path(full_path: &str) -> (Option<&str>, &str) {
     about = "Runs a script in the project's context. If no script is provided, lists available scripts."
 )]
 struct RunArgs {
+    /// The name of the script to run.
     script_name: Option<String>,
+
+    /// Display the execution plan without running any commands.
     #[arg(long, name = "dry-run")]
     dry_run: bool,
+
+    /// Parameters and flags to pass to the script.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     params: Vec<String>,
 }
@@ -43,23 +46,30 @@ struct RunArgs {
 /// Dispatches to list, dry-run, or execute a script based on arguments.
 pub fn handle(
     context: Option<String>,
+    // The dispatcher gives us the script name (if any) as the first arg,
+    // and the rest are script parameters.
     mut args: Vec<String>,
     index: &mut GlobalIndex,
 ) -> Result<()> {
-    let full_args = if args.is_empty() {
-        vec![]
+    // 1. Separate the script name from its parameters.
+    let script_name_opt = if args.is_empty() {
+        None
     } else {
-        let script_name = args.remove(0);
-        let mut temp_args = vec![script_name];
-        temp_args.extend(args);
-        temp_args
+        Some(args.remove(0))
     };
+    // What remains in `args` are the true script parameters.
+    let script_params = args;
 
-    let run_args = RunArgs::try_parse_from(&full_args)?;
+    // 2. Resolve config.
     let config = commons::resolve_config_for_context(context, index)?;
 
-    match run_args.script_name {
+    // 3. Match on whether a script name was provided.
+    match script_name_opt {
         Some(script_name) => {
+            // A script was specified. We need to check for the `--dry-run` flag,
+            // which could be anywhere in the params.
+            let (is_dry_run, final_params) = parse_dry_run_flag(&script_params);
+
             let task = config.get_script(&script_name)?.ok_or_else(|| {
                 anyhow!(
                     t!("run.error.not_found"),
@@ -68,28 +78,22 @@ pub fn handle(
                 )
             })?;
 
-            // The crucial new step: flatten the task before any further processing.
             let flattened_task = config.flatten_task(&task)?;
 
-            if run_args.dry_run {
-                dry_run_script(
-                    &script_name,
-                    &flattened_task,
-                    &config,
-                    &run_args.params,
-                    index,
-                )
+            if is_dry_run {
+                dry_run_script(&script_name, &flattened_task, &config, &final_params, index)
             } else {
-                execute_script(
-                    &script_name,
-                    &flattened_task,
-                    &config,
-                    &run_args.params,
-                    index,
-                )
+                execute_script(&script_name, &flattened_task, &config, &final_params, index)
             }
         }
-        None => list_available_scripts(&config, index),
+        None => {
+            // --- No script name provided: list available scripts ---
+            // Any arguments passed (like `--dry-run`) are ignored in this mode.
+            if !script_params.is_empty() {
+                log::warn!("Arguments provided to 'axes run' without a script name are ignored.");
+            }
+            list_available_scripts(&config, index)
+        }
     }
 }
 
@@ -108,15 +112,15 @@ fn list_available_scripts(config: &ResolvedConfig, index: &GlobalIndex) -> Resul
         return Ok(());
     }
 
-    let mut sorted_keys: Vec<_> = scripts.keys().cloned().collect();
+    let mut sorted_keys: Vec<_> = scripts.keys().collect();
     sorted_keys.sort();
 
     for script_name in sorted_keys {
-        let task = scripts.get(&script_name).unwrap();
+        let task = scripts.get(script_name).unwrap();
         print!("  - {}", script_name.green());
 
         let source_project_name =
-            crate::cli::handlers::info::find_task_source("scripts", &script_name, config, index)?;
+            crate::cli::handlers::info::find_task_source("scripts", script_name, config, index)?;
         if source_project_name != config.qualified_name {
             print!(
                 " {}",
@@ -128,10 +132,10 @@ fn list_available_scripts(config: &ResolvedConfig, index: &GlobalIndex) -> Resul
             );
         }
 
-        if let Some(d) = &task.desc {
-            if !d.trim().is_empty() {
-                print!(": {}", d.dimmed());
-            }
+        if let Some(d) = &task.desc
+            && !d.trim().is_empty()
+        {
+            print!(": {}", d.dimmed());
         }
         println!();
     }
@@ -153,36 +157,19 @@ fn execute_script(
         return Ok(());
     }
 
-    let all_definitions = commons::collect_parameter_defs_from_task(task, config);
-
-    // FIX: Apply the same fix here
-    let has_generic_params = task.commands.iter().any(|plat_exec| {
-        [
-            plat_exec.default.as_ref(),
-            plat_exec.windows.as_ref(),
-            plat_exec.linux.as_ref(),
-            plat_exec.macos.as_ref(),
-        ]
-        .into_iter()
-        .flatten()
-        .any(|cmd_exec| {
-            let template = match &cmd_exec.action {
-                CommandAction::Execute(t) | CommandAction::Print(t) => t,
-            };
-            template
-                .iter()
-                .any(|c| matches!(c, TemplateComponent::GenericParams { .. }))
-        })
-    });
-
-    let resolver = ArgResolver::new(&all_definitions, params, has_generic_params)?;
+    let resolver = commons::build_resolver_for_task(task, params)?;
 
     // Check if the script will be silent on the current platform
     let is_globally_silent = task.commands.iter().all(|plat_exec| {
         config
             .select_platform_exec(plat_exec)
-            .map_or(true, |cmd| cmd.silent_mode)
+            .is_none_or(|cmd| cmd.silent_mode)
     });
+    log::debug!(
+        "Script '{}' is_globally_silent = {}",
+        script_name,
+        is_globally_silent
+    );
 
     if !is_globally_silent {
         let prefix_path = format_prefix_path(&config.qualified_name);
@@ -193,10 +180,26 @@ fn execute_script(
     Ok(())
 }
 
+/// Manually parses and removes the `--dry-run` flag from a list of parameters.
+/// Clap is not suitable here as we need to separate the handler's flags from the script's parameters.
+fn parse_dry_run_flag(params: &[String]) -> (bool, Vec<String>) {
+    let mut is_dry_run = false;
+    let mut final_params = Vec::with_capacity(params.len());
+
+    for param in params {
+        if param == "--dry-run" {
+            is_dry_run = true;
+        } else {
+            final_params.push(param.clone());
+        }
+    }
+    (is_dry_run, final_params)
+}
+
 /// Displays the fully-resolved execution plan for a script.
 fn dry_run_script(
     script_name: &str,
-    task: &Arc<Task>, // Receives the FLATTENED task
+    task: &Arc<Task>,
     config: &ResolvedConfig,
     params: &[String],
     index: &mut GlobalIndex,
@@ -213,41 +216,20 @@ fn dry_run_script(
         return Ok(());
     }
 
-    let all_definitions = commons::collect_parameter_defs_from_task(task, config);
-    let has_generic_params = task.commands.iter().any(|plat_exec| {
-        [
-            plat_exec.default.as_ref(),
-            plat_exec.windows.as_ref(),
-            plat_exec.linux.as_ref(),
-            plat_exec.macos.as_ref(),
-        ]
-        .into_iter()
-        .flatten()
-        .any(|cmd_exec| {
-            let template = match &cmd_exec.action {
-                CommandAction::Execute(t) | CommandAction::Print(t) => t,
-            };
-            template
-                .iter()
-                .any(|c| matches!(c, TemplateComponent::GenericParams { .. }))
-        })
-    });
-    let resolver = ArgResolver::new(&all_definitions, params, has_generic_params)?;
+    let resolver = commons::build_resolver_for_task(task, params)?;
 
     println!("---");
     // Iterate over the universal AST, but only render the command for the current platform
     for plat_exec in &task.commands {
         if let Some(command_exec) = config.select_platform_exec(plat_exec) {
-            let mut prefixes = String::new();
-            if command_exec.silent_mode {
-                prefixes.push('@');
-            }
-            if command_exec.ignore_errors {
-                prefixes.push('-');
-            }
-            if command_exec.run_in_parallel {
-                prefixes.push('>');
-            }
+            let prefixes: String = [
+                (command_exec.silent_mode, '@'),
+                (command_exec.ignore_errors, '-'),
+                (command_exec.run_in_parallel, '>'),
+            ]
+            .iter()
+            .filter_map(|(flag, ch)| if *flag { Some(*ch) } else { None })
+            .collect();
 
             let (action_prefix, template) = match &command_exec.action {
                 CommandAction::Print(t) => ("# ".dimmed(), t),
@@ -274,10 +256,16 @@ fn dry_run_script(
 }
 
 fn format_prefix_path(qualified_name: &str) -> String {
-    let parts: Vec<&str> = qualified_name.split('/').collect();
-    match parts.len() {
-        1 => parts[0].to_string(),
-        2 => parts.join("/"),
-        _ => format!(".../{}", &parts[parts.len() - 2..].join("/")),
+    let mut parts = qualified_name.split('/');
+    // Use `nth` to efficiently get the part at a specific index from the end.
+    // `rev()` reverses the iterator, `nth(1)` gets the second-to-last element.
+    if let Some(second_to_last) = parts.clone().rev().nth(1) {
+        // More than 2 parts exist.
+        // `parts.last()` is now efficient as `split` is a DoubleEndedIterator.
+        let last = parts.next_back().unwrap_or(""); // Safe to unwrap
+        format!(".../{}/{}", second_to_last, last)
+    } else {
+        // 1 or 2 parts, return the whole name.
+        qualified_name.to_string()
     }
 }

@@ -1,8 +1,7 @@
-// src/cli/handlers/link.rs (REBUILT FOR ARCHITECTURE, SAFETY, AND UX)
-
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use colored::*;
+use uuid::Uuid;
 
 use crate::{
     cli::handlers::commons,
@@ -30,7 +29,6 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
     let context_str =
         context.ok_or_else(|| anyhow!(t!("error.context_required"), command = "link"))?;
 
-    // Use the architecturally correct lazy resolver.
     let config = commons::resolve_config_for_context(Some(context_str), index)?;
     let project_to_move_uuid = config.uuid;
     let old_qualified_name = config.qualified_name.clone();
@@ -44,25 +42,17 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
             )
         })?;
 
-    // 3. Perform critical safety checks BEFORE attempting the operation.
-    if project_to_move_uuid == index_manager::GLOBAL_PROJECT_UUID {
-        return Err(anyhow!(t!("link.error.cannot_link_global")));
-    }
-    if project_to_move_uuid == new_parent_uuid {
-        return Err(anyhow!(t!("link.error.link_to_self")));
-    }
-
-    let project_to_move_entry = index.projects.get(&project_to_move_uuid).unwrap(); // Safe
-    if project_to_move_entry.parent == Some(new_parent_uuid) {
-        println!(
-            "{}",
-            format!(
-                t!("link.info.already_child"),
-                name = old_qualified_name,
-                parent = new_parent_qualified_name
-            )
-            .yellow()
-        );
+    // 3. Perform critical pre-flight safety checks.
+    if validate_link_operation(
+        index,
+        project_to_move_uuid,
+        new_parent_uuid,
+        &old_qualified_name,
+        &new_parent_qualified_name,
+    )?
+    .is_none()
+    {
+        // A `None` result from validation indicates a no-op (already a child), so we exit.
         return Ok(());
     }
 
@@ -75,29 +65,11 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
         )
     );
 
-    // 4. Perform the link operation in the index manager (which contains cycle checks).
+    // 4. Perform the link operation. The index manager now handles the `project_ref.bin` update internally.
     index_manager::link_project(index, project_to_move_uuid, new_parent_uuid)
         .with_context(|| anyhow!(t!("link.error.link_failed"), name = old_qualified_name))?;
 
-    // 5. Update the local project reference file (`project_ref.bin`) for consistency.
-    let mut project_ref =
-        index_manager::get_or_create_project_ref(&config.project_root, project_to_move_uuid, index)
-            .with_context(|| t!("error.local_ref_failed"))?;
-
-    project_ref.parent_uuid = Some(new_parent_uuid);
-    if let Err(e) = index_manager::write_project_ref(&config.project_root, &project_ref) {
-        // This is not a fatal error, but the user must be warned.
-        eprintln!(
-            "\n{}",
-            anyhow!(t!("link.warning.local_ref_update_failed"), error = e)
-                .to_string()
-                .yellow()
-        );
-    }
-
-    // CRITICAL: The main function will save the updated global index. No need to do it here.
-
-    // 6. Provide clear, detailed feedback to the user, including the new qualified name.
+    // 5. Provide clear, detailed feedback to the user.
     let new_qualified_name = index_manager::build_qualified_name(project_to_move_uuid, index)
         .unwrap_or_else(|| t!("common.label.unknown").to_string());
 
@@ -116,4 +88,37 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
     println!("\n  {}", t!("common.info.caches_will_regenerate").dimmed());
 
     Ok(())
+}
+
+/// Centralizes all pre-flight safety checks for the link operation.
+/// Returns `Ok(Some(()))` on success, `Ok(None)` for a no-op, and `Err` for a validation failure.
+fn validate_link_operation(
+    index: &GlobalIndex,
+    project_to_move_uuid: Uuid,
+    new_parent_uuid: Uuid,
+    old_qualified_name: &str,
+    new_parent_qualified_name: &str,
+) -> Result<Option<()>> {
+    if project_to_move_uuid == index_manager::GLOBAL_PROJECT_UUID {
+        return Err(anyhow!(t!("link.error.cannot_link_global")));
+    }
+    if project_to_move_uuid == new_parent_uuid {
+        return Err(anyhow!(t!("link.error.link_to_self")));
+    }
+
+    let project_to_move_entry = index.projects.get(&project_to_move_uuid).unwrap(); // Safe
+    if project_to_move_entry.parent == Some(new_parent_uuid) {
+        println!(
+            "{}",
+            format!(
+                t!("link.info.already_child"),
+                name = old_qualified_name,
+                parent = new_parent_qualified_name
+            )
+            .yellow()
+        );
+        return Ok(None); // Signal a no-op.
+    }
+
+    Ok(Some(())) // Signal success.
 }
