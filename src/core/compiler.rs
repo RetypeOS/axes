@@ -332,34 +332,34 @@ pub fn parse_prefixes(line: &str) -> (Prefixes, &str) {
     (prefixes, line.get(current_pos..).unwrap_or("").trim_start())
 }
 
-/// Transforms a command string into a sequence of `TemplateComponent`s.
-/// This is the "tokenizer" of the compiler.
+/// Transforms a command string into a sequence of `TemplateComponent`s,
+/// merging adjacent literal components for optimization.
 pub fn tokenize_string(text: &str) -> Result<Vec<TemplateComponent>> {
-    // Pre-allocate vector capacity. A rough estimate is fine.
-    let mut components = Vec::with_capacity(text.len() / 15); // Avg token length guess
-    let mut last_index = 0;
+    let mut components = Vec::with_capacity(text.len() / 20);
 
+    // Helper to push literals and handle merging.
+    let push_literal = |components: &mut Vec<TemplateComponent>, s: &str| {
+        if s.is_empty() { return; }
+        if let Some(TemplateComponent::Literal(last)) = components.last_mut() {
+            last.push_str(s);
+        } else {
+            components.push(TemplateComponent::Literal(s.to_string()));
+        }
+    };
+
+    let mut last_index = 0;
     for caps in TOKEN_RE.captures_iter(text) {
         let full_match = caps.get(0).unwrap();
 
-        // Add the literal text between the last match and this one.
-        if last_index < full_match.start() {
-            // This requires changing `TemplateComponent::Literal` to accept `Into<String>`.
-            // For now, let's stick to `to_string` but note this for future deep optimization.
-            components.push(TemplateComponent::Literal(
-                text[last_index..full_match.start()].to_string(),
-            ));
-        }
+        // Push the literal part before the match.
+        push_literal(&mut components, &text[last_index..full_match.start()]);
 
         if full_match.as_str().starts_with('\\') {
-            // Escaped token
-            components.push(TemplateComponent::Literal(
-                full_match.as_str()[1..].to_string(),
-            ));
+            // It's an escaped token. Treat its content (without the '\') as a literal.
+            push_literal(&mut components, &full_match.as_str()[1..]);
         } else {
+            // It's a real token.
             let content = caps.get(1).unwrap().as_str();
-
-            // Add context to errors for easier debugging of malformed tokens.
             let component = parse_token_content(content, full_match.as_str())
                 .with_context(|| format!("Failed to parse token: '{}'", full_match.as_str()))?;
             components.push(component);
@@ -367,10 +367,8 @@ pub fn tokenize_string(text: &str) -> Result<Vec<TemplateComponent>> {
         last_index = full_match.end();
     }
 
-    // Add any remaining literal text after the last match.
-    if last_index < text.len() {
-        components.push(TemplateComponent::Literal(text[last_index..].to_string()));
-    }
+    // Push any remaining literal text after the last token.
+    push_literal(&mut components, &text[last_index..]);
 
     Ok(components)
 }
@@ -514,4 +512,177 @@ fn write_cached_layer(path: &std::path::Path, layer: &CachedProjectConfig) -> Re
     fs::write(path, &bytes)
         .with_context(|| format!("Failed to write cache file to '{}'", path.display()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{TemplateComponent, TomlScriptExtended, TomlVarExtended, TomlVarValue};
+
+    // --- Script Compilation Tests ---
+
+    #[test]
+    fn test_compile_simple_script_with_prefixes() {
+        let script = TomlScript::Simple("@-echo 'hello'".to_string());
+        let task = compile_script(script).unwrap();
+        assert_eq!(task.commands.len(), 1);
+        let exec = task.commands[0].default.as_ref().unwrap();
+        assert!(exec.silent_mode);
+        assert!(exec.ignore_errors);
+        assert!(!exec.run_in_parallel);
+        assert!(matches!(exec.action, CommandAction::Execute(_)));
+    }
+
+    #[test]
+    fn test_compile_sequence_script_mixed() {
+        let script = TomlScript::Sequence(vec![
+            TomlCommand::Simple("# Step 1".to_string()),
+            TomlCommand::Platform(PlatformCommand {
+                windows: Some("dir".to_string()),
+                default: Some("ls -la".to_string()),
+                ..Default::default()
+            }),
+        ]);
+        let task = compile_script(script).unwrap();
+        assert_eq!(task.commands.len(), 2);
+        
+        let first_cmd = task.commands[0].default.as_ref().unwrap();
+        assert!(matches!(first_cmd.action, CommandAction::Print(_)));
+
+        let second_cmd = &task.commands[1];
+        assert!(second_cmd.windows.is_some());
+        assert!(second_cmd.default.is_some());
+        assert!(second_cmd.linux.is_none());
+    }
+
+    #[test]
+    fn test_compile_extended_script_with_run_sequence() {
+        let script = TomlScript::Extended(TomlScriptExtended {
+            desc: Some("A complex script".to_string()),
+            run: Box::new(TomlScript::Sequence(vec![
+                TomlCommand::Simple("cmd1".to_string()),
+                TomlCommand::Simple("cmd2".to_string()),
+            ])),
+        });
+        let task = compile_script(script).unwrap();
+        assert_eq!(task.desc.as_deref(), Some("A complex script"));
+        assert_eq!(task.commands.len(), 2);
+    }
+    
+    #[test]
+    fn test_compile_platform_direct_script() {
+        let script = TomlScript::PlatformDirect(crate::models::TomlScriptPlatformDirect {
+            desc: Some("Platform direct".to_string()),
+            platform: PlatformCommand {
+                windows: Some("echo 'win'".to_string()),
+                ..Default::default()
+            }
+        });
+        let task = compile_script(script).unwrap();
+        assert_eq!(task.desc.as_deref(), Some("Platform direct"));
+        assert_eq!(task.commands.len(), 1);
+        assert!(task.commands[0].windows.is_some());
+        assert!(task.commands[0].default.is_none());
+    }
+
+    // --- Variable Compilation Tests ---
+
+    #[test]
+    fn test_compile_simple_var_no_prefixes() {
+        let var = TomlVar::Simple("@-my-value".to_string());
+        let cached_var = compile_var(var).unwrap();
+        let exec = cached_var.value.default.as_ref().unwrap();
+        
+        // CRITICAL: Prefixes must be ignored for variables.
+        assert!(!exec.silent_mode);
+        assert!(!exec.ignore_errors);
+        
+        if let CommandAction::Execute(tpl) = &exec.action {
+            if let TemplateComponent::Literal(s) = &tpl[0] {
+                assert_eq!(s, "@-my-value");
+            } else { panic!("Expected literal"); }
+        } else { panic!("Expected Execute action"); }
+    }
+
+    #[test]
+    fn test_compile_extended_var_platform() {
+        let var = TomlVar::Extended(TomlVarExtended {
+            desc: Some("Path to binary".to_string()),
+            value: TomlVarValue::Platform(PlatformCommand {
+                windows: Some("bin\\app.exe".to_string()),
+                default: Some("bin/app".to_string()),
+                ..Default::default()
+            }),
+        });
+        let cached_var = compile_var(var).unwrap();
+        assert_eq!(cached_var.desc.as_deref(), Some("Path to binary"));
+        assert!(cached_var.value.windows.is_some());
+        assert!(cached_var.value.default.is_some());
+    }
+    
+    // --- Error Handling and Edge Case Tests ---
+
+    #[test]
+    fn test_tokenizer_handles_escaped_tokens_and_merges_literals() {
+        let text = r"echo '\<hello> world <name>'";
+        let components = tokenize_string(text).unwrap();
+        assert_eq!(components.len(), 3);
+        assert!(matches!(&components[0], TemplateComponent::Literal(s) if s == "echo '<hello> world "));
+        assert!(matches!(&components[1], TemplateComponent::Name));
+        assert!(matches!(&components[2], TemplateComponent::Literal(s) if s == "'"));
+    }
+
+
+    #[test]
+    fn test_tokenizer_with_complex_tokens() {
+        let text = r"<run('git status')> <params::0(required)> <#red>ERROR<#reset>";
+        let components = tokenize_string(text).unwrap();
+        assert_eq!(components.len(), 7);
+        assert!(matches!(&components[0], TemplateComponent::Run(_)));
+        assert!(matches!(&components[1], TemplateComponent::Literal(s) if s == " "));
+        assert!(matches!(&components[2], TemplateComponent::Parameter(_)));
+        assert!(matches!(&components[3], TemplateComponent::Literal(s) if s == " "));
+        assert!(matches!(&components[4], TemplateComponent::Color(c) if *c == crate::models::AnsiStyle::Red));
+        assert!(matches!(&components[5], TemplateComponent::Literal(s) if s == "ERROR"));
+        assert!(matches!(&components[6], TemplateComponent::Color(c) if *c == crate::models::AnsiStyle::Reset));
+    }
+    
+    #[test]
+    fn test_empty_script_compiles_to_empty_task() {
+        let script = TomlScript::Simple("".to_string());
+        let task = compile_script(script).unwrap();
+        assert_eq!(task.commands.len(), 1); // An empty command is still a command
+        let exec = task.commands[0].default.as_ref().unwrap();
+        if let CommandAction::Execute(tpl) = &exec.action {
+            assert!(tpl.is_empty());
+        } else {
+            panic!("Expected Execute action");
+        }
+    }
+
+    #[test]
+    fn test_toml_deserialization_error_for_unknown_field_in_script() {
+        let toml_str = r#"
+            desc = "A script with a typo"
+            runs = "echo 'hello'" # Typo: should be `run`
+        "#;
+        // FIX: We are testing the `TomlScriptExtended` struct directly.
+        let result: Result<TomlScriptExtended, _> = toml::from_str(toml_str);
+        assert!(result.is_err(), "Should fail due to unknown field 'runs'");
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("unknown field `runs`"), "Error message was: {}", error_msg);
+    }
+
+    #[test]
+    fn test_toml_deserialization_error_for_unknown_field_in_var() {
+        let toml_str = r#"
+            desc = "A var with a typo"
+            val = "my-value" # Typo: should be `value`
+        "#;
+        // FIX: We are testing the `TomlVarExtended` struct directly.
+        let result: Result<TomlVarExtended, _> = toml::from_str(toml_str);
+        assert!(result.is_err(), "Should fail due to unknown field 'val'");
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("unknown field `val`"), "Error message was: {}", error_msg);
+    }
 }

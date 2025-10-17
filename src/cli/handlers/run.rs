@@ -1,12 +1,11 @@
 use crate::{
     cli::handlers::commons,
-    core::task_executor,
-    models::{CommandAction, GlobalIndex, ResolvedConfig, Task},
+    core::{parameters::ArgResolver, task_executor},
+    models::{CommandAction, GlobalIndex, PlatformSpecializedTask, ResolvedConfig},
 };
 use anyhow::{Result, anyhow};
 use clap::Parser;
 use colored::*;
-use std::sync::Arc;
 
 // --- Helper for the main dispatcher ---
 
@@ -46,31 +45,18 @@ struct RunArgs {
 /// Dispatches to list, dry-run, or execute a script based on arguments.
 pub fn handle(
     context: Option<String>,
-    // The dispatcher gives us the script name (if any) as the first arg,
-    // and the rest are script parameters.
     mut args: Vec<String>,
     index: &mut GlobalIndex,
 ) -> Result<()> {
-    // 1. Separate the script name from its parameters.
-    let script_name_opt = if args.is_empty() {
-        None
-    } else {
-        Some(args.remove(0))
-    };
-    // What remains in `args` are the true script parameters.
+    let script_name_opt = if args.is_empty() { None } else { Some(args.remove(0)) };
     let script_params = args;
-
-    // 2. Resolve config.
     let config = commons::resolve_config_for_context(context, index)?;
 
-    // 3. Match on whether a script name was provided.
     match script_name_opt {
         Some(script_name) => {
-            // A script was specified. We need to check for the `--dry-run` flag,
-            // which could be anywhere in the params.
             let (is_dry_run, final_params) = parse_dry_run_flag(&script_params);
 
-            let task = config.get_script(&script_name)?.ok_or_else(|| {
+            let task_universal = config.get_script(&script_name)?.ok_or_else(|| {
                 anyhow!(
                     t!("run.error.not_found"),
                     script = script_name.cyan(),
@@ -78,12 +64,16 @@ pub fn handle(
                 )
             })?;
 
-            let flattened_task = config.flatten_task(&task)?;
+            let task_flattened = config.flatten_task(&task_universal)?;
+
+            let resolver = commons::build_resolver_for_task(&task_flattened, &final_params)?;
+
+            let task_specialized = config.specialize_task_for_platform(&task_flattened);
 
             if is_dry_run {
-                dry_run_script(&script_name, &flattened_task, &config, &final_params, index)
+                dry_run_script(&script_name, &task_specialized, &config, &resolver, index)
             } else {
-                execute_script(&script_name, &flattened_task, &config, &final_params, index)
+                execute_script(&script_name, &task_specialized, &config, &resolver, index)
             }
         }
         None => {
@@ -147,9 +137,9 @@ fn list_available_scripts(config: &ResolvedConfig, index: &GlobalIndex) -> Resul
 /// Prepares and executes a script, conditionally printing the context header.
 fn execute_script(
     script_name: &str,
-    task: &Arc<Task>,
+    task: &PlatformSpecializedTask,
     config: &ResolvedConfig,
-    params: &[String],
+    resolver: &ArgResolver,
     index: &mut GlobalIndex,
 ) -> Result<()> {
     if task.commands.is_empty() {
@@ -157,26 +147,17 @@ fn execute_script(
         return Ok(());
     }
 
-    let resolver = commons::build_resolver_for_task(task, params)?;
-
-    // Check if the script will be silent on the current platform
-    let is_globally_silent = task.commands.iter().all(|plat_exec| {
-        config
-            .select_platform_exec(plat_exec)
-            .is_none_or(|cmd| cmd.silent_mode)
-    });
-    log::debug!(
-        "Script '{}' is_globally_silent = {}",
-        script_name,
-        is_globally_silent
-    );
+    // Resolver is now passed in.
+    
+    let is_globally_silent = task.commands.iter().all(|cmd| cmd.silent_mode);
+    log::debug!("Script '{}' is_globally_silent = {}", script_name, is_globally_silent);
 
     if !is_globally_silent {
         let prefix_path = format_prefix_path(&config.qualified_name);
         println!("\n[{}:{}]", prefix_path.dimmed(), script_name.cyan());
     }
 
-    task_executor::execute_task(task, config, &resolver, index)?;
+    task_executor::execute_task(task, config, resolver, index)?;
     Ok(())
 }
 
@@ -199,9 +180,9 @@ fn parse_dry_run_flag(params: &[String]) -> (bool, Vec<String>) {
 /// Displays the fully-resolved execution plan for a script.
 fn dry_run_script(
     script_name: &str,
-    task: &Arc<Task>,
+    task: &PlatformSpecializedTask,
     config: &ResolvedConfig,
-    params: &[String],
+    resolver: &ArgResolver,
     index: &mut GlobalIndex,
 ) -> Result<()> {
     let prefix_path = format_prefix_path(&config.qualified_name);
@@ -216,39 +197,26 @@ fn dry_run_script(
         return Ok(());
     }
 
-    let resolver = commons::build_resolver_for_task(task, params)?;
-
     println!("---");
     // Iterate over the universal AST, but only render the command for the current platform
-    for plat_exec in &task.commands {
-        if let Some(command_exec) = config.select_platform_exec(plat_exec) {
-            let prefixes: String = [
-                (command_exec.silent_mode, '@'),
-                (command_exec.ignore_errors, '-'),
-                (command_exec.run_in_parallel, '>'),
-            ]
-            .iter()
-            .filter_map(|(flag, ch)| if *flag { Some(*ch) } else { None })
-            .collect();
+    for command_exec in &task.commands {
+        let mut prefixes = String::new();
+        if command_exec.silent_mode { prefixes.push('@'); }
+        if command_exec.ignore_errors { prefixes.push('-'); }
+        if command_exec.run_in_parallel { prefixes.push('>'); }
 
-            let (action_prefix, template) = match &command_exec.action {
-                CommandAction::Print(t) => ("# ".dimmed(), t),
-                CommandAction::Execute(t) => ("".normal(), t),
-            };
+        let (action_prefix, template) = match &command_exec.action {
+            CommandAction::Print(t) => ("# ".dimmed(), t),
+            CommandAction::Execute(t) => ("".normal(), t),
+        };
 
-            let rendered_string =
-                task_executor::assemble_final_command(template, config, &resolver, index, 0)?;
+        // assemble_final_command now uses the pre-built resolver
+        let rendered_string = task_executor::assemble_final_command(template, config, resolver, index, 0)?;
 
-            if prefixes.is_empty() {
-                println!("{}{}", action_prefix, rendered_string.green());
-            } else {
-                println!(
-                    "{} {}{}",
-                    prefixes.dimmed(),
-                    action_prefix,
-                    rendered_string.green()
-                );
-            }
+        if prefixes.is_empty() {
+            println!("{}{}", action_prefix, rendered_string.green());
+        } else {
+            println!("{} {}{}", prefixes.dimmed(), action_prefix, rendered_string.green());
         }
     }
     println!("---");
