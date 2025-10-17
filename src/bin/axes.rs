@@ -121,7 +121,7 @@ fn find_command(name: &str) -> Option<&'static CommandDefinition> {
 fn main() {
     #[cfg(debug_assertions)]
     {
-        env_logger::init(); // This is often too verbose, let's keep it commented for now.
+    //    env_logger::init();
     }
 
     // 1. Load the index and clone its initial state.
@@ -213,7 +213,6 @@ fn run_cli(cli: Cli) -> Result<()> {
         } else if let Some(command) = find_command(arg2_val) {
             // Rule 2 (Explicit Action): `axes <context> <action> [args...]`
             let params = all_args.iter().skip(2).cloned().collect();
-            // This branch correctly returns Option<String>
             (command, Some(arg1.to_string()), params)
         } else if let Some(command) = find_command(arg1) {
             // Rule 3 (Global Action): `axes <action> [args...]`
@@ -239,7 +238,6 @@ fn run_cli(cli: Cli) -> Result<()> {
         let (ctx_part, script_part) = parse_script_path(arg1);
         (
             find_command("run").unwrap(),
-            // FIX: Convert Option<&str> to Option<String>
             ctx_part.map(|s| s.to_string()),
             vec![script_part.to_string()],
         )

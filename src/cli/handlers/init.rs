@@ -1,5 +1,3 @@
-// EN: src/cli/handlers/init.rs (REBUILT FOR CLARITY AND UX)
-
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use colored::*;
@@ -134,10 +132,28 @@ fn gather_project_details(
 ) -> Result<ProjectDetails> {
     let is_interactive = !args.autosolve;
 
+    // --- Resolve name and parent first for early validation ---
     let name = resolve_project_name(&args.name, target_dir, is_interactive)?;
     let parent_uuid = resolve_parent_project(&args.parent, is_interactive, index)?;
-    let version = resolve_project_version(&args.version, is_interactive)?;
-    let description = resolve_project_description(&args.description, &name, is_interactive)?;
+
+    // --- Early collision check ---
+    if index_manager::is_sibling_name_taken(index, parent_uuid, &name, None) {
+        return Err(anyhow!(t!("init.error.name_collision"), name = name));
+    }
+
+    // --- Proceed with other details only after validation passes ---
+    let version = resolve_string_value(
+        &args.version,
+        t!("init.prompt.version"),
+        "0.1.0".to_string(),
+        is_interactive,
+    )?;
+    let description = resolve_string_value(
+        &args.description,
+        t!("init.prompt.description"),
+        format!("A new project named '{}', managed by `axes`.", name),
+        is_interactive,
+    )?;
     let env = parse_key_value_pairs(&args.env)?;
     let vars = parse_key_value_pairs(&args.var)?;
 
@@ -220,56 +236,47 @@ fn resolve_parent_project(
     Ok(index_manager::GLOBAL_PROJECT_UUID)
 }
 
-fn resolve_project_version(version_arg: &Option<String>, is_interactive: bool) -> Result<String> {
-    if let Some(version) = version_arg {
-        println!("  {} {}", "Version:".dimmed(), version);
-        return Ok(version.clone());
-    }
-    if is_interactive {
-        Input::with_theme(&ColorfulTheme::default())
-            .with_prompt(t!("init.prompt.version"))
-            .default("0.1.0".to_string())
-            .interact_text()
-            .map_err(|e| anyhow!(e))
-    } else {
-        println!(
-            "  {} 0.1.0 {}",
-            "Version:".dimmed(),
-            t!("common.label.default").dimmed()
-        );
-        Ok("0.1.0".to_string())
-    }
-}
-
-fn resolve_project_description(
-    desc_arg: &Option<String>,
-    name: &str,
-    is_interactive: bool,
-) -> Result<String> {
-    if let Some(desc) = desc_arg {
-        println!("  {} {}", "Description:".dimmed(), desc);
-        return Ok(desc.clone());
-    }
-    let default_desc = format!("A new project named '{}', managed by `axes`.", name);
-    if is_interactive {
-        Input::with_theme(&ColorfulTheme::default())
-            .with_prompt(t!("init.prompt.description"))
-            .default(default_desc)
-            .interact_text()
-            .map_err(|e| anyhow!(e))
-    } else {
-        println!("  {} {}", "Description:".dimmed(), default_desc);
-        Ok(default_desc)
-    }
-}
-
 fn parse_key_value_pairs(pairs: &[String]) -> Result<HashMap<String, String>> {
-    let mut map = HashMap::new();
+    let mut map = HashMap::with_capacity(pairs.len()); // OPTIMIZATION: Pre-allocate.
     for pair in pairs {
         let (key, value) = pair
             .split_once('=')
             .ok_or_else(|| anyhow!(t!("init.error.invalid_kv_pair"), pair = pair))?;
-        map.insert(key.trim().to_string(), value.trim().to_string());
+
+        // OPTIMIZATION: Use `to_owned()` which can be cheaper than `to_string()` for `&str`.
+        // Also makes the ownership explicit.
+        map.insert(key.trim().to_owned(), value.trim().to_owned());
     }
     Ok(map)
+}
+
+/// Generic helper to resolve a string value, either from an argument or interactively.
+fn resolve_string_value(
+    arg_val: &Option<String>,
+    prompt: &str,
+    default_val: String,
+    is_interactive: bool,
+) -> Result<String> {
+    if let Some(val) = arg_val {
+        // We can make the output cleaner by specifying what we are setting.
+        // Let's assume the prompt contains the "name" of the value.
+        println!("  {} {}", format!("{}:", prompt).dimmed(), val);
+        return Ok(val.clone());
+    }
+
+    if is_interactive {
+        Input::with_theme(&ColorfulTheme::default())
+            .with_prompt(prompt)
+            .default(default_val)
+            .interact_text()
+            .map_err(|e| anyhow!(e))
+    } else {
+        println!(
+            "  {} {} {}",
+            format!("{}:", prompt).dimmed(),
+            default_val,
+            t!("common.label.default").dimmed()
+        );
+        Ok(default_val)
+    }
 }

@@ -1,5 +1,3 @@
-// EN: src/cli/handlers/tree.rs (REBUILT FOR POWER AND UX)
-
 use anyhow::Result;
 use clap::Parser;
 
@@ -10,6 +8,7 @@ use crate::{
     },
     models::GlobalIndex,
 };
+use colored::Colorize;
 
 #[derive(Parser, Debug, Default)]
 #[command(
@@ -45,20 +44,23 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
     // 1. Parse this handler's specific arguments.
     let tree_args = TreeArgs::try_parse_from(&args)?;
 
+    // 2. Determine the definitive context with clear priority: cli arg > dispatcher context.
     let final_context = tree_args.context.or(context);
 
-    // [MODIFIED] Logic to determine start node and header.
-    let (start_node_uuid, header) = if let Some(context_str) = final_context {
-        let (uuid, qualified_name) = context_resolver::resolve_context(&context_str, index)?;
-        (
-            Some(uuid),
-            format!(t!("tree.header.from_project"), name = qualified_name).to_string(),
-        )
-    } else {
-        (None, t!("tree.header.full_tree").to_string())
+    // 3. Resolve the start node and prepare the UI header based on the context.
+    let (start_node_uuid, header) = match final_context {
+        Some(context_str) => {
+            let (uuid, qualified_name) = context_resolver::resolve_context(&context_str, index)?;
+            let header_text = format!(t!("tree.header.from_project"), name = qualified_name.cyan());
+            (Some(uuid), header_text)
+        }
+        None => {
+            // No context provided, display the full tree from the global project.
+            (None, t!("tree.header.full_tree").to_string())
+        }
     };
 
-    // 3. Set display options based on flags.
+    // 4. Set display options based on flags.
     let display_options = DisplayOptions {
         show_paths: tree_args.paths || tree_args.all,
         show_uuids: tree_args.uuids || tree_args.all,
@@ -66,7 +68,7 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
         show_health: tree_args.check,
     };
 
-    // 4. Delegate to the graph display module to do all the rendering work.
+    // 5. Delegate to the graph display module for rendering.
     println!("\n{}", header);
     graph_display::display_project_tree(index, start_node_uuid, &display_options);
 

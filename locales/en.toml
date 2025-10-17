@@ -33,7 +33,7 @@
 # 4. Shared Logic (delete/unregister plans)
 # ===================================================================
 "plan.summary.unregister_single" = "Only project '{name}' will be affected."
-"plan.summary.unregister_recursive" = "This project and all its descendants will be affected."
+"plan.summary.unregister_recursive" = "Project {name} and all its descendants will be affected."
 "plan.summary.delete_recursive" = "Project '{name}' and all its descendants will be affected."
 "plan.summary.reparent_to" = "Direct children will be moved to project '{name}'."
 "plan.error.reparent_collision" = "Cannot proceed: Reparenting would cause name collisions for the following children: '{conflicts}'. Please resolve them manually first."
@@ -234,3 +234,6 @@ For detailed help on an action, run <cmd>axes <action> --help</cmd>.
 <hl>--help</hl>, <hi>-h</hi>            Print this help message.
 <hl>--version</hl>, <hi>-v</hi>         Print version information.
 """
+
+# NO TRANSLATET YET:
+"init.error.name_collision" = "init.error.name_collision '{name}'"

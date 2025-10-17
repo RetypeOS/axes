@@ -1,35 +1,70 @@
-// src/core/color.rs (NEW MODULE)
-
-use crate::models::AnsiColor;
+use crate::models::AnsiStyle;
 use anyhow::{Result, anyhow};
 
-/// Parses a color name string (e.g., "red", "green") into an `AnsiColor` enum.
-pub fn parse_color_name(name: &str) -> Result<AnsiColor> {
-    match name.to_lowercase().as_str() {
-        "reset" => Ok(AnsiColor::Reset),
-        "black" => Ok(AnsiColor::Black),
-        "red" => Ok(AnsiColor::Red),
-        "green" => Ok(AnsiColor::Green),
-        "yellow" => Ok(AnsiColor::Yellow),
-        "blue" => Ok(AnsiColor::Blue),
-        "magenta" => Ok(AnsiColor::Magenta),
-        "cyan" => Ok(AnsiColor::Cyan),
-        "white" => Ok(AnsiColor::White),
-        _ => Err(anyhow!("Unknown color token: '<#{}>'", name)),
+/// Parses a style name string (e.g., "red", "bold", "bright-green") into an `AnsiStyle` enum.
+/// The parsing is case-insensitive.
+pub fn parse_style_name(name: &str) -> Result<AnsiStyle> {
+    match name.to_lowercase().replace('_', "-").as_str() {
+        // Attributes
+        "reset" => Ok(AnsiStyle::Reset),
+        "bold" => Ok(AnsiStyle::Bold),
+        "dim" => Ok(AnsiStyle::Dim),
+        "italic" => Ok(AnsiStyle::Italic),
+        "underline" => Ok(AnsiStyle::Underline),
+
+        // Standard Colors
+        "black" => Ok(AnsiStyle::Black),
+        "red" => Ok(AnsiStyle::Red),
+        "green" => Ok(AnsiStyle::Green),
+        "yellow" => Ok(AnsiStyle::Yellow),
+        "blue" => Ok(AnsiStyle::Blue),
+        "magenta" => Ok(AnsiStyle::Magenta),
+        "cyan" => Ok(AnsiStyle::Cyan),
+        "white" => Ok(AnsiStyle::White),
+
+        // Bright Colors (with multiple name variants for user convenience)
+        "bright-black" | "gray" | "grey" => Ok(AnsiStyle::BrightBlack),
+        "bright-red" => Ok(AnsiStyle::BrightRed),
+        "bright-green" => Ok(AnsiStyle::BrightGreen),
+        "bright-yellow" => Ok(AnsiStyle::BrightYellow),
+        "bright-blue" => Ok(AnsiStyle::BrightBlue),
+        "bright-magenta" => Ok(AnsiStyle::BrightMagenta),
+        "bright-cyan" => Ok(AnsiStyle::BrightCyan),
+        "bright-white" => Ok(AnsiStyle::BrightWhite),
+
+        // Handle legacy `AnsiStyle` enum name in error messages if we rename it.
+        _ => Err(anyhow!("Unknown style token: '<#{}>'", name)),
     }
 }
 
-/// Converts an `AnsiColor` enum into its raw ANSI escape code representation.
-pub fn ansi_color_to_code(color: AnsiColor) -> &'static str {
-    match color {
-        AnsiColor::Reset => "\x1b[0m",
-        AnsiColor::Black => "\x1b[30m",
-        AnsiColor::Red => "\x1b[31m",
-        AnsiColor::Green => "\x1b[32m",
-        AnsiColor::Yellow => "\x1b[33m",
-        AnsiColor::Blue => "\x1b[34m",
-        AnsiColor::Magenta => "\x1b[35m",
-        AnsiColor::Cyan => "\x1b[36m",
-        AnsiColor::White => "\x1b[37m",
+/// Converts an `AnsiStyle` enum into its raw ANSI escape code representation.
+pub fn style_to_ansi_code(style: AnsiStyle) -> &'static str {
+    match style {
+        // Attributes
+        AnsiStyle::Reset => "\x1b[0m",
+        AnsiStyle::Bold => "\x1b[1m",
+        AnsiStyle::Dim => "\x1b[2m",
+        AnsiStyle::Italic => "\x1b[3m",
+        AnsiStyle::Underline => "\x1b[4m",
+
+        // Standard Colors
+        AnsiStyle::Black => "\x1b[30m",
+        AnsiStyle::Red => "\x1b[31m",
+        AnsiStyle::Green => "\x1b[32m",
+        AnsiStyle::Yellow => "\x1b[33m",
+        AnsiStyle::Blue => "\x1b[34m",
+        AnsiStyle::Magenta => "\x1b[35m",
+        AnsiStyle::Cyan => "\x1b[36m",
+        AnsiStyle::White => "\x1b[37m",
+
+        // Bright (Intense) Colors
+        AnsiStyle::BrightBlack => "\x1b[90m",
+        AnsiStyle::BrightRed => "\x1b[91m",
+        AnsiStyle::BrightGreen => "\x1b[92m",
+        AnsiStyle::BrightYellow => "\x1b[93m",
+        AnsiStyle::BrightBlue => "\x1b[94m",
+        AnsiStyle::BrightMagenta => "\x1b[95m",
+        AnsiStyle::BrightCyan => "\x1b[96m",
+        AnsiStyle::BrightWhite => "\x1b[97m",
     }
 }

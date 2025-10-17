@@ -1,5 +1,3 @@
-// EN: src/core/graph_display.rs (FINAL CORRECTED VERSION)
-
 use crate::{
     core::index_manager,
     models::{GlobalIndex, IndexEntry},
@@ -22,7 +20,7 @@ struct TreeRenderer<'a> {
     index: &'a GlobalIndex,
     options: &'a DisplayOptions,
     children_map: HashMap<Option<Uuid>, Vec<(Uuid, &'a IndexEntry)>>,
-    alias_map: HashMap<Uuid, Vec<String>>,
+    alias_map: HashMap<Uuid, Vec<&'a str>>,
 }
 
 impl<'a> TreeRenderer<'a> {
@@ -39,12 +37,13 @@ impl<'a> TreeRenderer<'a> {
             children.sort_by_key(|(_, entry)| &entry.name);
         }
 
-        let mut alias_map: HashMap<Uuid, Vec<String>> = HashMap::new();
+        let mut alias_map: HashMap<Uuid, Vec<&'a str>> = HashMap::new();
         for (alias_name, uuid) in &index.aliases {
-            alias_map
-                .entry(*uuid)
-                .or_default()
-                .push(format!("@{}", alias_name));
+            alias_map.entry(*uuid).or_default().push(alias_name);
+        }
+        // Sort alias names for deterministic output.
+        for aliases in alias_map.values_mut() {
+            aliases.sort_unstable();
         }
 
         Self {
@@ -56,27 +55,30 @@ impl<'a> TreeRenderer<'a> {
     }
 
     /// Renders the tree starting from a given node (or the root if `None`).
-    fn render_tree(&self, start_node_uuid: Option<Uuid>) {
-        if let Some(start_uuid) = start_node_uuid {
-            // Render a subtree from a specific node.
-            if let Some(start_entry) = self.index.projects.get(&start_uuid) {
+    fn render_tree(&self, start_node_uuid_opt: Option<Uuid>) {
+        // Logic for finding the start node.
+        let (start_uuid, is_subtree) = match start_node_uuid_opt {
+            Some(uuid) => (uuid, true), // Rendering a specific subtree
+            None => (index_manager::GLOBAL_PROJECT_UUID, false), // Rendering the full tree
+        };
+
+        if let Some(start_entry) = self.index.projects.get(&start_uuid) {
+            // If it's a subtree, we don't print the root node itself as part of the tree lines.
+            // The header already announced it.
+            if !is_subtree {
                 self.print_node_info(start_uuid, start_entry);
                 println!();
-                self.render_children_of(start_uuid, "", 1);
-            } else {
-                println!("\n{}", t!("tree.error.project_not_found").red());
             }
+            self.render_children_of(start_uuid, "", 1);
         } else {
-            // Render the full tree from the actual root project.
-            let root_uuid = index_manager::GLOBAL_PROJECT_UUID;
-            if let Some(root_entry) = self.index.projects.get(&root_uuid) {
-                self.print_node_info(root_uuid, root_entry);
-                println!();
-                self.render_children_of(root_uuid, "", 1);
+            let error_message = if is_subtree {
+                t!("tree.error.project_not_found").red()
             } else {
-                println!("\n{}", t!("tree.error.root_project_missing").yellow());
-            }
+                t!("tree.error.root_project_missing").yellow()
+            };
+            println!("\n{}", error_message);
         }
+
         self.print_legend();
     }
 
@@ -116,7 +118,12 @@ impl<'a> TreeRenderer<'a> {
             info_parts.push(t!("tree.label.last_used").yellow().to_string());
         }
         if let Some(aliases) = self.alias_map.get(&uuid) {
-            info_parts.push(aliases.join(", ").bright_blue().to_string());
+            let formatted_aliases = aliases
+                .iter()
+                .map(|name| format!("{}!", name))
+                .collect::<Vec<_>>()
+                .join(", ");
+            info_parts.push(formatted_aliases.bright_blue().to_string());
         }
         if self.options.show_paths {
             info_parts.push(format!("[{}]", entry.path.display()).dimmed().to_string());
@@ -132,14 +139,20 @@ impl<'a> TreeRenderer<'a> {
 
     /// Prints a helpful legend.
     fn print_legend(&self) {
-        let mut legend_items = vec![
-            format!(
-                "{} = {}",
-                t!("tree.label.last_used").yellow(),
-                t!("tree.legend.last_used")
-            ),
-            format!("{} = {}", "@alias".bright_blue(), t!("tree.legend.alias")),
-        ];
+        let mut legend_items = Vec::new();
+
+        // Build the legend dynamically based on active options.
+        legend_items.push(format!(
+            "{} = {}",
+            "alias!".bright_blue(),
+            t!("tree.legend.alias")
+        ));
+        legend_items.push(format!(
+            "{} = {}",
+            t!("tree.label.last_used").yellow(),
+            t!("tree.legend.last_used")
+        ));
+
         if self.options.show_health {
             legend_items.push(format!(
                 "{} = {}",
@@ -147,7 +160,10 @@ impl<'a> TreeRenderer<'a> {
                 t!("tree.legend.broken_path")
             ));
         }
-        println!("\nLegend: {}", legend_items.join(", ").dimmed());
+
+        if !legend_items.is_empty() {
+            println!("\nLegend: {}", legend_items.join(", ").dimmed());
+        }
     }
 }
 

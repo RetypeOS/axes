@@ -1,5 +1,3 @@
-// src/cli/handlers/rename.rs (CON CORRECCIÓN PARA NO-OP)
-
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use colored::*;
@@ -20,33 +18,20 @@ struct RenameArgs {
 
 // --- Main Handler ---
 pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
-    // 1. Parse arguments and validate the new name.
+    // 1. Parse and validate arguments.
     let rename_args = RenameArgs::try_parse_from(&args)?;
     let new_name = crate::cli::handlers::commons::validate_project_name(&rename_args.new_name)?;
-
-    // 2. Resolve the target project's UUID and current name directly from the index.
     let context_str =
         context.ok_or_else(|| anyhow!(t!("error.context_required"), command = "rename"))?;
 
+    // 2. Resolve target and perform pre-flight checks.
     let (uuid_to_rename, old_qualified_name) =
         context_resolver::resolve_context(&context_str, index)?;
-    let old_simple_name = old_qualified_name
-        .split('/')
-        .next_back()
-        .unwrap_or(&old_qualified_name);
+    let old_simple_name = &index.projects.get(&uuid_to_rename).unwrap().name;
 
-    // 3. [NEW] Add a check to handle no-op renames gracefully.
-    if old_simple_name == new_name {
-        println!(
-            "\n{}",
-            format!(t!("rename.info.no_change"), name = new_name).yellow()
-        );
-        return Ok(());
-    }
-
-    // 4. Handle the special case of renaming the 'global' project.
-    if uuid_to_rename == index_manager::GLOBAL_PROJECT_UUID && !confirm_global_rename()? {
-        return Ok(());
+    // This function now handles no-op and global project confirmation.
+    if !pre_rename_validation(uuid_to_rename, old_simple_name, &new_name)? {
+        return Ok(()); // Validation failed or user cancelled, exit gracefully.
     }
 
     println!(
@@ -58,29 +43,17 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
         )
     );
 
-    // 5. Perform the rename operation directly on the index.
+    // 3. Perform the rename operation.
+    log::info!(
+        "Renaming project {} ('{}') to '{}'",
+        uuid_to_rename,
+        old_qualified_name,
+        new_name
+    );
     index_manager::rename_project(index, uuid_to_rename, &new_name)
         .with_context(|| anyhow!(t!("rename.error.rename_failed"), name = old_qualified_name))?;
 
-    // 6. Update the local project reference file (`project_ref.bin`).
-    let project_entry = index.projects.get(&uuid_to_rename).unwrap(); // Safe
-    let mut project_ref =
-        index_manager::get_or_create_project_ref(&project_entry.path, uuid_to_rename, index)?;
-
-    project_ref.name = new_name.clone();
-    if let Err(e) = index_manager::write_project_ref(&project_entry.path, &project_ref) {
-        eprintln!(
-            "\n{}",
-            format!(
-                t!("rename.warning.local_ref_update_failed"),
-                path = project_entry.path.display(),
-                error = e
-            )
-            .yellow()
-        );
-    }
-
-    // 7. Provide clear feedback.
+    // 4. Provide clear feedback.
     let new_qualified_name =
         index_manager::build_qualified_name(uuid_to_rename, index).unwrap_or_default();
 
@@ -91,13 +64,29 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
         "New Full Path:".blue(),
         new_qualified_name.cyan()
     );
-
     println!("\n  {}", t!("rename.info.caches_remain_valid").dimmed());
 
     Ok(())
 }
 
-// ... (El resto del archivo no cambia)
+fn pre_rename_validation(uuid: uuid::Uuid, old_name: &str, new_name: &str) -> Result<bool> {
+    // Check for no-op renames.
+    if old_name == new_name {
+        println!(
+            "\n{}",
+            format!(t!("rename.info.no_change"), name = new_name).yellow()
+        );
+        return Ok(false);
+    }
+
+    // Handle special case for 'global' project.
+    if uuid == index_manager::GLOBAL_PROJECT_UUID {
+        return confirm_global_rename();
+    }
+
+    Ok(true)
+}
+
 fn confirm_global_rename() -> Result<bool> {
     println!(
         "{}",

@@ -1,6 +1,4 @@
-// EN: src/cli/handlers/alias.rs (REFACTORED AND ENHANCED)
-
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 use colored::*;
 use dialoguer::{Confirm, console::measure_text_width, theme::ColorfulTheme};
@@ -92,7 +90,13 @@ fn set_alias(name: &str, context: &str, index: &mut GlobalIndex) -> Result<()> {
         );
     }
 
-    let (target_uuid, target_name) = context_resolver::resolve_context(context, index)?;
+    let (target_uuid, target_name) = context_resolver::resolve_context(context, index)
+        .with_context(|| {
+            format!(
+                "The provided context '{}' for the alias could not be resolved.",
+                context
+            )
+        })?;
     index_manager::set_alias(index, clean_name.clone(), target_uuid);
 
     // CRITICAL: Do NOT save the index here. The main function handles it.
@@ -119,10 +123,11 @@ fn list_aliases(index: &GlobalIndex) -> Result<()> {
     }
 
     println!("\n{}:", t!("alias.info.header"));
+
+    // Collect references, not owned values. Avoids cloning Strings and Uuids.
     let mut sorted_aliases: Vec<_> = index.aliases.iter().collect();
     sorted_aliases.sort_by_key(|(name, _)| *name);
 
-    // Calculate column width for clean alignment.
     let max_len = sorted_aliases
         .iter()
         .map(|(name, _)| measure_text_width(&format!("{}!", name)))
@@ -165,7 +170,7 @@ fn remove_alias(name: &str, index: &mut GlobalIndex) -> Result<()> {
     Ok(())
 }
 
-/// [NEW] Handles the logic for checking the health of all aliases.
+/// Handles the logic for checking the health of all aliases.
 fn check_aliases(index: &GlobalIndex) -> Result<()> {
     if index.aliases.is_empty() {
         println!("\n{}", t!("alias.info.no_aliases"));
@@ -174,6 +179,7 @@ fn check_aliases(index: &GlobalIndex) -> Result<()> {
 
     println!("\n{}", t!("alias.info.checking_header"));
     let mut broken_count = 0;
+
     let mut sorted_aliases: Vec<_> = index.aliases.iter().collect();
     sorted_aliases.sort_by_key(|(name, _)| *name);
 

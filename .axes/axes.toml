@@ -4,7 +4,7 @@
 
 # === Project Metadata ===
 # Version is synchronized with Cargo.toml and the application's version output.
-version = "0.2.3-beta"
+version = "0.3.0-beta"
 description = "The development workflow configuration for the `axes` project itself."
 
 # === Development Scripts ===

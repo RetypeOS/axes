@@ -95,8 +95,8 @@ pub fn assemble_final_command(
     template: &[TemplateComponent],
     config: &ResolvedConfig,
     resolver: &ArgResolver,
-    index: &mut GlobalIndex,
-    depth: u32,
+    _index: &mut GlobalIndex,
+    _depth: u32,
 ) -> Result<String> {
     let mut final_command = String::with_capacity(template.len() * 50);
     for component in template {
@@ -121,7 +121,7 @@ pub fn assemble_final_command(
                 };
                 final_command.push_str(&joined);
             }
-            TemplateComponent::Color(c) => final_command.push_str(color::ansi_color_to_code(*c)),
+            TemplateComponent::Color(c) => final_command.push_str(color::style_to_ansi_code(*c)),
             TemplateComponent::Path => {
                 final_command.push_str(&config.project_root.to_string_lossy())
             }
@@ -134,7 +134,13 @@ pub fn assemble_final_command(
                 let command_to_run = match spec {
                     RunSpec::Literal(cmd) => {
                         let temp_template = vec![TemplateComponent::Literal(cmd.clone())];
-                        assemble_final_command(&temp_template, config, resolver, index, depth + 1)?
+                        assemble_final_command(
+                            &temp_template,
+                            config,
+                            resolver,
+                            _index,
+                            _depth + 1,
+                        )?
                     }
                 };
                 let env = config.get_env()?;

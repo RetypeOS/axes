@@ -50,9 +50,9 @@ _params_hyperfine = """
 _params_time = """
 <params::axes-low(      alias='-al', map=' ', default='axes ./low_test/script_90'                      )>\
 <params::axes-mid(      alias='-am', map=' ', default='axes ./mid_test/script_900'                     )>\
-<params::axes-high(     alias='-ah', map=' ', default='axes ./high_test/script_9000'                    )>\
+<params::axes-high(     alias='-ah', map=' ', default='axes ./high_test/script_9000'                   )>\
 <params::axes-big(      alias='-ab', map=' ', default='axes ./big_test/script_90000'                   )>\
-<params::axes-divided(  alias='-ad', map=' ', default='axes ./big_divided_test/into/script_90000'       )>\
+<params::axes-divided(  alias='-ad', map=' ', default='axes ./big_divided_test/into/script_90000'      )>\
 <params::just-low(      alias='-jl', map=' ', default='just --justfile low_test/justfile script_90'    )>\
 <params::just-mid(      alias='-jm', map=' ', default='just --justfile mid_test/justfile script_900'   )>\
 <params::just-high(     alias='-jh', map=' ', default='just --justfile high_test/justfile script_9000' )>\

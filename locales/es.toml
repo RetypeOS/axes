@@ -33,7 +33,7 @@
 # 4. Shared Logic (delete/unregister plans)
 # ===================================================================
 "plan.summary.unregister_single" = "Solo el proyecto '{name}' se verá afectado."
-"plan.summary.unregister_recursive" = "Este proyecto y todos sus descendientes se verán afectados."
+"plan.summary.unregister_recursive" = "El proyecto {name} y todos sus descendientes se verán afectados."
 "plan.summary.delete_recursive" = "El proyecto '{name}' y todos sus descendientes se verán afectados."
 "plan.summary.reparent_to" = "Los hijos directos serán movidos al proyecto '{name}'."
 "plan.error.reparent_collision" = "No se puede proceder: Reasignar provocaría colisiones de nombres para los siguientes hijos: '{conflicts}'. Por favor, resuélvelos manualmente primero."

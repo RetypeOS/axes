@@ -1,5 +1,3 @@
-// EN: src/cli/handlers/debug_cache.rs
-
 use crate::models::{CachedProjectConfig, GlobalIndex};
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
@@ -14,7 +12,6 @@ use std::fs;
 struct CacheArgs {
     /// The project context to inspect the cache for.
     context: Option<String>,
-
     #[command(subcommand)]
     command: CacheSubcommand,
 }
@@ -39,10 +36,8 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
         .context
         .or(context)
         .ok_or_else(|| anyhow!("The '_cache' command requires an explicit project context."))?;
-
     let (uuid, qualified_name) =
         crate::core::context_resolver::resolve_context(&final_context, index)?;
-
     match cache_args.command {
         CacheSubcommand::Inspect => inspect_cache(uuid, &qualified_name, index),
         CacheSubcommand::Clear => clear_cache(uuid, &qualified_name, index),
@@ -59,59 +54,64 @@ fn inspect_cache(uuid: uuid::Uuid, name: &str, index: &GlobalIndex) -> Result<()
         uuid
     );
 
-    // Get the project entry from the index.
-    let project = index.projects.get(&uuid).unwrap(); // Safe, resolve_context guarantees it exists.
+    let project = index.projects.get(&uuid).unwrap();
 
-    let cache_dir = match &project.cache_dir {
-        Some(dir) => dir,
-        None => {
-            println!(
-                "{}",
-                "Status: Project has no resolved cache directory in the index.".yellow()
-            );
-            return Ok(());
+    // Use a single `if let` to check for both required fields.
+    if let (Some(cache_dir), Some(cache_hash)) = (&project.cache_dir, &project.config_hash) {
+        let cache_path = cache_dir.join(cache_hash);
+        println!(
+            "  {:<15} {}",
+            "Index Cache Dir:".blue(),
+            cache_dir.display()
+        );
+        println!("  {:<15} {}", "Index Hash:".blue(), cache_hash);
+        println!("  {:<15} {}", "Resolved Path:".blue(), cache_path.display());
+
+        match fs::read(&cache_path) {
+            Ok(bytes) => {
+                if bytes.is_empty() {
+                    println!("{}", "\nStatus: Cache file is empty.".yellow());
+                    return Ok(());
+                }
+
+                // CLARITY: Wrap deserialization in a context block.
+                let cache_data: CachedProjectConfig = bincode::serde::decode_from_slice(&bytes, bincode::config::standard())
+                    .map(|(data, _)| data) // Discard the size
+                    .context("Failed to deserialize cache file. It might be corrupt or from an incompatible version.")?;
+
+                let json_output = serde_json::to_string_pretty(&cache_data)
+                    .context("Failed to serialize cache data to JSON for display.")?;
+
+                println!("\n--- {} ---", "Cache Content (as JSON)".green());
+                println!("{}", json_output);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                println!(
+                    "{}",
+                    "\nStatus: Cache file does not exist at the resolved path.".red()
+                );
+            }
+            Err(e) => {
+                // Handle other potential I/O errors (e.g., permissions).
+                return Err(e).with_context(|| {
+                    format!("Failed to read cache file at {}", cache_path.display())
+                });
+            }
         }
-    };
-
-    let cache_hash = match &project.config_hash {
-        Some(hash) => hash,
-        None => {
-            println!(
-                "{}",
-                "Status: Project has no configuration hash in the index (never cached).".yellow()
-            );
-            return Ok(());
-        }
-    };
-
-    let cache_path = cache_dir.join(cache_hash);
-    println!("  {:<15} {}", "Cache Path:".blue(), cache_path.display());
-
-    if !cache_path.exists() {
+    } else {
+        // ROBUSTNESS: Provide more detailed information about what's missing.
         println!(
             "{}",
-            "\nStatus: Cache file does not exist at the specified path.".red()
+            "\nStatus: Project has incomplete cache information in the index.".yellow()
         );
-        return Ok(());
+        if project.cache_dir.is_none() {
+            println!("  - Missing: `cache_dir`");
+        }
+        if project.config_hash.is_none() {
+            println!("  - Missing: `config_hash` (project has likely never been cached)");
+        }
     }
 
-    let bytes = fs::read(&cache_path)
-        .with_context(|| format!("Failed to read cache file at {}", cache_path.display()))?;
-
-    if bytes.is_empty() {
-        println!("{}", "\nStatus: Cache file is empty.".yellow());
-        return Ok(());
-    }
-
-    let (cache_data, _): (CachedProjectConfig, usize) =
-        bincode::serde::decode_from_slice(&bytes, bincode::config::standard())
-            .context("Failed to deserialize cache file. It might be corrupt.")?;
-
-    let json_output = serde_json::to_string_pretty(&cache_data)
-        .context("Failed to serialize cache data to JSON.")?;
-
-    println!("\n--- {} ---", "Cache Content (as JSON)".green());
-    println!("{}", json_output);
     Ok(())
 }
 
@@ -119,30 +119,39 @@ fn inspect_cache(uuid: uuid::Uuid, name: &str, index: &GlobalIndex) -> Result<()
 fn clear_cache(uuid: uuid::Uuid, name: &str, index: &mut GlobalIndex) -> Result<()> {
     println!("\nClearing cache for project '{}' ({})", name.cyan(), uuid);
 
-    // We get a mutable reference to the project entry to modify it.
     let project = index.projects.get_mut(&uuid).unwrap();
 
-    let mut file_deleted = false;
+    let mut actions_performed = false;
 
-    // If a cache path can be constructed, try to delete the file.
+    // --- File System Cleanup ---
     if let (Some(cache_dir), Some(cache_hash)) = (&project.cache_dir, &project.config_hash) {
         let cache_path = cache_dir.join(cache_hash);
-        println!("  {:<15} {}", "Target Path:".blue(), cache_path.display());
+        log::debug!(
+            "Attempting to delete cache file at: {}",
+            cache_path.display()
+        );
 
-        if cache_path.exists() {
-            fs::remove_file(&cache_path)?;
-            file_deleted = true;
-            println!(
-                "  {:<15} {}",
-                "File System:".blue(),
-                "Cache file deleted.".green()
-            );
-        } else {
-            println!(
-                "  {:<15} {}",
-                "File System:".blue(),
-                "Cache file not found, nothing to delete.".yellow()
-            );
+        match fs::remove_file(&cache_path) {
+            Ok(()) => {
+                println!(
+                    "  {:<15} {}",
+                    "File System:".blue(),
+                    "Cache file deleted.".green()
+                );
+                actions_performed = true;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                println!(
+                    "  {:<15} {}",
+                    "File System:".blue(),
+                    "Cache file not found, nothing to delete.".yellow()
+                );
+            }
+            Err(e) => {
+                return Err(e).with_context(|| {
+                    format!("Failed to delete cache file at {}", cache_path.display())
+                });
+            }
         }
     } else {
         println!(
@@ -152,24 +161,18 @@ fn clear_cache(uuid: uuid::Uuid, name: &str, index: &mut GlobalIndex) -> Result<
         );
     }
 
-    // Always clear the index entries to force regeneration.
-    let hash_cleared = project.config_hash.is_some();
-    project.config_hash = None;
-    // Clearing the cache_dir is important to force re-resolution of the path itself.
-    let dir_cleared = project.cache_dir.is_some();
-    project.cache_dir = None;
-
-    if hash_cleared || dir_cleared {
+    // --- Index State Cleanup ---
+    // Use `take()` for a more idiomatic way to consume and clear Option fields.
+    if project.config_hash.take().is_some() | project.cache_dir.take().is_some() {
         println!(
             "  {:<15} {}",
             "Index State:".blue(),
             "Cache hash and directory cleared.".green()
         );
+        actions_performed = true;
     }
 
-    // CRITICAL: Do NOT save the index. `main` will persist the changes.
-
-    if !file_deleted && !hash_cleared && !dir_cleared {
+    if !actions_performed {
         println!(
             "\n{}",
             "No cache information was found for this project. Nothing to do.".yellow()
@@ -177,7 +180,7 @@ fn clear_cache(uuid: uuid::Uuid, name: &str, index: &mut GlobalIndex) -> Result<
     } else {
         println!(
             "\n{}",
-            "✅ Successfully cleared cache. It will be regenerated on the next run.".bold()
+            "Successfully cleared cache. It will be regenerated on the next run.".bold()
         );
     }
 

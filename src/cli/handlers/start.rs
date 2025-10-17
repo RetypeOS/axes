@@ -64,10 +64,10 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
     };
 
     if let Some(task) = &flattened_start {
-        all_definitions.extend(commons::collect_parameter_defs_from_task(task, &config));
+        all_definitions.extend(commons::collect_parameter_defs_from_task(task));
     }
     if let Some(task) = &flattened_exit {
-        all_definitions.extend(commons::collect_parameter_defs_from_task(task, &config));
+        all_definitions.extend(commons::collect_parameter_defs_from_task(task));
     }
 
     let has_generic_params = flattened_start

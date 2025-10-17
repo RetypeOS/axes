@@ -1,10 +1,11 @@
 // src/core/cache.rs (New File)
 
 use anyhow::{Context, Result};
-use log::debug;
+use std::io::Read;
 use std::{fs, path::Path, time::SystemTime};
 
 const HASH_TRUNCATE_LENGTH: usize = 16; // 16 bytes = 32 hex characters
+const HASH_BUFFER_SIZE: usize = 8192; // 8KB buffer for streaming I/O
 
 /// Represents the validation metadata for a cache entry.
 /// This layered approach allows for fast checks before resorting to hashing.
@@ -25,23 +26,41 @@ pub struct CacheValidationData {
 /// # Errors
 /// Returns an I/O error if the file cannot be read or its metadata cannot be accessed.
 pub fn calculate_validation_data(path: &Path) -> Result<CacheValidationData> {
-    debug!("Calculating validation data for '{}'", path.display());
+    // ROBUSTNESS: Add a log at the function entry with a clear name.
+    log::trace!("Calculating validation data for '{}'", path.display());
 
-    // Layer 0 & 1: Timestamp and file size (fast metadata check)
+    // Layer 1: Filesystem metadata (fast check).
     let metadata = fs::metadata(path)
         .with_context(|| format!("Failed to read metadata for file '{}'", path.display()))?;
 
-    let timestamp = metadata.modified()?;
+    let timestamp = metadata
+        .modified()
+        .context("Filesystem does not support modification timestamps.")?;
     let file_size = metadata.len();
 
-    // Layer 2: Content Hash (definitive check)
-    let content = fs::read(path)
-        .with_context(|| format!("Failed to read content of file '{}'", path.display()))?;
+    // Layer 2: Content Hash (definitive check).
+    // Use streaming hashing to handle large files efficiently without
+    // loading them entirely into memory.
+    let mut file = fs::File::open(path)
+        .with_context(|| format!("Failed to open file for hashing '{}'", path.display()))?;
 
-    let hash = blake3::hash(&content);
+    let mut hasher = blake3::Hasher::new();
+
+    // Use a buffer to read the file in chunks.
+    // 8KB is a common and efficient buffer size for I/O.
+    let mut buffer = [0; HASH_BUFFER_SIZE];
+    loop {
+        let bytes_read = file.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+    }
+
+    let hash = hasher.finalize();
     let content_hash = hex::encode(&hash.as_bytes()[..HASH_TRUNCATE_LENGTH]);
 
-    debug!(
+    log::debug!(
         "Validation data for '{}': size={}, hash={}",
         path.display(),
         file_size,
@@ -58,7 +77,7 @@ pub fn calculate_validation_data(path: &Path) -> Result<CacheValidationData> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write; // Keep `Write` for the `write_all` method
+    use std::io::Write;
     use tempfile::NamedTempFile;
 
     #[test]
@@ -67,7 +86,7 @@ mod tests {
         let content = b"hello world"; // Use a byte string literal
         let mut temp_file = NamedTempFile::new().unwrap();
 
-        // FIX: Use `write_all` to write the exact bytes without any translation.
+        // Use `write_all` to write the exact bytes without any translation.
         temp_file.write_all(content).unwrap();
         temp_file.flush().unwrap(); // Ensure data is written to disk before reading metadata
 
@@ -84,8 +103,6 @@ mod tests {
         // This hash is now platform-independent and correct.
         let expected_hash = "d74981efa70a0c880b8d8c1985d075db";
 
-        // FIX: Update the expected hash to the correct one calculated from raw bytes.
-        // Your machine's calculation was the correct one!
         assert_eq!(data.content_hash, expected_hash);
 
         // Timestamp check (can be brittle, just check it's recent)

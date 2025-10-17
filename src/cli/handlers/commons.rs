@@ -1,8 +1,6 @@
-// src/cli/handlers/commons.rs
-
 // This module contains shared functions used by multiple handlers.
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -12,9 +10,9 @@ use uuid::Uuid;
 
 use crate::{
     core::{
-        config_loader::ConfigLoader,
         context_resolver,
         index_manager::{self},
+        parameters::ArgResolver,
     },
     models::{
         CommandAction, GlobalIndex, IndexEntry, ParameterDef, ResolvedConfig, Task,
@@ -26,115 +24,52 @@ use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
 
 use colored::Colorize;
 
-/// Represents a calculated plan for an unregister or delete operation.
-/// It contains all the necessary information to present to the user and execute.
-#[derive(Debug, Default)]
-pub struct UnregisterPlan {
-    pub uuids_to_remove: Vec<Uuid>,
-    pub reparent_warnings: Vec<String>,
-    pub summary_lines: Vec<String>,
-}
-
 pub fn resolve_config_for_context(
     context_str: Option<String>,
     index: &mut GlobalIndex,
 ) -> Result<ResolvedConfig> {
     let final_context_str = context_str.unwrap_or_else(|| ".".to_string());
+
+    if final_context_str == "_" {
+        // Ephemeral context: load from current directory without relying on the index for the project itself.
+        let mut loader = crate::core::config_loader::ConfigLoader::new(index);
+        let cwd = std::env::current_dir()?;
+        return loader
+            .resolve_ephemeral(&cwd)
+            .with_context(|| "Failed to resolve ephemeral project in the current directory");
+    }
+
+    // Original logic for registered projects
     let (uuid, _qualified_name) = context_resolver::resolve_context(&final_context_str, index)?;
-    let mut loader = ConfigLoader::new(index);
+    let mut loader = crate::core::config_loader::ConfigLoader::new(index);
     loader.resolve(uuid)
 }
 
-/// Prepares a plan for unregistering projects. This function is a "dry run"
-/// and does not modify the index; it only calculates the effects.
-pub fn prepare_unregister_plan(
-    index: &mut GlobalIndex,
-    config: &ResolvedConfig,
-    recursive: bool,
-    reparent_to: Option<String>,
-) -> Result<UnregisterPlan> {
-    let mut uuids_to_remove = vec![config.uuid];
-    let mut reparent_warnings = Vec::new();
-    let mut summary_lines = Vec::new();
-
-    let new_parent_uuid = if let Some(ctx) = &reparent_to {
-        let (uuid, _) = context_resolver::resolve_context(ctx, index)?;
-        Some(uuid)
-    } else {
-        None
-    };
-
-    if recursive {
-        if reparent_to.is_some() {
-            return Err(anyhow!(t!("plan.error.recursive_and_reparent")));
-        }
-        uuids_to_remove.extend(index_manager::get_all_descendants(index, config.uuid));
-        summary_lines.push(t!("plan.summary.unregister_recursive").to_string());
-    } else {
-        summary_lines.push(
-            format!(
-                t!("plan.summary.unregister_single"),
-                name = config.qualified_name
-            )
-            .to_string(),
-        );
-
-        let final_parent_uuid = new_parent_uuid.unwrap_or(index_manager::GLOBAL_PROJECT_UUID);
-        let final_parent_entry = index.projects.get(&final_parent_uuid).unwrap();
-
-        summary_lines.push(
-            format!(
-                t!("plan.summary.reparent_to"),
-                name = final_parent_entry.name
-            )
-            .to_string(),
-        );
-
-        let (warnings, conflicts) =
-            check_reparent_collisions(index, config.uuid, final_parent_uuid)?;
-        if !conflicts.is_empty() {
-            let conflict_str = conflicts.join("', '");
-            return Err(anyhow!(
-                t!("plan.error.reparent_collision"),
-                conflicts = conflict_str
-            ));
-        }
-        reparent_warnings = warnings;
-    }
-
-    Ok(UnregisterPlan {
-        uuids_to_remove,
-        reparent_warnings,
-        summary_lines,
-    })
-}
-
-/// Represents a calculated plan for a delete or unregister operation.
-/// It contains all the necessary information to present to the user and execute.
+/// [NEW UNIFIED STRUCT] Represents a calculated plan for an operation like delete or unregister.
 #[derive(Debug, Default)]
-pub struct DeletionPlan {
+pub struct OperationPlan {
     pub uuids_to_remove: Vec<Uuid>,
-    pub paths_to_purge: Vec<PathBuf>,
+    pub paths_to_purge: Vec<PathBuf>, // Empty for unregister, populated for delete.
     pub reparent_warnings: Vec<String>,
     pub summary_lines: Vec<String>,
 }
 
-/// Prepares a comprehensive plan for deleting projects. This function is a "dry run"
-/// and does not modify the index; it only calculates the effects.
-pub fn prepare_deletion_plan(
+/// [NEW UNIFIED FUNCTION] Prepares a comprehensive plan for an operation.
+/// This is a "dry run" that calculates effects without modifying the index.
+pub fn prepare_operation_plan(
     index: &mut GlobalIndex,
     config: &ResolvedConfig,
     recursive: bool,
     reparent_to: Option<String>,
-) -> Result<DeletionPlan> {
-    let mut plan = DeletionPlan::default();
+    is_destructive: bool, // `true` for delete, `false` for unregister
+) -> Result<OperationPlan> {
+    let mut plan = OperationPlan::default();
 
-    let new_parent_uuid = if let Some(ctx) = &reparent_to {
-        let (uuid, _) = context_resolver::resolve_context(ctx, index)?;
-        Some(uuid)
-    } else {
-        None
-    };
+    let new_parent_uuid = reparent_to
+        .as_ref()
+        .map(|ctx| context_resolver::resolve_context(ctx, index))
+        .transpose()?
+        .map(|(uuid, _)| uuid);
 
     if recursive {
         if reparent_to.is_some() {
@@ -143,52 +78,53 @@ pub fn prepare_deletion_plan(
         plan.uuids_to_remove.push(config.uuid);
         plan.uuids_to_remove
             .extend(index_manager::get_all_descendants(index, config.uuid));
-        plan.summary_lines.push(
+
+        let summary_line = if is_destructive {
             format!(
                 t!("plan.summary.delete_recursive"),
                 name = config.qualified_name
             )
-            .to_string(),
-        );
-    } else {
-        plan.uuids_to_remove.push(config.uuid);
-        plan.summary_lines.push(
+        } else {
             format!(
-                t!("plan.summary.unregister_single"),
+                t!("plan.summary.unregister_recursive"),
                 name = config.qualified_name
             )
-            .to_string(),
-        );
+        };
+        plan.summary_lines.push(summary_line);
+    } else {
+        plan.uuids_to_remove.push(config.uuid);
+        plan.summary_lines.push(format!(
+            t!("plan.summary.unregister_single"),
+            name = config.qualified_name
+        ));
 
         let final_parent_uuid = new_parent_uuid.unwrap_or(index_manager::GLOBAL_PROJECT_UUID);
-        let final_parent_entry = index.projects.get(&final_parent_uuid).unwrap();
+        let final_parent_entry = index.projects.get(&final_parent_uuid).unwrap(); // Safe
 
-        plan.summary_lines.push(
-            format!(
-                t!("plan.summary.reparent_to"), // Reusable
-                name = final_parent_entry.name
-            )
-            .to_string(),
-        );
+        plan.summary_lines.push(format!(
+            t!("plan.summary.reparent_to"),
+            name = final_parent_entry.name
+        ));
 
         let (warnings, conflicts) =
             check_reparent_collisions(index, config.uuid, final_parent_uuid)?;
         if !conflicts.is_empty() {
-            let conflict_str = conflicts.join("', '");
             return Err(anyhow!(
                 t!("plan.error.reparent_collision"),
-                conflicts = conflict_str
+                conflicts = conflicts.join("', '")
             ));
         }
         plan.reparent_warnings = warnings;
     }
 
-    // Collect all paths to be physically deleted.
-    plan.paths_to_purge = plan
-        .uuids_to_remove
-        .iter()
-        .filter_map(|uuid| index.projects.get(uuid).map(|e| e.path.clone()))
-        .collect();
+    // This is the only part that differs between delete and unregister.
+    if is_destructive {
+        plan.paths_to_purge = plan
+            .uuids_to_remove
+            .iter()
+            .filter_map(|uuid| index.projects.get(uuid).map(|e| e.path.clone()))
+            .collect();
+    }
 
     Ok(plan)
 }
@@ -315,86 +251,72 @@ fn select_parent_by_context(index: &mut GlobalIndex) -> Result<Option<Uuid>> {
 
 /// Handles the visual browsing workflow.
 fn select_parent_by_browsing(index: &GlobalIndex) -> Result<Uuid> {
-    let mut current_uuid_opt = None; // Start at the root view
+    // Pre-build a map of parent -> children to avoid iterating the whole projects map in every loop.
+    let mut children_map: HashMap<Option<Uuid>, Vec<(Uuid, &IndexEntry)>> = HashMap::new();
+    for (uuid, entry) in &index.projects {
+        children_map
+            .entry(entry.parent)
+            .or_default()
+            .push((*uuid, entry));
+    }
+    // Sort all child lists once for a consistent UI.
+    for children in children_map.values_mut() {
+        children.sort_by_key(|(_, entry)| &entry.name);
+    }
+
+    let mut current_uuid = index_manager::GLOBAL_PROJECT_UUID;
 
     loop {
-        let (current_name, current_uuid, children) = match current_uuid_opt {
-            Some(uuid) => {
-                let entry = index.projects.get(&uuid).unwrap();
-                let children_vec: Vec<&IndexEntry> = index
-                    .projects
-                    .values()
-                    .filter(|e| e.parent == Some(uuid))
-                    .collect();
-                (entry.name.clone(), uuid, children_vec)
-            }
-            None => {
-                let root_entry = index
-                    .projects
-                    .get(&index_manager::GLOBAL_PROJECT_UUID)
-                    .expect("Fatal: Root project not found during browsing.");
+        let current_entry = index.projects.get(&current_uuid).ok_or_else(|| {
+            anyhow!(
+                "Browser state invalid: project with UUID {} not found.",
+                current_uuid
+            )
+        })?;
 
-                let children_vec: Vec<&IndexEntry> = index
-                    .projects
-                    .values()
-                    .filter(|e| e.parent == Some(index_manager::GLOBAL_PROJECT_UUID))
-                    .collect();
-                (
-                    root_entry.name.clone(),
-                    index_manager::GLOBAL_PROJECT_UUID,
-                    children_vec,
-                )
-            }
-        };
+        let children = children_map
+            .get(&Some(current_uuid))
+            .map_or(&[][..], |v| &v[..]);
 
         let mut items = Vec::new();
-        items.push(format!("✅ [ Select '{}' as parent ]", current_name));
-
-        // The option to go back is only available if we are not at the root view.
-        if current_uuid_opt.is_some() {
+        items.push(format!("✅ [ Select '{}' as parent ]", current_entry.name));
+        if current_uuid != index_manager::GLOBAL_PROJECT_UUID {
             items.push("⬆️  [ Go up to parent project ]".to_string());
         }
 
-        let mut child_map = HashMap::new();
-        for child in children.iter() {
-            // Store the mapping from the display name to the actual entry.
-            let display_name = format!("  └─ {}", child.name);
-            items.push(display_name.clone());
-            child_map.insert(display_name, *child);
+        enum BrowserAction {
+            Select,
+            GoUp,
+            GoToChild(Uuid),
+        }
+        let mut action_map = vec![BrowserAction::Select];
+        if current_uuid != index_manager::GLOBAL_PROJECT_UUID {
+            action_map.push(BrowserAction::GoUp);
         }
 
-        let prompt = format!("Browsing children of '{}'", current_name);
+        for (child_uuid, child_entry) in children {
+            items.push(format!("  └─ {}", child_entry.name));
+            action_map.push(BrowserAction::GoToChild(*child_uuid));
+        }
+
+        let prompt = format!("Browsing children of '{}'", current_entry.name);
         let selection_idx = Select::with_theme(&ColorfulTheme::default())
             .with_prompt(&prompt)
             .items(&items)
             .default(0)
             .interact()?;
 
-        let selection_str = &items[selection_idx];
-
-        if selection_str.starts_with("✅") {
-            return Ok(current_uuid);
-        } else if selection_str.starts_with("⬆️") {
-            let current_entry = index.projects.get(&current_uuid).unwrap();
-            current_uuid_opt = if current_entry.parent == Some(index_manager::GLOBAL_PROJECT_UUID) {
-                None // Go back to the root view
-            } else {
-                current_entry.parent
-            };
-        } else {
-            // A child was selected
-            if let Some(selected_child) = child_map.get(selection_str) {
-                // Find the UUID of the selected child
-                let child_uuid = index
-                    .projects
-                    .iter()
-                    .find(|(_, entry)| entry.path == selected_child.path) // Path is a reliable unique identifier
-                    .map(|(uuid, _)| *uuid);
-
-                if let Some(uuid) = child_uuid {
-                    current_uuid_opt = Some(uuid);
-                }
+        match action_map.get(selection_idx) {
+            Some(BrowserAction::Select) => return Ok(current_uuid),
+            Some(BrowserAction::GoUp) => {
+                current_uuid = current_entry
+                    .parent
+                    .unwrap_or(index_manager::GLOBAL_PROJECT_UUID);
             }
+            Some(BrowserAction::GoToChild(child_uuid)) => {
+                current_uuid = *child_uuid;
+            }
+            None => { /* Should not happen */ }
         }
     }
 }
@@ -451,15 +373,12 @@ pub fn validate_project_name(raw_name: &str) -> Result<String> {
 
 /// This is a shared utility for handlers like `open`, `run`, and `start`.
 /// It now traverses the platform-agnostic AST to find all possible parameter definitions.
-pub fn collect_parameter_defs_from_task(
-    task: &Arc<Task>,
-    _config: &crate::models::ResolvedConfig, // _config is unused for now but kept for API consistency
-) -> Vec<ParameterDef> {
+pub fn collect_parameter_defs_from_task(task: &Arc<Task>) -> Vec<ParameterDef> {
     task.commands
         .iter()
         // Iterate over each PlatformExecution block
         .flat_map(|plat_exec| {
-            // FIX: Create an array of the Option<T>s themselves, then call iter().flatten().
+            // Create an array of the Option<T>s themselves, then call iter().flatten().
             // This turns an iterator of Option<T> into an iterator of T.
             [
                 plat_exec.default.as_ref(),
@@ -488,4 +407,34 @@ pub fn collect_parameter_defs_from_task(
             },
         )
         .0 // Return only the vector of unique definitions.
+}
+
+/// Builds an argument resolver for a given task and CLI parameters.
+/// This encapsulates the logic for collecting definitions and checking for the generic `<params>` token.
+pub fn build_resolver_for_task<'a>(
+    task: &Arc<Task>,
+    params: &'a [String],
+) -> Result<ArgResolver<'a>> {
+    let all_definitions = collect_parameter_defs_from_task(task);
+
+    let has_generic_params = task.commands.iter().any(|plat_exec| {
+        [
+            plat_exec.default.as_ref(),
+            plat_exec.windows.as_ref(),
+            plat_exec.linux.as_ref(),
+            plat_exec.macos.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|cmd_exec| {
+            let template = match &cmd_exec.action {
+                CommandAction::Execute(t) | CommandAction::Print(t) => t,
+            };
+            template
+                .iter()
+                .any(|c| matches!(c, TemplateComponent::GenericParams { .. }))
+        })
+    });
+
+    ArgResolver::new(&all_definitions, params, has_generic_params)
 }

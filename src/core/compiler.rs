@@ -5,7 +5,7 @@
 use anyhow::{Context, Result, anyhow};
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::{collections::HashMap, fs};
+use std::{collections::HashMap, fs, path::PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -196,6 +196,7 @@ pub fn load_and_compile_layer(entry: &IndexEntry) -> Result<CachedProjectConfig>
             .context("Error compiling [options.at_exit]")?,
         shell: project_config.options.shell,
         cache_dir: project_config.options.cache_dir,
+        prompt: project_config.options.prompt,
         open_with: CachedOpenWithConfig {
             default: project_config.options.open_with.default,
             commands: open_with_commands,
@@ -240,17 +241,22 @@ pub fn load_layer_task(
     );
 
     // --- CACHE HIT ATTEMPT ---
-    if let (Some(saved_hash), Some(cache_dir)) = (&entry.config_hash, &entry.cache_dir)
-        && *saved_hash == current_toml_hash
+
+    let cache_dir_to_check = entry
+        .cache_dir
+        .clone()
+        .unwrap_or_else(|| paths::get_default_cache_dir_for_project(uuid).unwrap());
+
+    if let Some(saved_hash) = &entry.config_hash
+        && saved_hash == &current_toml_hash
     {
-        log::trace!(
-            "Layer '{}' has saved hash in index: {}",
-            entry.name,
-            saved_hash
-        );
-        let cache_file_path = cache_dir.join(saved_hash);
+        let cache_file_path = cache_dir_to_check.join(saved_hash);
         if let Ok(cached_layer) = read_cached_layer(&cache_file_path) {
-            log::debug!("Cache HIT for layer '{}'.", entry.name);
+            log::debug!(
+                "Cache HIT for layer '{}' at '{}'.",
+                entry.name,
+                cache_file_path.display()
+            );
             return Ok((std::sync::Arc::new(cached_layer), None));
         }
         log::warn!(
@@ -262,18 +268,19 @@ pub fn load_layer_task(
     // --- CACHE MISS: RECOMPILE ---
     log::debug!("Cache MISS for layer '{}'. Recompiling.", entry.name);
 
-    let new_layer = load_and_compile_layer(&entry)?;
+    let new_layer = load_and_compile_layer(entry)?;
 
-    let final_cache_dir = paths::resolve_cache_dir_for_project(uuid, index, &new_layer.options)?;
-    let new_cache_file_path = final_cache_dir.join(&current_toml_hash);
-    write_cached_layer(&new_cache_file_path, &new_layer)?;
-
-    // Prepare an update object to be sent back to the main thread.
+    // We just return an IndexUpdate with the new hash. The ConfigLoader will handle the rest.
     let update = IndexUpdate {
         uuid,
         new_hash: current_toml_hash,
-        new_cache_dir: final_cache_dir,
+        // We leave the final cache_dir path to be resolved by the ConfigLoader.
+        new_cache_dir: PathBuf::new(),
     };
+
+    // We still need to write the new cache file somewhere. We'll use the path we checked.
+    let new_cache_file_path = cache_dir_to_check.join(&update.new_hash);
+    write_cached_layer(&new_cache_file_path, &new_layer)?;
 
     Ok((std::sync::Arc::new(new_layer), Some(update)))
 }
@@ -388,7 +395,7 @@ fn parse_token_content(content: &str, full_match: &str) -> Result<TemplateCompon
     } else if trimmed_content == "params" {
         Ok(TemplateComponent::GenericParams { literal: false })
     } else if let Some(color_name) = trimmed_content.strip_prefix('#') {
-        Ok(TemplateComponent::Color(color::parse_color_name(
+        Ok(TemplateComponent::Color(color::parse_style_name(
             color_name,
         )?))
     } else if let Some(run_spec) = trimmed_content.strip_prefix("run") {
