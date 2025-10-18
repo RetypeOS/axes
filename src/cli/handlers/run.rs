@@ -48,7 +48,11 @@ pub fn handle(
     mut args: Vec<String>,
     index: &mut GlobalIndex,
 ) -> Result<()> {
-    let script_name_opt = if args.is_empty() { None } else { Some(args.remove(0)) };
+    let script_name_opt = if args.is_empty() {
+        None
+    } else {
+        Some(args.remove(0))
+    };
     let script_params = args;
     let config = commons::resolve_config_for_context(context, index)?;
 
@@ -148,9 +152,13 @@ fn execute_script(
     }
 
     // Resolver is now passed in.
-    
+
     let is_globally_silent = task.commands.iter().all(|cmd| cmd.silent_mode);
-    log::debug!("Script '{}' is_globally_silent = {}", script_name, is_globally_silent);
+    log::debug!(
+        "Script '{}' is_globally_silent = {}",
+        script_name,
+        is_globally_silent
+    );
 
     if !is_globally_silent {
         let prefix_path = format_prefix_path(&config.qualified_name);
@@ -201,9 +209,15 @@ fn dry_run_script(
     // Iterate over the universal AST, but only render the command for the current platform
     for command_exec in &task.commands {
         let mut prefixes = String::new();
-        if command_exec.silent_mode { prefixes.push('@'); }
-        if command_exec.ignore_errors { prefixes.push('-'); }
-        if command_exec.run_in_parallel { prefixes.push('>'); }
+        if command_exec.silent_mode {
+            prefixes.push('@');
+        }
+        if command_exec.ignore_errors {
+            prefixes.push('-');
+        }
+        if command_exec.run_in_parallel {
+            prefixes.push('>');
+        }
 
         let (action_prefix, template) = match &command_exec.action {
             CommandAction::Print(t) => ("# ".dimmed(), t),
@@ -211,12 +225,18 @@ fn dry_run_script(
         };
 
         // assemble_final_command now uses the pre-built resolver
-        let rendered_string = task_executor::assemble_final_command(template, config, resolver, index, 0)?;
+        let rendered_string =
+            task_executor::assemble_final_command(template, config, resolver, index, 0)?;
 
         if prefixes.is_empty() {
             println!("{}{}", action_prefix, rendered_string.green());
         } else {
-            println!("{} {}{}", prefixes.dimmed(), action_prefix, rendered_string.green());
+            println!(
+                "{} {}{}",
+                prefixes.dimmed(),
+                action_prefix,
+                rendered_string.green()
+            );
         }
     }
     println!("---");

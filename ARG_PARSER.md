@@ -49,7 +49,8 @@ You can add a configuration block in parentheses to refine the behavior of a par
 * **Modifiers:**
   * `required`: Execution fails if the argument is not provided.
   * `default='value'`: Provides a default value if the argument is not passed in the CLI.
-  * `map='--new-flag'`: Transforms the positional argument into a flag with a value. If the user types `command my-value`, and the token is `<params::0(map='--target ')>`, the injected result will be `"--target my-value"`.
+  * `map='--new-flag '`: Transforms the positional argument into a flag with a value. If the user types `command my-value`, and the token is `<params::0(map='--target ')>`, the injected result will be `"--target my-value"`.
+  * `literal`: Wrap entire final value into literal, `... "this is a positional value" ...`.
 
 #### **Examples (Positional)**
 
@@ -118,8 +119,12 @@ Parameter tokens can also search for and consume flags (`--name`) from the comma
 * `required`: Fails if the flag (or its alias) is not present.
 * `default='value'`: If the flag is provided **without a value**, this `default` will be used. It is also used if the flag is **not provided at all**.
 * `alias='-a'`: Allows the flag to be recognized by a short alias. `axes` will throw an error if the user attempts to use both (`--flag-name` and `-a`) at the same time.
+
 * `map='--new-name'`: Replaces the flag name in the output.
-* `map=' '`: A very powerful special case. Indicates that you only want to inject the **value** of the flag, not the flag itself.
+
+* `map=''` (an empty string): A powerful special case. Indicates that you only want to inject the **value** of the flag, not the flag name itself.
+
+* `literal`: Wrap entire final value into literal, `--flag "this is a flag value"`.
 
 #### **Examples (Named)**
 
@@ -152,18 +157,28 @@ axes . test -m smoke        # -> pytest --marker smoke
 axes . test -m smoke --marker slow # -> Error: Conflict: Both flag '--marker' and its alias '-m' were provided.
 ```
 
-**Another possible use cases, but not recommended because will generate a conflicts:**
+**Another possible use cases:**
+
+**`copy-file` script with multiple flags and defaults:**
 
 ```toml
 # axes.toml
 [scripts]
-copy-file = "rsync <params::files-from(alias='from', default='list.txt')> <params::copy-in(alias='in', required)>"
+copy = "rsync <params::files-from(alias='-f', default='list.txt')> <params::destination(alias='-d', required)>"
 ```
 
 ```sh
-axes . copy-file from file.txt in ./backup            # -> rsync --files-from file.txt --copy-in ./backup
-axes . copy-file in ./backup                          # -> rsync --files-from list.txt --copy-in ./backup
-axes . copy-file in ./backup --copy-in /another/place # -> Error: Conflict: Both flag '--copy-in' and its alias 'in' were provided.
+# Uses the default for --files-from
+axes copy -f --destination ./backup
+# -> rsync --files-from list.txt --destination ./backup
+
+# Overrides the default using the alias
+axes copy -f file.txt -d ./backup
+# -> rsync --files-from file.txt --destination ./backup
+
+# Fails if the required destination is missing
+axes copy
+# -> Error: Flag '--destination' is required but was not provided.
 ```
 
 **`deploy` script with `map` and `required`:**
@@ -172,7 +187,7 @@ axes . copy-file in ./backup --copy-in /another/place # -> Error: Conflict: Both
 # axes.toml
 [scripts]
 # The internal script expects --environment, but we want to expose --env to the user.
-deploy = "terraform apply <params::env(map='--environment', required)>"
+deploy = "terraform apply <params::env(map='--environment ', required)>"
 ```
 
 ```sh
@@ -180,19 +195,19 @@ axes . deploy --env staging      # -> terraform apply --environment staging
 axes . deploy                    # -> Error: Flag '--env' is required but was not provided.
 ```
 
-**`docker` script with `map=' '` for value extraction:**
+**`docker` script with `map=''` for value extraction:**
 This is an advanced pattern for injecting values into places where a flag is not valid.
 
 ```toml
 # axes.toml
 [scripts]
 # The image tag is passed as a flag but is injected as a positional value.
-docker_tag = "docker tag my-image:latest my-org/my-image:<params::tag(map='', default='latest')>"
+docker_tag = "docker tag my-image:latest my-org/my-image:<params::tag(map='', default='latest', required)>"
 ```
 
 ```sh
 # Execution 1: Uses the default
-axes docker_tag
+axes docker_tag --tag
 # Command executed: `docker tag my-image:latest my-org/my-image:latest`
 
 # Execution 2: Specifies the tag
@@ -231,5 +246,65 @@ axes run_release --input /data/file.txt --release
 # `--input /data/file.txt` is consumed by <params> and expands to itself.
 # Command executed: `cargo run --release -- --input /data/file.txt`
 ```
+
+---
+
+## 5. Advanced Use Case: Building a Composable CLI
+
+`axes` is powerful enough to build complex command-line interfaces by composing variables and parameters. This example creates a flexible `git-log` script.
+
+**Goal:** Create a `log` script that:
+
+1. Defaults to a pretty, one-line format.
+2. Accepts an optional `--author="<name>"` flag.
+3. Accepts an optional `--count=<number>` flag to limit the number of commits.
+4. Accepts a `--stat` flag to show file statistics.
+
+**`axes.toml`:**
+
+```toml
+[vars]
+# We define a base format that can be reused or modified.
+_log_format = "--pretty=format:'%C(yellow)%h %C(cyan)%an %C(green)%s'"
+
+[scripts]
+# Our main `log` script composes all the pieces together.
+log = "git log <vars::_log_format> <params::author(map='--author=')> <params::count(alias='-n', map='-n ')> <params::stat>"
+
+This single line of `axes.toml` creates a remarkably powerful script:
+
+**How it works:**
+
+-   **`<vars::_log_format>`:** Injects the base format string.
+-   **`<params::author(map='--author=')>`:**
+    -   Looks for a `--author` flag in the CLI (e.g., `axes log --author="John Doe"`).
+    -   The `map='--author='` ensures that if a value is provided, it's injected as `--author=John Doe`. The `=` is crucial here. If the flag is not provided, this token expands to an empty string.
+-   **`<params::count(alias='-n', map='-n ')>`:**
+    -   Looks for `--count` or `-n` (e.g., `axes log -n 5`).
+    -   The `map='-n '` ensures it's injected as `-n 5` (with a space).
+-   **`<params::stat>`:**
+    -   This is a simple "pass-through" flag. If `axes log --stat` is run, this token expands to `--stat`. Otherwise, it's an empty string.
+
+**Example Executions:**
+
+```sh
+# Simple log with the default pretty format
+$ axes log
+# -> git log --pretty=format:'%C(yellow)%h %C(cyan)%an %C(green)%s'
+
+# Limit to 5 commits and show stats
+$ axes log -n 5 --stat
+# -> git log --pretty=format:'%C(yellow)%h %C(cyan)%an %C(green)%s' -n 5 --stat
+
+# Filter by author
+$ axes log --author="Jane Doe"
+# -> git log --pretty=format:'%C(yellow)%h %C(cyan)%an %C(green)%s' --author="Jane Doe"
+```
+
+This demonstrates how `axes` can build a sophisticated and validated CLI wrapper around any existing tool with just a few lines of declarative configuration, completely eliminating the need for complex shell scripting.
+
+➡️ **For a truly advanced, real-world example, see how `axes` uses its own engine to run its [benchmarking suite](./examples/stress_tests/.axes/axes.toml).**
+
+---
 
 By combining these patterns, you can build and/or modify command-line interfaces for your scripts that are as powerful, readable, and safe as those of any native tool, all from the simplicity of your `axes.toml`.

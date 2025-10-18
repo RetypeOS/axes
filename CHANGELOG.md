@@ -282,3 +282,55 @@ This version represents a qualitative leap in Developer Experience (DX), with a 
   * **Problem:** The `map` modifier on flag-type parameters (e.g., `<params::name(map='--new')>`) always added a space between the mapped value and the argument value, preventing common formats like `--key=value` or `--keyVALUE`.
   * **Solution:** The logic in `ArgResolver::new` has been refactored. The behavior of `map` is now **literal concatenation**. The `map` value acts as an exact prefix to the argument value. If a space is desired, it must be explicitly included in the `map` string (e.g., `map='--param '`).
   * **Impact:** This refactoring grants the user full and predictable control, drastically increasing flexibility for integration with any underlying command-line tool.
+
+---
+
+## v0.3.0-beta: "Juggernaut" - Universal Cache & JIT Optimization
+
+This version introduces the most profound architectural overhaul since the project's inception. Codenamed "Juggernaut," this release redesigns the core compilation and execution engine to achieve a **platform-agnostic binary cache** and a **Just-In-Time (JIT) optimized execution path**. The result is a system that is drastically more flexible, robust, and maintains its elite performance across all platforms.
+
+### 🏛️ Core Architecture: Universal AST & Platform-Agnostic Caching
+
+The central achievement of this release is the complete decoupling of the configuration *compilation* from its *execution*.
+
+* **Universal Abstract Syntax Tree (AST):** The `axes.toml` compiler (`core/compiler.rs`) no longer produces a binary cache specific to the operating system it runs on. It now generates a **universal AST** that contains the compiled command definitions for *all* target platforms (`windows`, `linux`, `macos`, `default`) within a new `PlatformExecution` structure.
+* **100% Portable Binary Cache:** As a direct result, a binary cache file (`.bin`) generated on Linux is now fully valid and usable on Windows or macOS, and vice-versa. This is a game-changing feature for teams working in multi-platform environments, as the compiled cache can be committed to version control, eliminating the "cold start" compilation cost for all team members.
+* **Just-In-Time (JIT) Specialization:** To maintain peak performance, a final optimization step has been introduced just before execution. The `ResolvedConfig` facade "specializes" the universal AST into a flat, platform-specific list of commands (`PlatformSpecializedTask`). This means the `TaskExecutor`'s hot loop remains free of any conditional logic, iterating over a simple, pre-selected list of commands at maximum speed. This approach provides the flexibility of a universal cache with the raw performance of a pre-compiled, platform-specific runner.
+
+### ✨ Enhancements & New Features
+
+* **Ergonomic Platform-Specific Syntax:** The syntax for defining platform-specific scripts in `axes.toml` has been greatly enhanced for clarity and ergonomics.
+  * **Direct Platform Keys:** For simple, single-command scripts, platform keys can now be defined directly at the script level, removing the need for a nested `run` table.
+
+        ```toml
+        # New, more direct syntax
+        [scripts.build]
+        desc = "Builds the project."
+        windows = "build.bat"
+        default = "./build.sh"
+        ```
+
+* **Semantic Distinction for Variables:**
+  * Variables (`[vars]`) are now treated as true single-line values, not multi-line actions. The compiler enforces that a variable resolves to a single value, preventing their misuse and improving the semantic correctness of `axes.toml`.
+  * The syntax for defining variables now uses a `value` key (e.g., `value = { windows = "...", default = "..." }`), clearly distinguishing them from the `run` key used for scripts.
+
+* **Ephemeral Project Execution (`_` context):**
+  * A powerful new feature for running `axes` commands on **unregistered projects** has been introduced via the special `_` context.
+  * Executing `axes _ run build` will find the `axes.toml` in the current directory, compile its configuration in-memory, and run the `build` script without ever touching the global index.
+  * This is ideal for CI/CD environments, temporary projects, or quick tests where registering a project is unnecessary overhead.
+
+* **Customizable Session Prompt:**
+  * A new `prompt` option can be defined in `[options]` to customize the shell prompt during an `axes start` session.
+  * The prompt is a template string that supports all `axes` tokens, including `<name>` and ANSI color tokens (`<#green>`), allowing for fully customized, context-aware prompts (e.g., `prompt = "(axes:<#cyan><name><#reset>) $ "`).
+
+### 🔥 Performance
+
+* **JIT Optimization:** Thanks to the JIT specialization step, the performance regression from the new universal AST model has been completely eliminated.
+* **Superior Performance in Real-World Scenarios:** Benchmarks show that in complex, multi-script execution scenarios (`test_q`), the new `axes` v0.3.0 is up to **20% faster** than previous versions, due to pervasive memory and execution path optimizations. In simpler stress tests, performance is on par with or slightly better than the previous record-holding version.
+
+### ⚠ Breaking Changes
+
+* **`axes.toml` Syntax:** The internal structure of scripts and variables has changed. While most existing `axes.toml` files should work, the new, stricter validation might require minor adjustments. Specifically:
+  * The `run` key in an extended script definition (`[scripts.name]`) is now mandatory.
+  * Variables in an extended definition (`[vars.name]`) must now use the `value` key instead of `run`.
+* **Binary Cache Invalidation:** Due to the fundamental change in the AST structure, all binary cache files from previous versions of `axes` are invalid and will be automatically regenerated on the first run.

@@ -1,6 +1,6 @@
 // EN: src/bin/axes.rs
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::Result;
 use axes::{
@@ -14,15 +14,24 @@ use axes::{
 };
 use clap::Parser;
 use colored::*;
-use lazy_static::lazy_static;
 
 // Use a thread-safe global static for the index.
-lazy_static! {
-    static ref GLOBAL_INDEX: Arc<Mutex<GlobalIndex>> = {
+//lazy_static! {
+//    static ref GLOBAL_INDEX: Arc<Mutex<GlobalIndex>> = {
+//        let index =
+//            index_manager::load_and_ensure_global_project().expect("Failed to load global index.");
+//        Arc::new(Mutex::new(index))
+//    };
+//}
+
+static GLOBAL_INDEX: OnceLock<Arc<Mutex<GlobalIndex>>> = OnceLock::new();
+
+fn get_or_init_global_index() -> &'static Arc<Mutex<GlobalIndex>> {
+    GLOBAL_INDEX.get_or_init(|| {
         let index =
             index_manager::load_and_ensure_global_project().expect("Failed to load global index.");
         Arc::new(Mutex::new(index))
-    };
+    })
 }
 
 // --- Command Definition and Registry ---
@@ -119,18 +128,22 @@ fn find_command(name: &str) -> Option<&'static CommandDefinition> {
 
 /// The main entry point of the `axes` application.
 fn main() {
+    let cli = Cli::parse();
+
     #[cfg(debug_assertions)]
     {
-    //    env_logger::init();
+        //env_logger::init();
     }
 
     // 1. Load the index and clone its initial state.
+    let global_index_arc = get_or_init_global_index();
+
     let index_initial_state = {
-        let index_guard = GLOBAL_INDEX.lock().unwrap();
+        let index_guard = global_index_arc.lock().unwrap();
         (*index_guard).clone()
     };
 
-    if let Err(e) = run_cli(Cli::parse()) {
+    if let Err(e) = run_cli(cli, global_index_arc) {
         // --- Graceful handling for clap's informational exits (`--help`, `--version`) ---
         // Before treating the error as a generic failure, check if it's a special
         // error from clap that should result in a clean exit.
@@ -166,7 +179,7 @@ fn main() {
     }
 
     // 3. At the very end, check if the index has changed and save if needed.
-    let index_final_state = GLOBAL_INDEX.lock().unwrap();
+    let index_final_state = global_index_arc.lock().unwrap();
     if *index_final_state != index_initial_state {
         if let Err(e) = index_manager::save_global_index(&index_final_state) {
             eprintln!(
@@ -181,12 +194,12 @@ fn main() {
 }
 
 /// The main application dispatcher implementing the new universal grammar.
-fn run_cli(cli: Cli) -> Result<()> {
+fn run_cli(cli: Cli, global_index_arc: &'static Arc<Mutex<GlobalIndex>>) -> Result<()> {
     log::debug!("CLI args parsed: {:?}", cli);
 
     // Get a mutable guard to the global index early.
     // It will be passed down to handlers that need to mutate the state.
-    let mut index_guard = GLOBAL_INDEX.lock().unwrap();
+    let mut index_guard = global_index_arc.lock().unwrap();
 
     let all_args = cli.args;
 

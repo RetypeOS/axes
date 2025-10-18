@@ -51,6 +51,7 @@ pub struct CliInputState<'a> {
 }
 
 /// El orquestador que valida y resuelve los parámetros.
+#[derive(Debug)]
 pub struct ArgResolver<'a> {
     /// Mapa del token original a su valor final resuelto.
     resolved_values: HashMap<String, String>,
@@ -317,7 +318,6 @@ impl<'a> ArgResolver<'a> {
 
         // --- 2. Resolution Loop for Each Parameter Definition ---
         for def in definitions {
-            // Skip generic <params> definition and already resolved tokens.
             if (matches!(def.kind, ParameterKind::Positional { index } if index == usize::MAX))
                 || resolved_values.contains_key(&def.original_token)
             {
@@ -326,6 +326,7 @@ impl<'a> ArgResolver<'a> {
 
             let final_string: String = match &def.kind {
                 ParameterKind::Positional { index } => {
+                    // This logic is already correct, no changes needed.
                     let cli_value = cli_state.consume_positional(*index);
                     if def.modifiers.required && cli_value.is_none() {
                         return Err(anyhow!(
@@ -334,7 +335,6 @@ impl<'a> ArgResolver<'a> {
                         ));
                     }
 
-                    // Use Cow to represent a value that is either borrowed from the CLI or owned by the default.
                     let final_value: Option<Cow<'a, str>> =
                         cli_value.map(Cow::Borrowed).or_else(|| {
                             def.modifiers
@@ -352,51 +352,71 @@ impl<'a> ArgResolver<'a> {
                     })
                 }
                 ParameterKind::Named { name } => {
-                    let cli_value_opt =
-                        cli_state.consume_named(name, def.modifiers.alias.as_deref())?;
-                    if def.modifiers.required && cli_value_opt.is_none() {
+                    // --- REBUILT LOGIC FOR NAMED PARAMETERS ---
+                    let alias = def.modifiers.alias.as_deref();
+                    let cli_presence = cli_state.consume_named(name, alias)?; // Option<Option<&'a str>>
+
+                    // 1. Check `required` constraint. This is now correct.
+                    if def.modifiers.required && cli_presence.is_none() {
                         return Err(anyhow!(
                             "Flag '--{}' is required but was not provided.",
                             name
                         ));
                     }
 
-                    if let Some(cli_value) = cli_value_opt {
-                        let final_value: Option<Cow<'a, str>> =
-                            cli_value.map(Cow::Borrowed).or_else(|| {
-                                def.modifiers
-                                    .default_value
-                                    .as_ref()
-                                    .map(|s| Cow::Owned(s.clone()))
-                            });
+                    // 2. Determine the base value.
+                    // `cli_presence` has three states:
+                    //   - Some(Some(val)): Flag with value (`--flag val`).
+                    //   - Some(None): Flag without value (`--flag`).
+                    //   - None: Flag not present.
+                    let base_value: Option<Cow<'a, str>> = match cli_presence {
+                        Some(Some(val)) => Some(Cow::Borrowed(val)),
+                        Some(None) => def
+                            .modifiers
+                            .default_value
+                            .as_ref()
+                            .map(|s| Cow::Owned(s.clone())),
+                        None => def
+                            .modifiers
+                            .default_value
+                            .as_ref()
+                            .map(|s| Cow::Owned(s.clone())),
+                    };
 
-                        let final_value_maybe_wrapped = if def.modifiers.literal {
-                            final_value.as_ref().map(|v| Cow::Owned(wrap_value(v)))
-                        } else {
-                            final_value
-                        };
-
-                        if let Some(map_str) = &def.modifiers.map {
-                            if map_str.is_empty() {
-                                final_value_maybe_wrapped
-                                    .unwrap_or(Cow::Borrowed(""))
-                                    .into_owned()
+                    // 3. Format the output based on the value and modifiers.
+                    if let Some(map_str) = &def.modifiers.map {
+                        // `map` is defined: The presence of the flag is irrelevant, only the value matters.
+                        base_value.map_or(String::new(), |val| {
+                            let val_maybe_wrapped = if def.modifiers.literal {
+                                Cow::Owned(wrap_value(&val))
                             } else {
-                                format!(
-                                    "{}{}",
-                                    map_str,
-                                    final_value_maybe_wrapped.unwrap_or(Cow::Borrowed(""))
-                                )
+                                val
+                            };
+                            if map_str.is_empty() {
+                                val_maybe_wrapped.into_owned()
+                            } else {
+                                format!("{}{}", map_str, val_maybe_wrapped)
+                            }
+                        })
+                    } else {
+                        // `map` is NOT defined (pass-through mode). Output depends on flag presence.
+                        if cli_presence.is_some() {
+                            let flag_name = format!("--{}", name);
+                            match base_value {
+                                Some(val) => {
+                                    let val_maybe_wrapped = if def.modifiers.literal {
+                                        Cow::Owned(wrap_value(&val))
+                                    } else {
+                                        val
+                                    };
+                                    format!("{} {}", flag_name, val_maybe_wrapped)
+                                }
+                                None => flag_name, // Flag present, but no value from CLI or default.
                             }
                         } else {
-                            let flag_name = format!("--{}", name);
-                            match final_value_maybe_wrapped {
-                                Some(val) => format!("{} {}", flag_name, val),
-                                None => flag_name,
-                            }
+                            // Flag was not present, and no `map`. The token resolves to nothing.
+                            String::new()
                         }
-                    } else {
-                        String::new() // Flag was not provided, resolves to an empty string.
                     }
                 }
             };
@@ -428,5 +448,238 @@ impl<'a> ArgResolver<'a> {
     /// This is a zero-copy operation.
     pub fn get_generic_values(&self) -> &[&'a str] {
         &self.unclaimed_args
+    }
+}
+
+// MARK: --- UNIT TESTS ---
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- Helper to create a Vec<String> from &str slices ---
+    fn to_cli_params(params: &[&str]) -> Vec<String> {
+        params.iter().map(|s| s.to_string()).collect()
+    }
+
+    // --- `parse_parameter_modifiers_from_str` Tests ---
+    #[test]
+    fn test_parse_modifiers() {
+        let modifiers =
+            parse_parameter_modifiers_from_str("required, default='latest', literal").unwrap();
+        assert!(modifiers.required);
+        assert!(modifiers.literal);
+        assert_eq!(modifiers.default_value.as_deref(), Some("latest"));
+        assert!(modifiers.alias.is_none());
+    }
+
+    #[test]
+    fn test_parse_modifiers_with_alias_and_map() {
+        let modifiers = parse_parameter_modifiers_from_str("alias = '-t', map='--tag='").unwrap();
+        assert!(!modifiers.required);
+        assert_eq!(modifiers.alias.as_deref(), Some("-t"));
+        assert_eq!(modifiers.map.as_deref(), Some("--tag="));
+    }
+
+    // --- `CliInputState` Tests ---
+    #[test]
+    fn test_cli_input_state_parsing() {
+        let params = to_cli_params(&["pos0", "--named1", "val1", "-s", "--bool-flag", "pos1"]);
+        let state = CliInputState::new(&params).unwrap();
+
+        assert_eq!(state.positional.len(), 1);
+        assert_eq!(
+            state.positional[0].value,
+            Some("pos0".to_string()).as_deref()
+        );
+
+        assert_eq!(state.named.len(), 3);
+        assert_eq!(
+            state.named.get("named1").unwrap().value,
+            Some("val1".to_string()).as_deref()
+        );
+        assert_eq!(state.named.get("-s").unwrap().value, None);
+        assert_eq!(state.named.get("bool-flag").unwrap().value, None);
+    }
+
+    // --- `ArgResolver` Full Logic Tests ---
+
+    // Test Positional Parameters
+    #[test]
+    fn test_resolver_positional_basic() {
+        let defs = [parse_parameter_token("<p::0>", "0").unwrap()];
+        let params = to_cli_params(&["hello"]);
+        let resolver = ArgResolver::new(&defs, &params, false).unwrap();
+        assert_eq!(resolver.get_specific_value("<p::0>"), Some("hello"));
+    }
+
+    #[test]
+    fn test_resolver_positional_required_fail() {
+        let defs = [parse_parameter_token("<p::0(required)>", "0(required)").unwrap()];
+        let params = to_cli_params(&[]);
+        let result = ArgResolver::new(&defs, &params, false);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("is required"));
+    }
+
+    #[test]
+    fn test_resolver_positional_default() {
+        let defs =
+            [parse_parameter_token("<p::0(default='world')>", "0(default='world')").unwrap()];
+        let params = to_cli_params(&[]);
+        let resolver = ArgResolver::new(&defs, &params, false).unwrap();
+        assert_eq!(
+            resolver.get_specific_value("<p::0(default='world')>"),
+            Some("world")
+        );
+    }
+
+    // Test Named Parameters (Flags)
+    #[test]
+    fn test_resolver_named_simple_pass_through() {
+        let defs = [parse_parameter_token("<p::verbose>", "verbose").unwrap()];
+        let params = to_cli_params(&["--verbose"]);
+        let resolver = ArgResolver::new(&defs, &params, false).unwrap();
+        assert_eq!(
+            resolver.get_specific_value("<p::verbose>"),
+            Some("--verbose")
+        );
+    }
+
+    #[test]
+    fn test_resolver_named_with_value_pass_through() {
+        let defs = [parse_parameter_token("<p::env>", "env").unwrap()];
+        let params = to_cli_params(&["--env", "staging"]);
+        let resolver = ArgResolver::new(&defs, &params, false).unwrap();
+        assert_eq!(
+            resolver.get_specific_value("<p::env>"),
+            Some("--env staging")
+        );
+    }
+
+    #[test]
+    fn test_resolver_named_required_success() {
+        let defs = [parse_parameter_token("<p::env(required)>", "env(required)").unwrap()];
+        let params = to_cli_params(&["--env", "staging"]);
+        let resolver = ArgResolver::new(&defs, &params, false).unwrap();
+        assert_eq!(
+            resolver.get_specific_value("<p::env(required)>"),
+            Some("--env staging")
+        );
+    }
+
+    #[test]
+    fn test_resolver_named_required_fail() {
+        let defs = [parse_parameter_token("<p::env(required)>", "env(required)").unwrap()];
+        let params = to_cli_params(&[]);
+        let result = ArgResolver::new(&defs, &params, false);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Flag '--env' is required")
+        );
+    }
+
+    #[test]
+    fn test_resolver_named_flag_absent_uses_default() {
+        let defs = [
+            parse_parameter_token("<p::tag(default='latest')>", "tag(default='latest')").unwrap(),
+        ];
+        let params = to_cli_params(&[]);
+        let resolver = ArgResolver::new(&defs, &params, false).unwrap();
+        // With `map` undefined, and flag absent, the token resolves to nothing. This is correct.
+        assert_eq!(
+            resolver.get_specific_value("<p::tag(default='latest')>"),
+            Some("")
+        );
+    }
+
+    #[test]
+    fn test_resolver_named_flag_present_no_value_uses_default() {
+        let defs = [
+            parse_parameter_token("<p::tag(default='latest')>", "tag(default='latest')").unwrap(),
+        ];
+        let params = to_cli_params(&["--tag"]);
+        let resolver = ArgResolver::new(&defs, &params, false).unwrap();
+        assert_eq!(
+            resolver.get_specific_value("<p::tag(default='latest')>"),
+            Some("--tag latest")
+        );
+    }
+
+    #[test]
+    fn test_resolver_named_required_and_default() {
+        // This confirms the logic we discussed: `required` checks for presence,
+        // `default` provides a value if present without one.
+        let defs = [parse_parameter_token(
+            "<p::region(required, default='us-east-1')>",
+            "region(required, default='us-east-1')",
+        )
+        .unwrap()];
+
+        // Case 1: Fails because flag is not present.
+        let params_fail = to_cli_params(&[]);
+        let result_fail = ArgResolver::new(&defs, &params_fail, false);
+        assert!(result_fail.is_err());
+
+        // Case 2: Succeeds and uses the default value.
+        let params_succeed = to_cli_params(&["--region"]);
+        let resolver = ArgResolver::new(&defs, &params_succeed, false).unwrap();
+        assert_eq!(
+            resolver.get_specific_value("<p::region(required, default='us-east-1')>"),
+            Some("--region us-east-1")
+        );
+    }
+
+    #[test]
+    fn test_resolver_map_empty_extracts_value() {
+        let defs = [parse_parameter_token(
+            "<p::tag(map='', default='latest')>",
+            "tag(map='', default='latest')",
+        )
+        .unwrap()];
+
+        // Case 1: Flag absent, uses default.
+        let params1 = to_cli_params(&[]);
+        let resolver1 = ArgResolver::new(&defs, &params1, false).unwrap();
+        assert_eq!(
+            resolver1.get_specific_value("<p::tag(map='', default='latest')>"),
+            Some("latest")
+        );
+
+        // Case 2: Flag present with value.
+        let params2 = to_cli_params(&["--tag", "v1.2.0"]);
+        let resolver2 = ArgResolver::new(&defs, &params2, false).unwrap();
+        assert_eq!(
+            resolver2.get_specific_value("<p::tag(map='', default='latest')>"),
+            Some("v1.2.0")
+        );
+    }
+
+    // Test Generic <params> Collector
+    #[test]
+    fn test_resolver_unclaimed_args() {
+        let defs = [parse_parameter_token("<p::0>", "0").unwrap()];
+        let params = to_cli_params(&["pos0", "pos1", "--flag", "val"]);
+        let resolver = ArgResolver::new(&defs, &params, true).unwrap();
+
+        assert_eq!(resolver.get_specific_value("<p::0>"), Some("pos0"));
+        assert_eq!(resolver.unclaimed_args, vec!["pos1", "--flag", "val"]);
+    }
+
+    #[test]
+    fn test_resolver_unclaimed_args_error_when_no_generic_token() {
+        let defs = [parse_parameter_token("<p::0>", "0").unwrap()];
+        let params = to_cli_params(&["pos0", "pos1"]);
+        let result = ArgResolver::new(&defs, &params, false); // has_generic_params is false
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Unexpected arguments")
+        );
     }
 }

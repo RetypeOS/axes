@@ -37,6 +37,10 @@ _params_hyperfine = """
 <params::make-mid(      alias='-mm', map=' ', default='make -f mid_test/makefile.mk script_900',        literal )>\
 <params::make-high(     alias='-mh', map=' ', default='make -f high_test/makefile.mk script_9000',      literal )>\
 <params::make-big(      alias='-mb', map=' ', default='make -f big_test/makefile.mk script_90000',      literal )>\
+<params::task-low(      alias='-tl', map=' ', default='task -f --dir ./low_test script_90'              literal )>\
+<params::task-mid(      alias='-tm', map=' ', default='task -f --dir ./mid_test script_900'             literal )>\
+<params::task-high(     alias='-th', map=' ', default='task -f --dir ./high_test script_9000'           literal )>\
+<params::task-big(      alias='-tb', map=' ', default='task -f --dir ./big_test script_90000'           literal )>\
 <params(literal)>\
 """
 
@@ -48,19 +52,23 @@ _params_hyperfine = """
 # The only functional difference is the ABSENCE of the `(literal)` modifier, as
 # the `time` command does not require it.
 _params_time = """
-<params::axes-low(      alias='-al', map=' ', default='axes ./low_test/script_90'                      )>\
-<params::axes-mid(      alias='-am', map=' ', default='axes ./mid_test/script_900'                     )>\
-<params::axes-high(     alias='-ah', map=' ', default='axes ./high_test/script_9000'                   )>\
-<params::axes-big(      alias='-ab', map=' ', default='axes ./big_test/script_90000'                   )>\
-<params::axes-divided(  alias='-ad', map=' ', default='axes ./big_divided_test/into/script_90000'      )>\
-<params::just-low(      alias='-jl', map=' ', default='just --justfile low_test/justfile script_90'    )>\
-<params::just-mid(      alias='-jm', map=' ', default='just --justfile mid_test/justfile script_900'   )>\
-<params::just-high(     alias='-jh', map=' ', default='just --justfile high_test/justfile script_9000' )>\
-<params::just-big(      alias='-jb', map=' ', default='just --justfile big_test/justfile script_90000' )>\
-<params::make-low(      alias='-ml', map=' ', default='make -f low_test/makefile.mk script_90'         )>\
-<params::make-mid(      alias='-mm', map=' ', default='make -f mid_test/makefile.mk script_900'        )>\
-<params::make-high(     alias='-mh', map=' ', default='make -f high_test/makefile.mk script_9000'      )>\
-<params::make-big(      alias='-mb', map=' ', default='make -f big_test/makefile.mk script_90000'      )>\
+<params::axes-low(      alias='-al', map=' ', default='axes ./low_test/script_90'                       )>\
+<params::axes-mid(      alias='-am', map=' ', default='axes ./mid_test/script_900'                      )>\
+<params::axes-high(     alias='-ah', map=' ', default='axes ./high_test/script_9000'                    )>\
+<params::axes-big(      alias='-ab', map=' ', default='axes ./big_test/script_90000'                    )>\
+<params::axes-divided(  alias='-ad', map=' ', default='axes ./big_divided_test/into/script_90000'       )>\
+<params::just-low(      alias='-jl', map=' ', default='just --justfile low_test/justfile script_90'     )>\
+<params::just-mid(      alias='-jm', map=' ', default='just --justfile mid_test/justfile script_900'    )>\
+<params::just-high(     alias='-jh', map=' ', default='just --justfile high_test/justfile script_9000'  )>\
+<params::just-big(      alias='-jb', map=' ', default='just --justfile big_test/justfile script_90000'  )>\
+<params::make-low(      alias='-ml', map=' ', default='make -f low_test/makefile.mk script_90'          )>\
+<params::make-mid(      alias='-mm', map=' ', default='make -f mid_test/makefile.mk script_900'         )>\
+<params::make-high(     alias='-mh', map=' ', default='make -f high_test/makefile.mk script_9000'       )>\
+<params::make-big(      alias='-mb', map=' ', default='make -f big_test/makefile.mk script_90000'       )>\
+<params::task-low(      alias='-tl', map=' ', default='task -f --dir ./low_test script_90'              )>\
+<params::task-mid(      alias='-tm', map=' ', default='task -f --dir ./mid_test script_900'             )>\
+<params::task-high(     alias='-th', map=' ', default='task -f --dir ./high_test script_9000'           )>\
+<params::task-big(      alias='-tb', map=' ', default='task -f --dir ./big_test script_90000'           )>\
 <params>\
 """
 
