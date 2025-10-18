@@ -339,7 +339,9 @@ pub fn tokenize_string(text: &str) -> Result<Vec<TemplateComponent>> {
 
     // Helper to push literals and handle merging.
     let push_literal = |components: &mut Vec<TemplateComponent>, s: &str| {
-        if s.is_empty() { return; }
+        if s.is_empty() {
+            return;
+        }
         if let Some(TemplateComponent::Literal(last)) = components.last_mut() {
             last.push_str(s);
         } else {
@@ -545,7 +547,7 @@ mod tests {
         ]);
         let task = compile_script(script).unwrap();
         assert_eq!(task.commands.len(), 2);
-        
+
         let first_cmd = task.commands[0].default.as_ref().unwrap();
         assert!(matches!(first_cmd.action, CommandAction::Print(_)));
 
@@ -568,7 +570,7 @@ mod tests {
         assert_eq!(task.desc.as_deref(), Some("A complex script"));
         assert_eq!(task.commands.len(), 2);
     }
-    
+
     #[test]
     fn test_compile_platform_direct_script() {
         let script = TomlScript::PlatformDirect(crate::models::TomlScriptPlatformDirect {
@@ -576,7 +578,7 @@ mod tests {
             platform: PlatformCommand {
                 windows: Some("echo 'win'".to_string()),
                 ..Default::default()
-            }
+            },
         });
         let task = compile_script(script).unwrap();
         assert_eq!(task.desc.as_deref(), Some("Platform direct"));
@@ -592,16 +594,20 @@ mod tests {
         let var = TomlVar::Simple("@-my-value".to_string());
         let cached_var = compile_var(var).unwrap();
         let exec = cached_var.value.default.as_ref().unwrap();
-        
+
         // CRITICAL: Prefixes must be ignored for variables.
         assert!(!exec.silent_mode);
         assert!(!exec.ignore_errors);
-        
+
         if let CommandAction::Execute(tpl) = &exec.action {
             if let TemplateComponent::Literal(s) = &tpl[0] {
                 assert_eq!(s, "@-my-value");
-            } else { panic!("Expected literal"); }
-        } else { panic!("Expected Execute action"); }
+            } else {
+                panic!("Expected literal");
+            }
+        } else {
+            panic!("Expected Execute action");
+        }
     }
 
     #[test]
@@ -619,7 +625,7 @@ mod tests {
         assert!(cached_var.value.windows.is_some());
         assert!(cached_var.value.default.is_some());
     }
-    
+
     // --- Error Handling and Edge Case Tests ---
 
     #[test]
@@ -627,11 +633,12 @@ mod tests {
         let text = r"echo '\<hello> world <name>'";
         let components = tokenize_string(text).unwrap();
         assert_eq!(components.len(), 3);
-        assert!(matches!(&components[0], TemplateComponent::Literal(s) if s == "echo '<hello> world "));
+        assert!(
+            matches!(&components[0], TemplateComponent::Literal(s) if s == "echo '<hello> world ")
+        );
         assert!(matches!(&components[1], TemplateComponent::Name));
         assert!(matches!(&components[2], TemplateComponent::Literal(s) if s == "'"));
     }
-
 
     #[test]
     fn test_tokenizer_with_complex_tokens() {
@@ -642,11 +649,15 @@ mod tests {
         assert!(matches!(&components[1], TemplateComponent::Literal(s) if s == " "));
         assert!(matches!(&components[2], TemplateComponent::Parameter(_)));
         assert!(matches!(&components[3], TemplateComponent::Literal(s) if s == " "));
-        assert!(matches!(&components[4], TemplateComponent::Color(c) if *c == crate::models::AnsiStyle::Red));
+        assert!(
+            matches!(&components[4], TemplateComponent::Color(c) if *c == crate::models::AnsiStyle::Red)
+        );
         assert!(matches!(&components[5], TemplateComponent::Literal(s) if s == "ERROR"));
-        assert!(matches!(&components[6], TemplateComponent::Color(c) if *c == crate::models::AnsiStyle::Reset));
+        assert!(
+            matches!(&components[6], TemplateComponent::Color(c) if *c == crate::models::AnsiStyle::Reset)
+        );
     }
-    
+
     #[test]
     fn test_empty_script_compiles_to_empty_task() {
         let script = TomlScript::Simple("".to_string());
@@ -670,7 +681,11 @@ mod tests {
         let result: Result<TomlScriptExtended, _> = toml::from_str(toml_str);
         assert!(result.is_err(), "Should fail due to unknown field 'runs'");
         let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("unknown field `runs`"), "Error message was: {}", error_msg);
+        assert!(
+            error_msg.contains("unknown field `runs`"),
+            "Error message was: {}",
+            error_msg
+        );
     }
 
     #[test]
@@ -683,6 +698,10 @@ mod tests {
         let result: Result<TomlVarExtended, _> = toml::from_str(toml_str);
         assert!(result.is_err(), "Should fail due to unknown field 'val'");
         let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("unknown field `val`"), "Error message was: {}", error_msg);
+        assert!(
+            error_msg.contains("unknown field `val`"),
+            "Error message was: {}",
+            error_msg
+        );
     }
 }

@@ -16,71 +16,56 @@ Your expertise is invaluable. If you see a feature that excites you, especially 
 2. Open a new Issue to discuss your implementation strategy. This allows us to align on the architecture and assign the task.
 3. Let's build the future of `axes` together!
 
-## Current Status: `v0.2.0-beta` — The Performance Milestone
+## Current Status: `v0.3.0-beta` — The "Juggernaut" Architecture Milestone
 
-With version `v0.2.0`, we have achieved a critical goal: **peak performance**.
+With version `v0.3.0`, we have successfully re-engineered the core of `axes`. This "Juggernaut" release establishes a new foundation of performance, robustness, and cross-platform consistency.
 
-* **Optimized Core Engine:** The script expansion engine has been rewritten from the ground up. It now uses a highly efficient **direct structural composition** algorithm, making it one of the fastest orchestrators available.
-* **Universal Grammar:** The CLI is now more predictable and ergonomic, with a unified grammar that works seamlessly inside and outside of project sessions.
-* **Foundation for the Future:** With the core architecture now stable and lightning-fast, we are ready to build the next generation of intelligent features on this solid foundation.
+* **Universal AST & Portable Cache:** The compilation engine has been rewritten. `axes` now generates a **platform-agnostic Abstract Syntax Tree (AST)**, meaning binary cache files are **100% portable** between Windows, macOS, and Linux. This is a game-changing feature for multi-platform teams.
+* **Just-In-Time (JIT) Optimization:** A final, in-memory "specialization" step was introduced before execution. This gives us the flexibility of a universal cache with the raw, uncompromising speed of a platform-specific runner. Benchmarks confirm `axes` is now significantly faster than its predecessors and competitors in realistic, high-load scenarios.
+* **Enhanced Syntax & Robustness:** The `axes.toml` syntax for scripts and variables is now more powerful, ergonomic, and strictly validated to prevent user errors.
+* **Ephemeral Execution (`_`):** It is now possible to run scripts in unregistered projects, a powerful feature for CI/CD and temporary workflows.
 
 ---
 
 ## The Road to `v1.0` — From Orchestrator to Intelligent Build System
 
-Our immediate goal is to evolve `axes` beyond simple command execution. We will introduce intelligence, efficiency, and an unparalleled user experience, culminating in a `v1.0` release that sets a new standard.
+Our path to `v1.0` is focused on building upon the new "Juggernaut" architecture. We will stabilize, enhance the user experience, and then deliver the cornerstone feature of an intelligent build system: artifact caching.
 
-### **Milestone 1: The "Intelligent Build" Milestone (`v0.3.0`)**
+### **Milestone 1: The "Polishing & Stability" Milestone (`v0.4.0`)**
 
-**Goal:** Transform `axes` from a task *runner* into an efficient build system that avoids redundant work. This is our highest priority.
+**Goal:** Solidify the `v0.3.0` architecture, refine the user experience, and ensure rock-solid stability. This is our immediate priority.
 
-* `[ ]` **Implement Artifact Caching (MVP):**
-  * **Description:** Introduce a task caching mechanism based on input file checksums, similar to `Task` or `Turborepo`. A new `[scripts.my_script.cache]` section in `axes.toml` will allow users to declare `sources` (input files/globs). `axes` will calculate a state checksum and skip the execution if no sources have changed since the last successful run.
-  * **Value:** This is the single most impactful feature for developer productivity. It will save minutes to hours in daily workflows and CI/CD pipelines by avoiding costly re-compilations, re-testing, and re-packaging. It elevates `axes` into the "intelligent build system" category.
-
-### **Milestone 2: The "Premium DX" Milestone (`v0.4.0`)**
-
-**Goal:** Polish the daily user experience to make `axes` not just powerful, but a joy to use.
-
+* `[ ]` **Final Architectural Review & Minor Fixes:**
+  * **Description:** Conduct a comprehensive review of all core modules and handlers, applying final optimizations, improving documentation, and fixing any minor bugs discovered after the v0.3.0 refactor.
+  * **Value:** Ensures the new foundation is flawless before building major new features upon it.
 * `[ ]` **Implement Shell Autocompletion:** `[contribution welcome]`
-  * **Description:** Provide dynamic, context-aware autocompletion for shells (`bash`, `zsh`, `fish`). The completion engine must intelligently suggest project contexts, aliases, available scripts for a given context, and even script parameters.
-  * **Value:** The most significant quality-of-life improvement for discoverability and daily usability.
-* `[ ]` **Implement the "Orchestrator" TUI:**
-  * **Description:** When running `axes` without arguments, launch an interactive Terminal User Interface. This TUI will act as a project dashboard, visualizing the project tree, allowing users to browse available scripts (with descriptions), and trigger them directly.
+  * **Description:** Provide dynamic, context-aware autocompletion for `bash`, `zsh`, and `fish`. The engine must intelligently suggest project contexts, aliases, and available scripts for a given context.
+  * **Value:** The single most impactful quality-of-life improvement for discoverability and daily usability.
+* `[ ]` **Implement the "Orchestrator" TUI (MVP):**
+  * **Description:** When running `axes` without arguments, launch a basic, interactive Terminal User Interface. This TUI will visualize the project tree and allow users to browse and select available scripts for the current context.
   * **Value:** Transforms the first impression of `axes` into a premium, guided experience and makes complex monorepos instantly navigable.
 
-### **Milestone 3: The "Power User" Milestone (`v0.5.0`)**
+### **Milestone 2: The "Intelligent Build" Milestone (`v0.5.0`)**
 
-**Goal:** Unlock advanced scripting patterns and give users granular control over their workflows.
+**Goal:** Transform `axes` from a task *runner* into an efficient build system that avoids redundant work.
 
-* `[ ]` **Implement Private Scopes (`_` prefix):**
-  * **Description:** Keys in `[vars]`, `[env]`, and `[scripts]` that start with an underscore (`_`) will not be inherited by child projects.
-  * **Value:** Allows true encapsulation. Parent projects can define internal helper scripts and variables without polluting the namespace of their children.
-* `[ ]` **Advanced Artifact Caching:**
-  * **Description:** Extend the caching system to support `generates` (output files) and dynamic `key`s based on variables. This allows caching to be influenced by environment, platform, or parameters.
+* `[ ]` **Implement Artifact Caching (MVP):**
+  * **Description:** Introduce a task caching mechanism based on input file checksums. A new `[scripts.my_script.cache]` section in `axes.toml` will allow users to declare `sources` (input files/globs). `axes` will calculate a state checksum and skip script execution if no sources have changed since the last successful run.
+  * **Value:** This is the cornerstone feature for developer productivity, saving immense time in daily workflows and CI/CD pipelines by avoiding costly re-compilations, re-testing, and re-packaging.
 
-        ```toml
-        [scripts.build.cache]
-        sources = ["src/**/*.js"]
-        generates = ["dist/bundle.js"]
-        key = "<vars::node_version>-<params::profile>"
-        ```
+### **Milestone 3: The "Ecosystem & Stability" Milestone (`v1.0.0`)**
 
-  * **Value:** Enables highly sophisticated and reliable caching strategies for complex build matrices.
+**Goal:** Prepare `axes` for its official, production-ready launch with features that build long-term trust and simplify integration.
 
-### **Milestone 4: The "Ecosystem & Stability" Milestone (`v1.0.0`)**
-
-**Goal:** Prepare `axes` for its official, production-ready launch.
-
-* `[ ]` **Implement `axes validate` / `axes doctor`:**
-  * **Description:** A command that performs a health check on the entire `axes` ecosystem. It will find and offer to fix inconsistencies like broken parent links in the index, projects whose paths no longer exist, and corrupted cache files.
-  * **Value:** A crucial diagnostic and repair tool that builds long-term user trust and confidence.
+* `[ ]` **Implement `axes doctor` command:**
+  * **Description:** A comprehensive health check command that finds and offers to fix inconsistencies like broken parent links in the index, projects whose paths no longer exist, and orphaned cache files. This evolves the existing `repair` command.
+  * **Value:** A crucial diagnostic and repair tool that builds user confidence.
 * `[ ]` **Native Support for `.env` Files:** `[contribution welcome]`
-  * **Description:** Add a key like `[env].load = true` to automatically discover and load variables from a `.env` file into the script execution environment.
-  * **Value:** A highly requested feature that aligns with modern development practices and simplifies configuration management.
+  * **Description:** Add a key like `[env].load = ".env"` to automatically discover and load variables from a specified `.env` file into the script execution environment.
+  * **Value:** A highly requested feature that aligns with modern development practices.
 * `[ ]` **Final API Freeze and Documentation Overhaul:**
-  * **Description:** Conduct a final review of the `axes.toml` syntax and CLI command contracts. Declare them stable for `v1.0`. Ensure all documentation is complete, polished, and full of examples.
-  * **Value:** The promise of stability that is essential for adoption in production environments.
+  * **Description:** Conduct a final review of the `axes.toml` syntax and CLI command contracts. Declare them stable for `v1.0`. Ensure all documentation is complete, polished, and full of real-world examples.
+  * **Value:** The promise of stability essential for adoption in production environments.
 
 ---
 
@@ -88,20 +73,20 @@ Our immediate goal is to evolve `axes` beyond simple command execution. We will 
 
 These are ambitious, game-changing features that we will explore once the `v1.0` foundation is solid.
 
-* `[ ]` **The `axes` Daemon:** A long-running background process that can watch the filesystem and provide near-instantaneous build caching and reactivity, similar to modern frontend tools.
-* `[ ]` **Remote Caching:** The ability to share the artifact cache across a team or CI farm, enabling massive speedups in collaborative environments.
-* `[ ]` **Templating Engine (`init 2.0`):** Transform `axes init` into a powerful scaffolding engine (`cookiecutter`-style) that can generate new projects from predefined, version-controlled templates.
-* `[ ]` **Dynamic Tokens:** Integrate with tools like Git to provide dynamic, real-time tokens like `<git::branch>` or `<git::is_dirty>`.
+* `[ ]` **The `axes` Daemon:** A long-running background process for near-instantaneous build caching and reactivity.
+* `[ ]` **Remote Caching:** Sharing the artifact cache across a team or CI farm.
+* `[ ]` **Templating Engine (`init 2.0`):** A powerful scaffolding engine to generate new projects from templates.
+* `[ ]` **Advanced Scripting Features:** Private scopes (`_` prefix for non-inheritable items), advanced caching keys, and dynamic tokens (`<git::branch>`).
 
 ---
 
 ## **Call for Testers (Beta Phase)**
 
-The most valuable contribution right now is to **use `axes` and give us feedback**. We are particularly interested in:
+The most valuable contribution right now is to **use `axes v0.3.0` and give us feedback**. We are particularly interested in:
 
-1. **Performance:** How does `axes v0.2.0` feel in your daily workflow? Are there any commands that still feel slow?
-2. **The Parameter System:** Push `<params::...>` to its limits. Create complex, parameterized scripts. Is the behavior always intuitive?
-3. **Real-World Monorepos:** Try integrating `axes` into one of your existing monorepo projects. What challenges did you face? What features were missing?
+1. **Cross-Platform Cache:** If you work in a multi-OS team, try committing your `.axes-cache` directory. Does it work seamlessly for your colleagues?
+2. **The `_` Context:** Push the ephemeral execution mode to its limits in your CI pipelines or local tests.
+3. **Real-World Monorepos:** Integrate `axes` into one of your existing complex projects. What challenges did you face? What features were missing?
 
 **How to report feedback?**
-Please open an Issue in our [GitHub repository](https://github.com/RetypeOS/axes/issues). Every piece of feedback is a step toward building a better tool.
+Please open an Issue in our [GitHub repository](https://github.com/retypeos/axes/issues). Every piece of feedback is a step toward building a better tool.

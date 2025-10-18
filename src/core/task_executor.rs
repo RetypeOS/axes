@@ -1,12 +1,15 @@
 use crate::{
     core::{color, commons::wrap_value, parameters::ArgResolver},
-    models::{CommandAction, GlobalIndex, PlatformSpecializedTask, ResolvedConfig, RunSpec, TemplateComponent},
+    models::{
+        CommandAction, GlobalIndex, PlatformSpecializedTask, ResolvedConfig, RunSpec,
+        TemplateComponent,
+    },
     system::executor,
 };
 use anyhow::{Context, Result, anyhow};
 use colored::*;
 use rayon::prelude::*;
-use std::{fmt::Write};
+use std::fmt::Write;
 
 // --- Main Public Function ---
 

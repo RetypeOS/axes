@@ -1,5 +1,5 @@
 
-# Performance Analysis (Benchmarks with `hyperfine`)
+# Performance Analysis (Benchmarks with `hyperfine`) [OUTDATED]
 
 ## 1. Introduction and Methodology
 

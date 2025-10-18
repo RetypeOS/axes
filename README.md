@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="#"><img src="https://img.shields.io/badge/build-passing-brightgreen" alt="CI/CD Status"></a>
-  <a href="https://github.com/retypeos/axes/releases"><img src="https://img.shields.io/badge/version-v0.2.6--beta-blue" alt="Latest Version"></a>
+  <a href="https://github.com/retypeos/axes/releases"><img src="https://img.shields.io/badge/version-v0.3.0--beta-blue" alt="Latest Version"></a>
   <a href="https://deepwiki.com/RetypeOS/axes"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
   <a href="https://github.com/retypeos/axes/blob/main/LICENSE"><img src="https://img.shields.io/github/license/retypeos/axes?color=lightgrey" alt="License"></a>
 
@@ -40,31 +40,43 @@ This constant cognitive load breaks workflow and slows down teams. Simple task r
 
 ### The Solution: Performance and Orchestration, Unified
 
-For years, the choice has been a false dilemma: use a simple, fast runner with limited features, or a powerful but slow and complex orchestrator. **`axes` eliminates this compromise.**
+For years, developers have faced a false dilemma: use a simple, fast runner with limited features, or a powerful but slow and complex orchestrator. **`axes` eliminates this compromise.**
 
-We offer advanced orchestration capabilities at a speed that rivals, and often surpasses, the most popular executors in the Rust ecosystem.
+We deliver advanced orchestration capabilities at a speed that is not just competitive, but class-leading. Our architecture is designed to scale with your project's complexity, maintaining elite performance where other tools falter.
 
-| Command (Hot Execution) | Average [ms] (± σ) | Min … Max [ms] | Relative Speed |
-|:---|:---:|:---:|:---:|
-| **`axes <script>`** | **41.8 ± 1.9** | 38.1 … 45.9 | **1.00** |
-| `just <script>` | 44.7 ± 4.0 | 38.0 … 57.9 | 1.07x slower |
-| `task <script>` | 79.9 ± 9.3 | 60.9 … 99.2 | 1.91x slower |
-| --- | --- | --- | --- |
-| **`axes --version` (Startup)** | **19.6 ± 1.8** | 16.6 … 25.3 | **1.00** |
-| `just --version` (Startup) | 24.4 ± 3.5 | 18.7 … 35.1 | 1.25x slower |
-| `task --version` (Startup) | 69.0 ± 9.0 | 54.9 … 90.8 | 3.52x slower |
+| Command (minimal start time)               | Average Time (Mean ± σ) | Relative Speed |
+|:-----------------------------------|:-----------------------:|:--------------:|
+| **`axes --version`**                | **17.1 ms ± 0.9 ms**    | **1.00**       |
+| `just --version`                    | 32.7 ms ± 2.8 ms        | 1.92x Slower   |
+| `task --version`                    | 107.1 ms ± 11.8 ms      | 6.28x Slower   |
 
-*Benchmarks executed with `hyperfine` on a standard development machine with specs: (Aspire A315-58, Windows 11, 11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz (2.80 GHz), Intel(R) Iris(R) Xe Graphics (128mb), 16GB RAM, NVMe SSD). Each command was executed 50 times after a warm-up of 5 executions.*
+| Command (Hot Execution, High Load) | Average Time (Mean ± σ) | Relative Speed |
+|:-----------------------------------|:-----------------------:|:--------------:|
+| **`axes <script>`**                | **40.2 ms ± 1.1 ms**    | **1.00**       |
+| `just <script>`                    | 73.6 ms ± 2.7 ms        | 1.83x Slower   |
+| `task <script>`                    | 855.1 ms ± 50.2 ms      | 21.28x Slower  |
 
-This performance is not accidental; it is the result of an **architecture obsessed with efficiency**:
+*In an extreme stress test with 90,000+ commands, `axes` completes in **~118 ms**, while `task` takes over **33 seconds**—a performance difference of nearly **300x**.*
 
-1. **Lazy and Parallel Loading:** `axes` only loads the configuration it needs from disk, and it does so in parallel.
-2. **Pre-compiled AST Cache:** On the first execution, your `axes.toml` files are compiled into a highly optimized **Abstract Syntax Tree (AST)**. This AST is saved in a compact binary cache.
-3. **Instant Hot Executions:** Every subsequent execution completely skips the costly text parsing. `axes` deserializes the pre-compiled AST from the binary cache—an operation orders of magnitude faster than text parsing—and executes it instantly.
+<p align="center">
+  <sub>
+    Benchmarks executed with <code>hyperfine</code> on Windows 11 (i7-1165G7, 16GB RAM, NVMe SSD).<br>
+    The "High Load" test involves a script with 9,000 commands. Full methodology and results for all platforms are in our
+    <a href="./examples/BENCHMARKS.md"><code>BENCHMARKS.md</code></a> file.
+  </sub>
+</p>
 
-**The result: you pay the orchestration cost once. You get the speed of a simple executor every time after.**
+This level of performance is the direct result of an **architecture obsessed with efficiency**:
 
-- ⚙️ **[In-depth Architecture Analysis (`TECHNICAL.md`)](./TECNICAL.md):** For those interested in the engineering behind our performance.
+1. **Lazy and Parallel Loading:** `axes` reads and compiles only the configuration it needs, and it does so concurrently, leveraging all available CPU cores.
+
+2. **Ahead-of-Time (AOT) Compilation to a Universal AST:** On the first run, your `axes.toml` files are compiled into a highly optimized, platform-agnostic **Abstract Syntax Tree (AST)**. This universal AST is then saved in a compact binary cache, which is **100% portable across operating systems** (Windows, macOS, Linux).
+
+3. **Just-in-Time (JIT) Optimized Execution:** Every subsequent ("hot") execution bypasses slow text parsing entirely. `axes` deserializes the universal AST from the binary cache, performs an ultra-fast in-memory **"JIT" specialization** for your current OS, and executes the resulting flat command list instantly.
+
+**The result is an engineering guarantee: you pay the orchestration cost once. You get maximum, scalable performance on every run after that.**
+
+- ⚙️ **[In-depth Architecture Analysis (`TECHNICAL.md`)](./TECHNICAL.md):** For those interested in the engineering behind our performance.
 
 ---
 
@@ -103,17 +115,29 @@ Your scripts become first-class command-line applications, complete with documen
 #    Fails if an environment is not provided.
 test = "pytest --env <params::0(required)>"
 
-# 2. Named parameter with a default value:
+# 2. Named parameter with personalized flag with map, a default value and alias:
 #    Uses '--tag latest' if not specified.
-build = "docker build . -t my-app:<params::tag(map='', default='latest')>"
+build = "docker build . <params::tag(alias='-t', map='--tag my-app:', default='latest', required)>"
+
+# 3. Compose entire positional parameter and flag parameter in multiline script.
+make_push = [
+  "git add .",
+  "git commit <params::0(map='-m ', required, literal)>",
+  "git push origin <params::branch(alias='-b', default='main', required)>"
+]
 ```
 
 ```sh
 axes test production   # Passes --env production to pytest
 axes test              # ERROR: Parameter 0 is required.
 
-axes build --tag v1.2.0  # Builds image my-app:v1.2.0
-axes build               # Builds image my-app:latest
+axes build --tag v1.2.0 # Builds image my-app:v1.2.0
+axes build -t           # Builds image my-app:latest
+
+axes make_push "This is a commit message." -b # Make push completely steps with message
+axes make_push "This is a another commit message." -b master # Make push completely steps with message and another branch
+axes make_push "Another commit message" # Fails because flag '--branch' is needed.
+axes make_push -b another-branch        # Fails because param 0 is needed.
 ```
 
 Say goodbye to fragile `bash` scripts for parsing arguments.
@@ -239,7 +263,7 @@ The `axes lint` command, run from the root, will now run the linters of both sub
 
 `axes` gives you granular control over how each command is executed using simple prefixes:
 
-- `# <text>`: **Comment/Print.** Prints the text to the console instead of executing it. Perfect for showing status messages.
+- `# Message...`: **Comment/Print.** Prints the text to the console instead of executing it. Perfect for showing status messages.
   - Instead of using: `echo 'Starting build...'` - Slow, inefficient, and may require special parsing.
   - You can use: `# Starting build...` - Simpler and respects the content itself.
 
@@ -255,7 +279,7 @@ The `axes lint` command, run from the root, will now run the linters of both sub
   - `> axes web test`
   - `# --- All tests completed ---`
 
-These modifiers can be combined, as in the `lint` example (`@>`), for powerful and precise orchestration.
+Modifiers can be combined (e.g., `-@>`) in any order for powerful, precise orchestration.
 
 **The Unified Workflow:**
 

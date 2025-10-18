@@ -11,6 +11,8 @@ description = "The development workflow configuration for the `axes` project its
 # Defines workflows for building, testing, and managing the tool.
 [scripts]
 tests = 'echo <params(literal)> <params::flag(map="zzzz=", default="aaaa", required)>'
+aaa = '''echo <params>'''
+
 # --- Core Development Workflows ---
 build = { desc = "Builds the project in debug mode with fast compilation.", run = "cargo build <params>" }
 build_release = { desc = "Builds the project in release mode for distribution.", run = "cargo build --release <params::lang(map='--features lang_', default='es')>" }
@@ -57,7 +59,6 @@ run = [
 desc = "Generates a performance flamegraph for a given command and opens the result."
 run = [
     "cargo flamegraph --bin axes -- <params::0(literal)>",
-    "<scripts::_flamgraph_exec>"
 ]
 
 # === Interpolation Variables ===
