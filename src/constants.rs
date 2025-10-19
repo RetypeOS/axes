@@ -1,5 +1,3 @@
-// src/constants.rs
-
 /// The name of the directory containing axes configuration for a project.
 pub const AXES_DIR: &str = ".axes";
 

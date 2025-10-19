@@ -1,5 +1,3 @@
-// src/core/parameters.rs
-
 use crate::{
     core::commons::wrap_value,
     models::{ParameterDef, ParameterKind, ParameterModifiers},

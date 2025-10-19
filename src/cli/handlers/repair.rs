@@ -1,5 +1,3 @@
-// src/cli/handlers/repair.rs
-
 use anyhow::{Result, anyhow};
 use clap::Parser;
 use colored::*;

@@ -1,5 +1,3 @@
-// EN: src/cli/handlers/info.rs (FULLY RESTORED AND OPTIMIZED FOR V0.3)
-
 use crate::{
     cli::handlers::commons,
     constants::{AXES_DIR, PROJECT_CONFIG_FILENAME},

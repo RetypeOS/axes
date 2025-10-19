@@ -1,5 +1,3 @@
-// src/core/paths.rs
-
 use crate::constants::GLOBAL_INDEX_FILENAME;
 use anyhow::{Result, anyhow};
 use lazy_static::lazy_static;

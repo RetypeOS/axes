@@ -1,5 +1,3 @@
-// EN: src/bin/axes.rs
-
 use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::Result;
@@ -15,18 +13,9 @@ use axes::{
 use clap::Parser;
 use colored::*;
 
-// Use a thread-safe global static for the index.
-//lazy_static! {
-//    static ref GLOBAL_INDEX: Arc<Mutex<GlobalIndex>> = {
-//        let index =
-//            index_manager::load_and_ensure_global_project().expect("Failed to load global index.");
-//        Arc::new(Mutex::new(index))
-//    };
-//}
-
 static GLOBAL_INDEX: OnceLock<Arc<Mutex<GlobalIndex>>> = OnceLock::new();
 
-fn get_or_init_global_index() -> &'static Arc<Mutex<GlobalIndex>> {
+fn get_global_index() -> &'static Arc<Mutex<GlobalIndex>> {
     GLOBAL_INDEX.get_or_init(|| {
         let index =
             index_manager::load_and_ensure_global_project().expect("Failed to load global index.");
@@ -136,7 +125,7 @@ fn main() {
     }
 
     // 1. Load the index and clone its initial state.
-    let global_index_arc = get_or_init_global_index();
+    let global_index_arc = get_global_index();
 
     let index_initial_state = {
         let index_guard = global_index_arc.lock().unwrap();
@@ -147,23 +136,19 @@ fn main() {
         // --- Graceful handling for clap's informational exits (`--help`, `--version`) ---
         // Before treating the error as a generic failure, check if it's a special
         // error from clap that should result in a clean exit.
-        if let Some(clap_err) = e.downcast_ref::<clap::Error>() {
-            // `use_stderr()` is clap's idiomatic way to distinguish between:
-            // - `false`: Informational exits like --help (print to stdout, exit 0).
-            // - `true`: Actual parsing errors (print to stderr, exit 1).
-            if !clap_err.use_stderr() {
-                // This is a --help or --version request.
-                clap_err.print().expect("Failed to print clap help/version");
-                std::process::exit(0);
-            }
+        if let Some(clap_err) = e.downcast_ref::<clap::Error>()
+            && !clap_err.use_stderr()
+        {
+            clap_err.print().expect("Failed to print clap help/version");
+            std::process::exit(0);
         }
 
         // --- Existing error handling for all other application errors ---
         if let Some(exec_err) = e.downcast_ref::<executor::ExecutionError>()
             && matches!(exec_err, executor::ExecutionError::Interrupted { .. })
         {
-            eprintln!(); // Print a newline after ^C for clean terminal output.
-            std::process::exit(130); // Standard exit code for Ctrl+C.
+            eprintln!();
+            std::process::exit(130);
         }
 
         eprintln!("\n{}: {}", "Error".red().bold(), e);
@@ -178,7 +163,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    // 3. At the very end, check if the index has changed and save if needed.
+    // 3. Check if the index has changed and save if needed.
     let index_final_state = global_index_arc.lock().unwrap();
     if *index_final_state != index_initial_state {
         if let Err(e) = index_manager::save_global_index(&index_final_state) {
@@ -230,7 +215,6 @@ fn run_cli(cli: Cli, global_index_arc: &'static Arc<Mutex<GlobalIndex>>) -> Resu
         } else if let Some(command) = find_command(arg1) {
             // Rule 3 (Global Action): `axes <action> [args...]`
             let params = all_args.iter().skip(1).cloned().collect();
-            // This branch correctly returns Option<String> (via `None`)
             (command, None, params)
         } else {
             // Rule 4 (Default, Implicit Script): `axes <script_path> [params...]`

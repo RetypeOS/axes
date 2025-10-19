@@ -1,5 +1,3 @@
-// EN: src/cli/handlers/mod.rs
-
 pub mod alias;
 pub mod commons;
 pub mod debug_cache;
