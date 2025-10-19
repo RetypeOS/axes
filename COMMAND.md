@@ -56,7 +56,7 @@ axes init [options...]
 
 | Flag                   | Description                                                                              | Required |
 | :--------------------- | :--------------------------------------------------------------------------------------- | :-------- |
-| `--parent <context>`   | The context of the project that will be the parent of the new one. Defaults to `global`. | No        |
+| `--parent <context>`   | The context of the project that will be the parent. Accepts any valid context (`..`, `my-app/api`, `g!`, etc.). Defaults to `global`. | No        |
 | `--name <name>`        | The name for the new project. If not provided, the directory name is used.               | No        |
 | `--version <ver>`      | The initial version for the project (e.g., `1.0.0`).                                     | No        |
 | `--description <desc>` | A brief description for the project.                                                     | No        |
@@ -93,10 +93,11 @@ axes register [<path>] [--autosolve]
 
 #### **Arguments and Flags**
 
-| Argument/Flag      | Description                                                                                         | Required |
-| :------------------ | :-------------------------------------------------------------------------------------------------- | :-------- |
-| `<path>`            | The path to the project to be registered. If omitted, the current directory is used.                | No        |
-| `--autosolve`       | Non-interactive mode. The operation will fail if it encounters any conflict (e.g., an existing UUID).| No        |
+| Argument/Flag       | Description                                                                                           | Required |
+| :------------------ | :---------------------------------------------------------------------------------------------------- | :------- |
+| `<path>`            | The path to the project to register. Defaults to the current directory.                               | No       |
+| `--parent <context>`| Suggests a parent for the registered project, overriding any parent defined in its `project_ref.bin`. | No       |
+| `--autosolve`       | Non-interactive mode. Fails on any conflict.                                                          | No       |
 
 #### **Usage Examples**
 
@@ -329,23 +330,30 @@ These are the main commands you will use in your daily workflow to run tasks, st
 
 ### `run`
 
-Executes a script defined in the `[scripts]` section of a project's `axes.toml`. This is the most powerful and versatile command in `axes`.
+Executes a script defined in a project's `axes.toml`. This is the most powerful and frequently used command in `axes`.
 
-#### **Syntax**
+#### **Syntax (Universal Grammar)**
+
+The recommended way to run a script is using the universal grammar, which feels like a native command:
+
+```sh
+axes [<context>]/<script_name> [parameters...]
+```
+
+This is an ergonomic shortcut for the more explicit form:
 
 ```sh
 axes [<context>] run <script_name> [parameters...]
-# Or:
-axes [<context>]/<script_name> [parameters...]
 ```
 
 #### **Arguments and Flags**
 
-| Argument          | Description                                                                  | Required  |
-| :---------------- | :--------------------------------------------------------------------------- | :-------- |
-| `<context>`       | The project context in which the script will be executed. (Implicitly `.` if omitted). | No       |
-| `<script_name>`   | The name of the script to execute (the key under the `[scripts]` table).     | Yes       |
-| `[parameters...]` | Any additional arguments that will be passed to the script.                  | No        |
+| Argument          | Description                                                                  |
+| :---------------- | :--------------------------------------------------------------------------- |
+| `<context>`       | The project context. Defaults to `.` (current project) if omitted.           |
+| `<script_name>`   | The name of the script to execute.                                           |
+| `[parameters...]` | Any additional arguments passed directly to the script's parameter engine.     |
+| `--dry-run`       | A special flag that prints the commands that *would* be executed for the current platform, without running them. Must be passed before parameters. |
 
 #### **Key Functionality**
 
@@ -391,9 +399,10 @@ axes [<context>] start [parameters...]
 #### **Arguments and Flags**
 
 | Argument          | Description                                                                         | Required |
-| :---------------- | :---------------------------------------------------------------------------------- | :-------- |
+| :---------------- | :---------------------------------------------------------------------------------- | :------- |
 | `<context>`       | The project in which to start the session. (Implicitly `.` if omitted).             | No       |
 | `[parameters...]` | Any additional arguments that will be passed to the `at_start` and `at_exit` hooks. | No       |
+| `--dry-run`       | Prints the hook commands that *would* be executed, without starting a session.      | No       |
 
 #### **Session Behavior**
 
@@ -430,26 +439,34 @@ axes [<context>] open [<app_key>] [parameters...]
 
 #### **Arguments and Flags**
 
-| Argument         | Description                                                                          | Required |
-| :---------------- | :----------------------------------------------------------------------------------- | :-------- |
-| `<context>`       | The project to be opened. (Implicitly `.` if omitted).                               | No       |
+| Argument          | Description                                                                              | Required |
+| :---------------- | :--------------------------------------------------------------------------------------- | :------- |
+| `<context>`       | The project to be opened. (Implicitly `.` if omitted).                                   | No       |
 | `[<app_key>]`     | The key of the application to use (e.g., `code`). If omitted, the `default` key is used. | No       |
-| `[parameters...]` | Any additional arguments that will be passed to the `app_key` script. | No       |
+| `[parameters...]` | Any additional arguments that will be passed to the `app_key` script.                    | No       |
 
 #### **Configuration**
 
-Applications are defined in the `[options.open_with]` section of your `axes.toml`. Since v0.1.8, each entry is a **complete script** that can be a string, a sequence, or a table with a description. [WARN: Pending to Change...]
+Applications are defined in the `[options.open_with]` section of your `axes.toml`. Each entry is a complete `axes` script, allowing for platform-specific logic, descriptions, and parameterization.
 
 ```toml
 [options.open_with]
-# Simple string shortcut
-edit = "code \"<path>\""
+# The default action when `axes open` is run without an app_key.
+default = "vsc"
 
-# Shortcut with description and that accepts parameters
-terminal = { desc = "Opens a terminal in a subfolder.", run = "wt -d \"<path>/<params::0(default='.')>\"" }
+[options.open_with.vsc]
+desc = "Opens the project in Visual Studio Code."
+run = 'code "<path>"'
 
-# Sets the default action
-default = "edit"
+[options.open_with.terminal]
+desc = "Opens a new terminal in a specific subfolder."
+run = 'wt -d "<path>/<params::0(default=".")>"' # Example for Windows Terminal
+
+[options.open_with.explorer]
+desc = "Opens the project in the system's file explorer."
+windows = "explorer \"<path>\""
+macos = "open \"<path>\""
+default = "xdg-open \"<path>\"" # For Linux
 ```
 
 #### **Usage Examples**
@@ -546,7 +563,14 @@ axes my-app/api-legacy info
 
 ### `repair`
 
-Reports errors in the project system and/or project files and offers to automatically repair them.
+Scans the filesystem to find and fix inconsistencies between the `GlobalIndex` and your projects' on-disk state.
+
+#### **Functionality**
+
+`repair` can currently detect and offer to fix:
+
+* **Path Mismatches:** When a project's directory has been moved or renamed, `repair` detects that the path in the index is stale and updates it to the new, correct location.
+* *(Future capabilities will include detecting orphaned projects, corrupted `project_ref.bin` files, etc.)*
 
 #### **Syntax**
 

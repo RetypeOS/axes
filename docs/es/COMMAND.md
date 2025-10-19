@@ -17,24 +17,24 @@ Este documento es la guía de referencia definitiva para cada comando disponible
 ### **Las Reglas de la Gramática (en orden de prioridad):**
 
 1. **`axes <contexto> <acción> [args...]`**
-    * Si el **segundo** argumento es una acción del sistema conocida (`info`, `delete`, `start`, etc.), el primer argumento se trata como el contexto del proyecto.
+    * Si el **segundo** argumento es una acción conocida del sistema (`info`, `delete`, `start`, etc.), el primer argumento se trata como el contexto del proyecto.
     * *Ejemplo:* `axes mi-app info`
 
 2. **`axes <acción> [args...]`**
-    * Si el **primer** argumento es una acción del sistema conocida, `axes` la ejecuta. Esto se usa para comandos globales (`init`, `tree`, `alias`) o cuando se usa un contexto implícito.
+    * Si el **primer** argumento es una acción conocida del sistema, `axes` la ejecuta. Esto se usa para comandos globales (`init`, `tree`, `alias`) o al usar un contexto implícito.
     * *Ejemplo (Global):* `axes tree --all`
     * *Ejemplo (Contexto Implícito):* `axes info` (equivalente a `axes . info`)
 
 3. **`axes <ruta_script_virtual> [params...]` (Por Defecto)**
-    * Si ninguna de las reglas anteriores coincide, `axes` asume que estás intentando **ejecutar un *script***. Este es un atajo para `axes <ctx> run <script_name>`.
-    * *Ejemplo:* `axes build --release` => `run build script del proyecto actual` (`axes run build --release`)
-    * *Ejemplo:* `axes api/build --release` => `run build script del hijo 'api' desde el proyecto actual` (`axes api run build --release`)
+    * Si ninguna de las reglas anteriores coincide, `axes` asume que estás intentando **ejecutar un script**. Este es un atajo para `axes <ctx> run <nombre_script>`.
+    * *Ejemplo:* `axes build --release` => `ejecutar script build del proyecto actual` (`axes run build --release`)
+    * *Ejemplo:* `axes api/build --release` => `ejecutar script build del hijo 'api' desde el proyecto actual` (`axes api run build --release`)
 
 ### **Sistema de Contexto:**
 
 * **Contexto Explícito:** `axes mi-app/api ...`
-* **Contexto Implícito (`.`):** Para comandos que requieren un contexto (`info`, `run`, `start`, etc.), si no se proporciona uno, `axes` usa automáticamente `.` (el proyecto en el directorio actual o su primer ancestro).
-* **Navegación:** Puedes usar `..` para referirte a un proyecto padre, `*` para el último hijo usado, y atajos como `g!` para el proyecto global.
+* **Contexto Implícito (`.`):** Para comandos que requieren un contexto (`info`, `run`, `start`, etc.), si no proporcionas uno, `axes` usa automáticamente `.` (el proyecto en el directorio actual o su primer ancestro).
+* **Navegación:** Puedes usar `..` para referirte a un proyecto padre, `*` para el último hijo usado, y alias como `g!` para el proyecto global.
 
 ---
 
@@ -54,26 +54,26 @@ Inicializa `axes` en el directorio actual, creando una estructura `.axes/` y reg
 axes init [opciones...]
 ```
 
-#### **Argumentos y Flags**
+#### **Argumentos y Banderas**
 
-| Flag                   | Descripción                                                                              | Requerido |
-| :--------------------- | :--------------------------------------------------------------------------------------- | :-------- |
-| `--parent <contexto>`  | El contexto del proyecto que será el padre del nuevo. Por defecto es `global`.             | No        |
-| `--name <nombre>`      | El nombre del nuevo proyecto. Si no se proporciona, se usa el nombre del directorio.      | No        |
-| `--version <ver>`      | La versión inicial para el proyecto (ej. `1.0.0`).                                       | No        |
-| `--description <desc>` | Una breve descripción para el proyecto.                                                  | No        |
-| *...y otros*           | `init` acepta más *flags* para preconfigurar `[vars]` y `[env]`.                         | No        |
+| Bandera                   | Descripción                                                                              | Requerido |
+| :------------------------ | :--------------------------------------------------------------------------------------- | :-------- |
+| `--parent <contexto>`     | El contexto del proyecto que será el padre. Acepta cualquier contexto válido (`..`, `mi-app/api`, `g!`, etc.). Por defecto es `global`. | No        |
+| `--name <nombre>`         | El nombre para el nuevo proyecto. Si no se proporciona, se utiliza el nombre del directorio. | No        |
+| `--version <ver>`         | La versión inicial para el proyecto (ej., `1.0.0`).                                     | No        |
+| `--description <desc>`    | Una descripción breve para el proyecto.                                                  | No        |
+| *...y otros*              | `init` acepta más banderas para pre-configurar `[vars]` y `[env]`.                         | No        |
 
 #### **Ejemplos de Uso**
 
 ```sh
-# Inicializa un proyecto en el directorio actual, y abre el asistente preguntando por los parámetros no indicados.
+# Inicializa un proyecto en el directorio actual, y comienza el asistente preguntando por parámetros no indicados.
 cd mi-proyecto
 axes init
 
-# Inicializa un proyecto especificando su padre por contexto, y el resto de los parámetros se resolverán automáticamente.
+# Inicializa un proyecto especificando su padre por contexto, y el resto de parámetros se resolverán automáticamente.
 cd mi-servicio
-axes init --parent monorepo --autosolve
+axes init --parent mi-monorepo --autosolve
 
 # Inicializa un proyecto con todos los detalles desde la línea de comandos
 axes init --name mi-api --parent .. --version "1.0-beta" --description "La API principal."
@@ -93,17 +93,18 @@ Registra un directorio que **ya contiene** una configuración `.axes/` en el ín
 axes register [<ruta>] [--autosolve]
 ```
 
-#### **Argumentos y Flags**
+#### **Argumentos y Banderas**
 
-| Argumento/Flag      | Descripción                                                                                         | Requerido |
-| :------------------ | :-------------------------------------------------------------------------------------------------- | :-------- |
-| `<ruta>`            | La ruta al proyecto a registrar. Si se omite, se usa el directorio actual.                          | No        |
-| `--autosolve`       | Modo no interactivo. La operación fallará si encuentra cualquier conflicto (ej. un UUID existente).| No        |
+| Argumento/Bandera   | Descripción                                                                                       | Requerido |
+| :------------------ | :------------------------------------------------------------------------------------------------ | :------- |
+| `<ruta>`            | La ruta al proyecto a registrar. Por defecto es el directorio actual.                               | No       |
+| `--parent <contexto>`| Sugiere un padre para el proyecto registrado, anulando cualquier padre definido en su `project_ref.bin`. | No       |
+| `--autosolve`       | Modo no interactivo. Falla ante cualquier conflicto.                                                | No       |
 
 #### **Ejemplos de Uso**
 
 ```sh
-# Registra el proyecto en el directorio actual de forma interactiva
+# Registra el proyecto en el directorio actual interactivamente
 axes register
 
 # Registra un proyecto ubicado en otra ruta
@@ -116,7 +117,7 @@ axes register ../otro-proyecto-con-axes
 
 (Alias: `unreg`)
 
-Elimina uno o más proyectos del índice de `axes`. **Esta acción NO borra ningún archivo**, solo hace que `axes` "olvide" los proyectos.
+Elimina uno o más proyectos del índice de `axes`. **Esta acción NO elimina ningún archivo**, solo hace que `axes` "olvide" los proyectos.
 
 #### **Sintaxis**
 
@@ -128,23 +129,23 @@ axes <contexto> unregister [--recursive] [--reparent-to <nuevo_padre>]
 
 Por defecto, `unregister` **no es recursivo**. Solo desregistra el proyecto especificado en `<contexto>`, y sus hijos directos son reasignados al proyecto raíz (generalmente `global`) para evitar romper el grafo.
 
-#### **Argumentos y Flags**
+#### **Argumentos y Banderas**
 
-| Flag                     | Descripción                                                                                               | Requerido |
-| :----------------------- | :-------------------------------------------------------------------------------------------------------- | :-------- |
-| `--recursive`            | Modo recursivo. Desregistra el proyecto especificado Y **todos sus descendientes**. No se reasigna a nadie.      | No        |
-| `--reparent-to <padre>` | En lugar de mover los hijos a la raíz, los mueve al `<nuevo_padre>` especificado. No es compatible con `--recursive`. | No        |
+| Bandera                     | Descripción                                                                                               | Requerido |
+| :-------------------------- | :-------------------------------------------------------------------------------------------------------- | :-------- |
+| `--recursive`               | Modo recursivo. Desregistra el proyecto especificado Y **todos sus descendientes**. No ocurre reasignación. | No        |
+| `--reparent-to <padre>` | En lugar de mover los hijos a la raíz, los mueve al `<nuevo_padre>` especificado. No compatible con `--recursive`. | No        |
 
 #### **Ejemplos de Uso**
 
 ```sh
-# Desregistra `legacy-service`, sus hijos ahora serán hijos de `global`.
-axes mi-app/legacy-service unregister
+# Desregistra `servicio-legado`, sus hijos ahora serán hijos de `global`.
+axes mi-app/servicio-legado unregister
 
-# Desregistra `prototype` y todos sus sub-proyectos.
-axes prototype unregister --recursive
+# Desregistra `prototipo` y todos sus subproyectos.
+axes prototipo unregister --recursive
 
-# Desregistra el proyecto "contenedor" `frontend-v1`, moviendo sus hijos a `frontend-v2`.
+# Desregistra el "contenedor" `frontend-v1`, moviendo sus hijos a `frontend-v2`.
 axes frontend-v1 unregister --reparent-to frontend-v2
 ```
 
@@ -164,27 +165,27 @@ axes <contexto> delete [--recursive]
 
 #### **Comportamiento por Defecto**
 
-Al igual que `unregister`, `delete` **no es recursivo por defecto** para prevenir pérdidas accidentales de datos. Solo elimina el `.axes/` del proyecto especificado, y sus hijos son reasignados al proyecto raíz.
+Al igual que `unregister`, `delete` **no es recursivo por defecto** para prevenir la pérdida accidental de datos. Solo elimina el `.axes/` del proyecto especificado, y sus hijos son reasignados al proyecto raíz.
 
-#### **Argumentos y Flags**
+#### **Argumentos y Banderas**
 
-| Flag          | Descripción                                                                                  | Requerido |
+| Bandera       | Descripción                                                                                  | Requerido |
 | :------------ | :------------------------------------------------------------------------------------------- | :-------- |
 | `--recursive` | Modo recursivo. Elimina el `.axes/` del proyecto especificado Y **todos sus descendientes**.   | No        |
 
 #### **Ejemplos de Uso**
 
 ```sh
-# Elimina la identidad de `old-service`, preservando sus hijos.
-axes old-service delete
+# Elimina la identidad de `servicio-antiguo`, preservando a sus hijos.
+axes servicio-antiguo delete
 
-# Elimina completamente el proyecto `experiment` y todo lo que contiene del ecosistema `axes`.
-axes experiment delete --recursive
+# Elimina completamente el proyecto `experimento` y todo lo que contiene del ecosistema `axes`.
+axes experimento delete --recursive
 ```
 
 ## Inspección y Navegación
 
-Estos comandos ayudan a visualizar y comprender la estructura del árbol de proyectos y la configuración de cada uno. Son operaciones de solo lectura y completamente seguras.
+Estos comandos te ayudan a visualizar y comprender la estructura de tu árbol de proyectos y la configuración de cada uno. Son operaciones de solo lectura y completamente seguras.
 
 ### `tree`
 
@@ -200,18 +201,18 @@ axes [<contexto>] tree [-p, --paths] [-u, --uuids] [--all]
 
 #### **Comportamiento**
 
-* Si se proporciona `<contexto>`, muestra el subárbol a partir de ese proyecto.
-* Si se omite, muestra el árbol completo a partir del proyecto en el directorio actual (`.`). Para ver el árbol completo, usa `axes global tree` o `axes g! tree`.
+* Si se proporciona `<contexto>`, muestra el subárbol desde ese proyecto.
+* Si se omite, muestra el árbol completo desde el proyecto en el directorio actual (`.`). Para ver el árbol completo, usa `axes global tree` o `axes g! tree`.
 
-#### **Argumentos y Flags**
+#### **Argumentos y Banderas**
 
-| Argumento/Flag      | Descripción                                                                 | Requerido  |
+| Argumento/Bandera | Descripción                                                                 | Requerido |
 | :------------------ | :------------------------------------------------------------------------- | :-------- |
-| `<contexto>`        | El proyecto desde el que empezar a mostrar el árbol.                       | No        |
+| `<contexto>`        | El proyecto desde el cual comenzar a mostrar el árbol.                          | No        |
 | `-p`, `--paths`     | Muestra la ruta física absoluta de cada proyecto.                          | No        |
 | `-u`, `--uuids`     | Muestra el UUID único de cada proyecto.                                    | No        |
 | `--all`             | Un atajo para mostrar toda la información disponible (`--paths` y `--uuids`).| No        |
-| `-d`, `--depth <PROFUNDIDAD>` | Limita la profundidad de visualización del árbol.                                    | No        |
+| `-d`, `--depth <DEPTH>` | Limita la profundidad de la visualización del árbol.                       | No        |
 | `--check`           | Comprueba si las rutas de los proyectos existen en el sistema de archivos. | No        |
 
 #### **Ejemplos de Uso**
@@ -220,8 +221,8 @@ axes [<contexto>] tree [-p, --paths] [-u, --uuids] [--all]
 # Muestra el árbol de proyectos completo
 axes tree
 
-# Muestra el subárbol del monorepo `my-app`
-axes my-app tree
+# Muestra el subárbol del monorepo `mi-app`
+axes mi-app tree
 
 # Muestra el árbol completo con rutas y UUIDs, útil para depuración
 axes tree --all
@@ -234,7 +235,7 @@ axes .. tree -p
 
 ### `info`
 
-Muestra un resumen completo de la configuración **final y fusionada** de un proyecto, incluyendo metadatos, *scripts* heredados y variables.
+Muestra un resumen completo de la configuración **final y fusionada** de un proyecto, incluyendo metadatos, scripts heredados y variables.
 
 #### **Sintaxis**
 
@@ -242,11 +243,11 @@ Muestra un resumen completo de la configuración **final y fusionada** de un pro
 axes [<contexto>] info
 ```
 
-#### **Argumentos y Flags**
+#### **Argumentos y Banderas**
 
-| Argumento    | Descripción                                   | Requerido  |
+| Argumento   | Descripción                                   | Requerido |
 | :---------- | :-------------------------------------------- | :-------- |
-| `<contexto>` | El proyecto cuya información mostrar.         | No        |
+| `<contexto>`| El proyecto cuya información se va a mostrar. | No        |
 
 #### **Ejemplos de Uso**
 
@@ -255,17 +256,17 @@ axes [<contexto>] info
 axes global info
 
 # Muestra la configuración completa del servicio API, incluyendo
-# las variables y scripts que ha heredado de `my-app`.
-axes my-app/api info
+# las variables y scripts que ha heredado de `mi-app`.
+axes mi-app/api info
 ```
 
-La salida de `info` es tu mejor herramienta para depurar por qué un *script* se comporta de cierta manera o de dónde proviene una variable específica.
+La salida de `info` es tu mejor herramienta para depurar por qué un script se comporta de cierta manera o de dónde proviene una variable específica.
 
 ---
 
 ### `alias`
 
-Gestiona atajos (alias) para las rutas de contexto de proyectos. Los alias son globales y te permiten acceder rápidamente a proyectos anidados profundamente.
+Gestiona atajos (alias) para las rutas de contexto de tus proyectos. Los alias son globales y te permiten acceder rápidamente a proyectos anidados profundamente.
 
 #### **Sintaxis**
 
@@ -275,26 +276,26 @@ axes [<ctx>] alias <subcomando> [argumentos...]
 
 #### **Subcomandos de `alias`**
 
-| Argumento    | Descripción                                      | Requerido                  |
-| :---------- | :----------------------------------------------- | :------------------------- |
-| `set`       | Establece un nuevo alias o actualiza uno existente. | `<alias> <contexto_objetivo>` |
-| `list`      | Lista todos los alias definidos.                 | Nada                       |
-| `remove`    | Elimina un alias.                                | `<alias>`                  |
-| `check`     | Verifica todos los alias, reportando enlaces rotos | Nada                       |
+| Argumento   | Descripción                                        | Requerido                  |
+| :---------- | :------------------------------------------------- | :------------------------- |
+| `set`       | Establece un nuevo alias o actualiza uno existente. | `<alias> <contexto_destino>` |
+| `list`      | Enumera todos los alias definidos.                 | Ninguno                    |
+| `remove`    | Elimina un alias.                                  | `<alias>`                  |
+| `check`     | Verifica todos los alias, reportando enlaces rotos | Ninguno                    |
 
 **`list`**
 (Alias: `ls`)
-Muestra una tabla de todos los alias definidos. Este es el subcomando por defecto si no se especifica ninguno.
+Muestra una tabla de todos los alias definidos. Este es el subcomando predeterminado si no se especifica ninguno.
 
 * **Sintaxis:** `axes alias [list]`
 
 **`set`**
 Crea un nuevo alias o actualiza uno existente.
 
-* **Sintaxis:** `axes alias set <nombre_alias> <contexto_objetivo>`
+* **Sintaxis:** `axes alias set <nombre_alias> <contexto_destino>`
 * **Argumentos:**
-  * `<nombre_alias>`: El nombre del atajo (ej. `api`, `frontend`). No incluyas el `!`.
-  * `<contexto_objetivo>`: La ruta completa del proyecto al que apuntará el alias.
+  * `<nombre_alias>`: El nombre del atajo (ej., `api`, `frontend`). No incluyas el `!`.
+  * `<contexto_destino>`: La ruta completa del proyecto al que apuntará el alias.
 
 **`remove`**
 (Alias: `rm`)
@@ -306,8 +307,8 @@ Elimina un alias.
 
 #### **Notas Importantes**
 
-* Los alias se usan añadiendo un `!` al final. Por ejemplo, si creas `axes alias set api my-monorepo/services/main-api`, puedes usarlo con `axes api! info`.
-* El alias `g!` es un alias especial por defecto que siempre apunta al proyecto raíz. Se puede modificar o eliminar, pero se mostrará una advertencia.
+* Los alias se utilizan añadiendo un `!` al final. Por ejemplo, si creas `axes alias set api mi-monorepo/services/main-api`, puedes usarlo con `axes api! info`.
+* El alias `g!` es un alias especial por defecto que siempre apunta al proyecto raíz. Puede ser modificado o eliminado, pero se mostrará una advertencia.
 
 #### **Ejemplos de Uso**
 
@@ -316,7 +317,7 @@ Elimina un alias.
 axes alias
 
 # Crea un atajo para un servicio anidado
-axes alias set api my-monorepo/services/api-v2
+axes alias set api mi-monorepo/services/api-v2
 
 # Usa el nuevo alias
 axes api! test
@@ -325,40 +326,47 @@ axes api! test
 axes alias rm api
 ```
 
-## Interacción y Ejecución del Proyecto
+## Interacción y Ejecución de Proyectos
 
-Estos son los comandos principales que usarás en tu flujo de trabajo diario para ejecutar tareas, iniciar entornos y abrir tus proyectos.
+Estos son los comandos principales que utilizarás en tu flujo de trabajo diario para ejecutar tareas, iniciar entornos y abrir tus proyectos.
 
 ### `run`
 
-Ejecuta un *script* definido en la sección `[scripts]` del `axes.toml` de un proyecto. Este es el comando más potente y versátil de `axes`.
+Ejecuta un script definido en el `axes.toml` de un proyecto. Este es el comando más potente y utilizado de `axes`.
 
-#### **Sintaxis**
+#### **Sintaxis (Gramática Universal)**
+
+La forma recomendada de ejecutar un script es utilizando la gramática universal, que se siente como un comando nativo:
 
 ```sh
-axes [<contexto>] run <nombre_script> [parámetros...]
-# O:
 axes [<contexto>]/<nombre_script> [parámetros...]
 ```
 
-#### **Argumentos y Flags**
+Este es un atajo ergonómico para la forma más explícita:
 
-| Argumento          | Descripción                                                                  | Requerido  |
-| :---------------- | :--------------------------------------------------------------------------- | :-------- |
-| `<contexto>`       | El contexto del proyecto en el que se ejecutará el *script*. (Implícitamente `.` si se omite). | No       |
-| `<nombre_script>`  | El nombre del *script* a ejecutar (la clave bajo la tabla `[scripts]`).     | Sí       |
-| `[parámetros...]` | Cualquier argumento adicional que se pasará al *script*.                  | No        |
+```sh
+axes [<contexto>] run <nombre_script> [parámetros...]
+```
+
+#### **Argumentos y Banderas**
+
+| Argumento         | Descripción                                                                  |
+| :---------------- | :--------------------------------------------------------------------------- |
+| `<contexto>`      | El contexto del proyecto. Por defecto es `.` (proyecto actual) si se omite.  |
+| `<nombre_script>` | El nombre del script a ejecutar.                                             |
+| `[parámetros...]` | Cualquier argumento adicional pasado directamente al motor de parámetros del script. |
+| `--dry-run`       | Una bandera especial que imprime los comandos que *se ejecutarían* para la plataforma actual, sin ejecutarlos. Debe pasarse antes de los parámetros. |
 
 #### **Funcionalidad Clave**
 
-El comando `run` es orquestado por un potente motor de expansión de texto. Dentro de tus *scripts*, puedes usar una sintaxis especial `<...>` para:
+El comando `run` está orquestado por un potente motor de expansión de texto. Dentro de tus scripts, puedes usar una sintaxis especial `<...>` para:
 
 * **Incluir variables:** `<vars::mi_variable>`
-* **Componer otros *scripts*:** `<scripts::otro_script>`
+* **Componer otros scripts:** `<scripts::otro_script>`
 * **Ejecutar comandos y sustituir su salida:** `<run('git rev-parse --short HEAD')>`
-* **Pasar parámetros de la CLI de forma estructurada:** `<params::0>`, `<params::fl(map='--flag', default='some', required)>`, `<params>`
+* **Pasar parámetros de CLI de forma estructurada:** `<params::0>`, `<params::fl(map='--flag', default='some', required)>`, `<params>`
 
-> **Nota:** El sistema de *scripting* y parámetros es la característica más profunda de `axes`. Para una guía completa con ejemplos, consulta el **[Dominando `axes.toml` (`AXES_TOML_GUIDE.md`)](./AXES_TOML_GUIDE.md)**.
+> **Nota:** El sistema de scripting y parámetros es la característica más profunda de `axes`. Para una guía completa con ejemplos, consulta **[Dominando `axes.toml` (`AXES_TOML_GUIDE.md`)](./AXES_TOML_GUIDE.md)**.
 
 #### **Ejemplos de Uso**
 
@@ -366,23 +374,23 @@ El comando `run` es orquestado por un potente motor de expansión de texto. Dent
 # Ejecuta el script 'build' en el proyecto actual (usando atajo)
 axes build
 
-# Ejecuta el script 'build' en el proyecto `my-app/frontend`
-axes my-app/frontend run build
+# Ejecuta el script 'build' en el proyecto `mi-app/frontend`
+axes mi-app/frontend run build
 
-# Ejecuta el script 'test' y le pasa un parámetro
+# Ejecuta el script 'test' y pasa un parámetro
 # (asumiendo que `test` usa `<params>` o `<params::0>`)
-axes my-app/api/test tests/unit/test_auth.py
+axes mi-app/api/test tests/unit/test_auth.py
 
-# Ejecuta un script pasándole un flag
+# Ejecuta un script pasando una bandera
 # (asumiendo que `deploy` usa `<params::production>`)
-axes my-app/deploy --production
+axes mi-app/deploy --production
 ```
 
 ---
 
 ### `start`
 
-Inicia una sesión de *shell* interactiva y persistente dentro del contexto de un proyecto. Es la herramienta ideal para un trabajo enfocado.
+Inicia una sesión de shell interactiva y persistente dentro del contexto de un proyecto. Es la herramienta ideal para el trabajo enfocado.
 
 #### **Sintaxis**
 
@@ -390,39 +398,40 @@ Inicia una sesión de *shell* interactiva y persistente dentro del contexto de u
 axes [<contexto>] start [parámetros...]
 ```
 
-#### **Argumentos y Flags**
+#### **Argumentos y Banderas**
 
-| Argumento          | Descripción                                                                         | Requerido |
-| :---------------- | :---------------------------------------------------------------------------------- | :-------- |
-| `<contexto>`       | El proyecto en el que iniciar la sesión. (Implícitamente `.` si se omite).             | No       |
-| `[parámetros...]` | Cualquier argumento adicional que se pasará a los *hooks* `at_start` y `at_exit`. | No       |
+| Argumento         | Descripción                                                                         | Requerido |
+| :---------------- | :---------------------------------------------------------------------------------- | :------- |
+| `<contexto>`      | El proyecto en el que iniciar la sesión. (Implícitamente `.` si se omite).          | No       |
+| `[parámetros...]` | Cualquier argumento adicional que se pasará a los hooks `at_start` y `at_exit`.     | No       |
+| `--dry-run`       | Imprime los comandos de hook que *se ejecutarían*, sin iniciar una sesión.          | No       |
 
 #### **Comportamiento de la Sesión**
 
 Al ejecutar `start`, `axes` hace lo siguiente:
 
-1. **Resuelve y Valida Parámetros:** `axes` analiza los `[parámetros...]` proporcionados y los valida contra las definiciones `<params::...>` encontradas en los *hooks* de `at_start` y `at_exit`.
-2. **Ejecuta el Hook `at_start`:** Se ejecuta el *script* `at_start`, inyectando los parámetros resueltos.
-3. **Inicia el Shell:** Se lanza el *shell* interactivo con todas las variables de `[env]` inyectadas.
+1. **Resuelve y Valida Parámetros:** `axes` analiza los `[parámetros...]` proporcionados y los valida contra las definiciones `<params::...>` encontradas en los hooks `at_start` y `at_exit`.
+2. **Ejecuta el Hook `at_start`:** El script `at_start` se ejecuta, inyectando los parámetros resueltos.
+3. **Inicia el Shell:** El shell interactivo se lanza con todas las variables `[env]` inyectadas.
 
-Una vez dentro, puedes ejecutar comandos `axes` sin especificar el contexto. Al salir de la sesión con `exit`, se ejecuta el *hook* `at_exit`, que también recibe los mismos `[parámetros...]` resueltos al inicio de la sesión.
+Una vez dentro, puedes ejecutar comandos `axes` sin especificar el contexto. Al salir de la sesión con `exit`, se ejecuta el hook `at_exit`, que también recibe los mismos `[parámetros...]` resueltos al inicio de la sesión.
 
 #### **Ejemplos de Uso**
 
 ```sh
-# Inicia una sesión simple en el servicio de API
-axes my-app/api start
+# Inicia una sesión simple en el servicio API
+axes mi-app/api start
 
 # Asumiendo un `at_start` como: "docker-compose up -d <params::service>"
-# Inicia una sesión y especifica qué servicio levantar
-axes my-app/api start --service web
+# Inicia una sesión y especifica qué servicio activar
+axes mi-app/api start --service web
 ```
 
 ---
 
 ### `open`
 
-Abre el directorio raíz de un proyecto utilizando una aplicación preconfigurada.
+Abre el directorio raíz de un proyecto usando una aplicación preconfigurada.
 
 #### **Sintaxis**
 
@@ -430,28 +439,36 @@ Abre el directorio raíz de un proyecto utilizando una aplicación preconfigurad
 axes [<contexto>] open [<clave_app>] [parámetros...]
 ```
 
-#### **Argumentos y Flags**
+#### **Argumentos y Banderas**
 
-| Argumento         | Descripción                                                                          | Requerido |
-| :---------------- | :----------------------------------------------------------------------------------- | :-------- |
-| `<contexto>`       | El proyecto a abrir. (Implícitamente `.` si se omite).                               | No       |
-| `[<clave_app>]`     | La clave de la aplicación a usar (ej. `code`). Si se omite, se usa la clave `default`. | No       |
-| `[parámetros...]` | Cualquier argumento adicional que se pasará al script de `clave_app`. | No       |
+| Argumento         | Descripción                                                                              | Requerido |
+| :---------------- | :--------------------------------------------------------------------------------------- | :------- |
+| `<contexto>`      | El proyecto a abrir. (Implícitamente `.` si se omite).                                   | No       |
+| `[<clave_app>]`   | La clave de la aplicación a usar (ej., `code`). Si se omite, se usa la clave `default`. | No       |
+| `[parámetros...]` | Cualquier argumento adicional que se pasará al script de la `clave_app`.                 | No       |
 
 #### **Configuración**
 
-Las aplicaciones se definen en la sección `[options.open_with]` de tu `axes.toml`. Cada entrada es un **script completo** que puede ser una cadena, una secuencia o una tabla con una descripción.
+Las aplicaciones se definen en la sección `[options.open_with]` de tu `axes.toml`. Cada entrada es un **script completo de `axes`**, lo que permite lógica específica de la plataforma, descripciones y parametrización.
 
 ```toml
 [options.open_with]
-# Atajo simple de cadena
-edit = "code \"<path>\""
+# Establece la acción por defecto cuando se ejecuta `axes open` sin clave_app.
+default = "vsc"
 
-# Atajo con descripción y que acepta parámetros
-terminal = { desc = "Abre un terminal en una subcarpeta.", run = "wt -d \"<path>/<params::0(default='.')>\"" }
+[options.open_with.vsc]
+desc = "Abre el proyecto en Visual Studio Code."
+run = 'code "<path>"'
 
-# Establece la acción por defecto
-default = "edit"
+[options.open_with.terminal]
+desc = "Abre un nuevo terminal en la raíz del proyecto."
+run = 'wt -d "<path>/<params::0(default=".")>"' # Ejemplo para Windows Terminal
+
+[options.open_with.explorer]
+desc = "Abre el proyecto en el explorador de archivos del sistema."
+windows = "explorer \"<path>\""
+macos = "open \"<path>\""
+default = "xdg-open \"<path>\"" # Para Linux
 ```
 
 #### **Ejemplos de Uso**
@@ -460,17 +477,17 @@ default = "edit"
 # Abre el proyecto actual con la aplicación por defecto (implícitamente axes . open)
 axes open
 
-# Abre explícitamente el proyecto `my-app/api` en el explorador de archivos
-# (Asumiendo que existe una clave 'files')
-axes my-app/api open files
+# Abre explícitamente el proyecto `mi-app/api` en el explorador de archivos
+# (Asumiendo que la clave 'files' está definida)
+axes mi-app/api open files
 
 # Usa el atajo 'terminal' y pasa un parámetro para abrir en el subdirectorio 'src'
-axes my-app/frontend open terminal src
+axes mi-app/frontend open terminal src
 ```
 
 ## Refactorización del Árbol de Proyectos
 
-Estos comandos permiten modificar la estructura de tu ecosistema `axes`, cambiando las relaciones entre proyectos y sus nombres. Son operaciones potentes que actualizan el índice global de `axes`.
+Estos comandos te permiten modificar la estructura de tu ecosistema `axes`, cambiando las relaciones entre proyectos y sus nombres. Estas son operaciones potentes que actualizan el índice global de `axes`.
 
 ### `link`
 
@@ -482,28 +499,28 @@ Cambia el padre de un proyecto existente, moviéndolo a una nueva ubicación en 
 axes <contexto_hijo> link <contexto_nuevo_padre>
 ```
 
-#### **Argumentos y Flags**
+#### **Argumentos y Banderas**
 
-| Argumento                   | Descripción                                       | Requerido  |
-| :-------------------------- | :------------------------------------------------ | :-------- |
-| `<contexto_hijo>`           | El proyecto que deseas mover.                     | Sí       |
-| `<contexto_nuevo_padre>`     | El proyecto que se convertirá en su nuevo padre.  | Sí       |
+| Argumento                  | Descripción                                       | Requerido |
+| :------------------------- | :------------------------------------------------ | :-------- |
+| `<contexto_hijo>`          | El proyecto que deseas mover.                     | Sí        |
+| `<contexto_nuevo_padre>`   | El proyecto que se convertirá en su nuevo padre. | Sí        |
 
 #### **Validaciones de Seguridad**
 
-`link` es una operación segura. `axes` evitará cualquier acción que pueda corromper el grafo de proyectos, fallando con un error claro si intentas:
+`link` es una operación segura. `axes` prevendrá cualquier acción que pueda corromper el grafo del proyecto, fallando con un error claro si intentas:
 
-* **Crear un ciclo:** Mover un proyecto para que se convierta en su propio descendiente (ej. `axes A link A/B`).
-* **Crear una colisión de nombre:** Mover un proyecto a un nuevo padre que ya tiene un hijo con el mismo nombre.
+* **Crear un ciclo:** Mover un proyecto para que se convierta en su propio descendiente (ej., `axes A link A/B`).
+* **Crear una colisión de nombres:** Mover un proyecto a un nuevo padre que ya tiene un hijo con el mismo nombre.
 
 #### **Ejemplos de Uso**
 
 ```sh
-# `legacy-service` era hijo de `global`, ahora será hijo de `monorepo-v2`.
-axes legacy-service link monorepo-v2
+# `servicio-legado` era hijo de `global`, ahora será hijo de `monorepo-v2`.
+axes servicio-legado link monorepo-v2
 
-# Mueve `admin-panel` para que sea hijo del servicio `api` en lugar de `frontend`.
-axes mi-app/frontend/admin-panel link mi-app/api
+# Mueve el `panel-admin` para que sea hijo del servicio `api` en lugar de `frontend`.
+axes mi-app/frontend/panel-admin link mi-app/api
 ```
 
 ---
@@ -518,21 +535,21 @@ Cambia el nombre de un proyecto. Este es el nombre utilizado en las rutas de con
 axes <contexto> rename <nuevo_nombre>
 ```
 
-#### **Argumentos y Flags**
+#### **Argumentos y Banderas**
 
-| Argumento          | Descripción                                   | Requerido  |
+| Argumento         | Descripción                                   | Requerido |
 | :---------------- | :-------------------------------------------- | :-------- |
-| `<contexto>`       | El proyecto que deseas renombrar.               | Sí       |
-| `<nuevo_nombre>`   | El nuevo nombre para el proyecto.                 | Sí       |
+| `<contexto>`      | El proyecto que deseas renombrar.             | Sí        |
+| `<nuevo_nombre>`  | El nuevo nombre para el proyecto.             | Sí        |
 
 #### **Reglas de Nomenclatura**
 
-El `<nuevo_nombre>` debe seguir ciertas reglas para asegurar la estabilidad:
+El `<nuevo_nombre>` debe seguir ciertas reglas para garantizar la estabilidad:
 
-* **No puede contener espacios** ni caracteres de ruta (`/`, `\`).
-* **No puede ser un nombre reservado** para navegación (ej. `.` , `..`, `*`).
+* **No puede contener espacios** o caracteres de ruta (`/`, `\`).
+* **No puede ser un nombre reservado** para navegación (ej., `.` , `..`, `*`).
 
-`axes` también te advertirá si intentas usar nombres que, aunque válidos, no son recomendables (ej. si empiezan con `-`). Renombrar el proyecto raíz `global` está permitido pero requerirá una confirmación adicional debido a su importancia.
+`axes` también te advertirá si intentas usar nombres que, aunque válidos, no son recomendados (ej., que empiecen por `-`). Renombrar el proyecto raíz `global` está permitido, pero requerirá una confirmación adicional debido a su importancia.
 
 #### **Ejemplos de Uso**
 
@@ -540,15 +557,22 @@ El `<nuevo_nombre>` debe seguir ciertas reglas para asegurar la estabilidad:
 # Renombra un proyecto de `api-v1` a `api-legacy`.
 axes mi-app/api-v1 rename api-legacy
 
-# El nuevo contexto para acceder a él será ahora `my-app/api-legacy`.
-axes my-app/api-legacy info
+# El nuevo contexto para acceder a él será ahora `mi-app/api-legacy`.
+axes mi-app/api-legacy info
 ```
 
 ---
 
 ### `repair`
 
-Reporta errores en el sistema de proyectos y/o en los archivos de proyecto, y ofrece repararlos automáticamente.
+Escanea el sistema de archivos para encontrar y corregir inconsistencias entre el `GlobalIndex` y el estado en disco de tus proyectos.
+
+#### **Funcionalidad**
+
+Actualmente, `repair` puede detectar y ofrecer corregir:
+
+* **Desajustes de Ruta:** Cuando el directorio de un proyecto ha sido movido o renombrado, `repair` detecta que la ruta en el índice está obsoleta y la actualiza a la nueva ubicación correcta.
+* *(Las capacidades futuras incluirán la detección de proyectos huérfanos, archivos `project_ref.bin` corruptos, etc.)*
 
 #### **Sintaxis**
 
@@ -556,27 +580,27 @@ Reporta errores en el sistema de proyectos y/o en los archivos de proyecto, y of
 axes [ruta] repair [args...]
 ```
 
-#### **Argumentos y Flags**
+#### **Argumentos y Banderas**
 
-| Argumento            | Descripción                                                             | Requerido |
+| Argumento           | Descripción                                                             | Requerido |
 | :------------------ | :---------------------------------------------------------------------- | :------- |
-| `--recursive`, `-r` | Explora recursivamente todos los proyectos en los subdirectorios        | No       |
+| `--recursive`, `-r` | Explora recursivamente todos los proyectos en subdirectorios.             | No       |
 | `--depth`, `-d`     | (uint) Profundidad máxima de búsqueda.                                  | No       |
 | `--fix`             | Aplica la solución propuesta automáticamente a los errores detectados.   | No       |
 
 #### **Ejemplos de Uso**
 
 ```sh
-# Escanea el directorio actual e informa de cualquier inconsistencia encontrada.
+# Escanea el directorio actual y reporta cualquier inconsistencia encontrada.
 axes repair
 
-# Escanea el directorio actual y los subdirectorios e informa de cualquier inconsistencia encontrada.
+# Escanea el directorio actual y subdirectorios y reporta cualquier inconsistencia encontrada.
 axes repair --recursive
 
-# Escanea el directorio actual y los subdirectorios y repara automáticamente cualquier inconsistencia encontrada.
+# Escanea el directorio actual y subdirectorios y repara automáticamente cualquier inconsistencia encontrada.
 axes repair --recursive --fix
 ```
 
 ---
 
-Este documento proporciona una referencia completa de los comandos disponibles. Para aprender a escribir flujos de trabajo potentes, la siguiente lectura recomendada es la **[Guía de `axes.toml` (`AXES_TOML_GUIDE.md`)](./AXES_TOML_GUIDE.md)**.
+Este documento proporciona una referencia completa de los comandos disponibles. Para aprender a escribir flujos de trabajo potentes, la siguiente lectura recomendada es la **[Guía de `axes.toml` (AXES_TOML_GUIDE.md)](./AXES_TOML_GUIDE.md)**.
