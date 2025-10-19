@@ -77,7 +77,7 @@ As the number of commands in a script increases, the architectural advantages of
   <sub>
     <b>TLE:</b> Time Limit Exceeded. The tool failed to complete the benchmark in a reasonable time.<br>
     Benchmarks executed with <code>hyperfine</code> and <code>/usr/bin/time -v</code> on Linux (WSL2 on Windows 11, i7-1165G7, 16GB RAM).<br>
-    Full methodology and results are in our <a href="./examples/BENCHMARKS.md"><code>BENCHMARKS.md</code></a>.
+    Full methodology and results are in our <a href="./BENCHMARKS.md"><code>BENCHMARKS.md</code></a>.
   </sub>
 </p>
 
