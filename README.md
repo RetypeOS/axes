@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  <strong>axes</strong> is a high-performance workflow orchestrator that unifies complex, polyglot projects under a simple, consistent, and ultra-fast command-line interface. It acts as an abstraction layer over your existing tools—from <code>npm</code> and <code>docker</code> to other <i>task runners</i>—providing a universal command language for your entire ecosystem.
+  <strong>axes</strong> is a high-performance task-workflow orchestrator that unifies complex, polyglot projects under a simple, consistent, and ultra-fast command-line interface. It acts as an abstraction layer over your existing tools—from <code>npm</code> and <code>docker</code> to other <i>task runners</i>—providing a universal command language for your entire ecosystem.
 </p>
 
 ---
@@ -40,37 +40,58 @@ This constant cognitive load breaks workflow and slows down teams. Simple task r
 
 ### The Solution: Performance and Orchestration, Unified
 
-For years, developers have faced a false dilemma: use a simple, fast runner with limited features, or a powerful but slow and complex orchestrator. **`axes` eliminates this compromise.**
+For years, developers have faced a false dilemma: use a simple, fast runner, or a powerful but slow orchestrator. **`axes` eliminates this compromise.**
 
-We deliver advanced orchestration capabilities at a speed that is not just competitive, but class-leading. Our architecture is designed to scale with your project's complexity, maintaining elite performance where other tools falter.
+Our architecture is engineered not just for speed, but for **scalability**. `axes` maintains elite performance and minimal resource usage even as project complexity grows, a domain where other tools falter. The following benchmarks, executed on Linux (WSL2), demonstrate this principle.
 
-| Command (minimal start time)        | Average Time (Mean ± σ) | Relative Speed |
-|:------------------------------------|:-----------------------:|:--------------:|
-| **`axes --version`**                | **17.1 ms ± 0.9 ms**    | **1.00**       |
-| `just --version`                    | 32.7 ms ± 2.8 ms        | 1.92x Slower   |
-| `task --version`                    | 107.1 ms ± 11.8 ms      | 6.28x Slower   |
+#### **Execution Performance & Memory Efficiency at Scale**
 
-| Command (Hot Execution, High Load)  | Average Time (Mean ± σ) | Relative Speed |
-|:------------------------------------|:-----------------------:|:--------------:|
-| **`axes <script>`**                 | **40.2 ms ± 1.1 ms**    | **1.00**       |
-| `just <script>`                     | 73.6 ms ± 2.7 ms        | 1.83x Slower   |
-| `task <script>`                     | 855.1 ms ± 50.2 ms      | 21.28x Slower  |
+As the number of commands in a script increases, the architectural advantages of `axes` become clear.
 
-*In an extreme stress test with 100,000+ commands, `axes` completes in **~118 ms**, while `task` takes over **33 seconds**—a performance difference of nearly **300x**.*
+| Benchmark Scenario |    Tool    | Time (Mean)  |  Peak Memory  |
+|:-------------------|:----------:|:------------:|:-------------:|
+|    **Low Load**    |   `make`   | **~1.9 ms**  | **~2.4 MB**   |
+|   (100 commands)   | **`axes`** |   ~3.6 ms    |   ~4.6 MB     |
+|                    |   `task`   |   ~21.5 ms   |   ~20.4 MB    |
+|                    |   `just`   |   ~38.4 ms   |   ~4.5 MB     |
+|     ―――――――――      |     ――     |    ――――――    |    ――――――     |
+|  **Medium Load**   | **`axes`** | **~4.1 ms**  | **~5.5 MB**   |
+|   (1k commands)    |   `make`   |   ~4.5 ms    |   ~2.7 MB     |
+|                    |   `just`   |   ~42.2 ms   |   ~6.1 MB     |
+|                    |   `task`   |   ~58.8 ms   |   ~27.5 MB    |
+|     ―――――――――      |     ――     |    ――――――    |    ――――――     |
+|   **High Load**    | **`axes`** | **~10.5 ms** | **~10.0 MB**  |
+|   (10k commands)   |   `just`   |   ~73.9 ms   |   ~23.1 MB    |
+|                    |   `make`   |   ~172.8 ms  |   ~5.9 MB     |
+|                    |   `task`   |   ~740.2 ms  |   ~107.6 MB   |
+|     ―――――――――      |     ――     |    ――――――    |    ――――――     |
+|  **Stress Test**   |   `axes`   |   ~79.6 ms   |   ~57.6 MB    |
+|  (100k commands)   | **`axes`(divided)** | **~54.0 ms** | **~56.2 MB**  |
+|                    |   `just`   |   ~359.1 ms  |   ~190.7 MB   |
+|                    |   `make`   | *TLE (>90s)* |   ~37.6 MB    |
+|                    |   `task`   | *TLE (>90s)* |   ~903.1 MB   |
 
-> Benchmarks executed with `hyperfine` on Windows 11 (i7-1165G7, 16GB RAM, NVMe SSD).
-> The "High Load" test involves a script with 10,000 commands. Full methodology and results for all platforms are in our
-> [BENCHMARKS.md](./examples/BENCHMARKS.md) file.
+> Note: "`axes`(divided)" means that the scripts were split, 50k for itself and 50k for its first ancestor. This demonstrates that the more you divide tasks among superior parent projects, the better the speed will be.
+
+<p align="center">
+  <sub>
+    <b>TLE:</b> Time Limit Exceeded. The tool failed to complete the benchmark in a reasonable time.<br>
+    Benchmarks executed with <code>hyperfine</code> and <code>/usr/bin/time -v</code> on Linux (WSL2 on Windows 11, i7-1165G7, 16GB RAM).<br>
+    Full methodology and results are in our <a href="./examples/BENCHMARKS.md"><code>BENCHMARKS.md</code></a>.
+  </sub>
+</p>
+
+The data reveals a clear architectural advantage:
+
+- **Scalability:** While `make` is fastest for trivial tasks, its performance degrades exponentially with complexity. `axes` exhibits near-linear scaling, making it dramatically faster and the only reliable option for large-scale orchestration.
+- **Memory Efficiency:** `axes` is exceptionally lightweight. In the most demanding test, it uses **3.3x less memory** than `just` and a staggering **15.7x less memory** than `task`, which consumes nearly a gigabyte of RAM before failing.
 
 This level of performance is the direct result of an **architecture obsessed with efficiency**:
 
-1. **Lazy and Parallel Loading:** `axes` reads and compiles only the configuration it needs, and it does so concurrently, leveraging all available CPU cores.
+1. **Ahead-of-Time (AOT) Compilation to a Universal AST:** Your `axes.toml` files are compiled once into a platform-agnostic binary cache.
+2. **Just-in-Time (JIT) Optimized Execution:** Subsequent runs deserialize the cache and perform an ultra-fast, in-memory specialization for your OS, eliminating parsing and decision-making overhead from the hot path.
 
-2. **Ahead-of-Time (AOT) Compilation to a Universal AST:** On the first run, your `axes.toml` files are compiled into a highly optimized, platform-agnostic **Abstract Syntax Tree (AST)**. This universal AST is then saved in a compact binary cache, which is **100% portable across operating systems** (Windows, macOS, Linux).
-
-3. **Just-in-Time (JIT) Optimized Execution:** Every subsequent ("hot") execution bypasses slow text parsing entirely. `axes` deserializes the universal AST from the binary cache, performs an ultra-fast in-memory **"JIT" specialization** for your current OS, and executes the resulting flat command list instantly.
-
-**The result is an engineering guarantee: you pay the orchestration cost once. You get maximum, scalable performance on every run after that.**
+**The result is an engineering guarantee: you get scalable performance and best-in-class memory efficiency, no matter how complex your workflows become.**
 
 - ⚙️ **[In-depth Architecture Analysis (`TECHNICAL.md`)](./TECHNICAL.md):** For those interested in the engineering behind our performance.
 

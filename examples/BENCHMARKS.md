@@ -1,175 +1,117 @@
+# `axes` Performance Benchmarks
 
-# Performance Analysis (Benchmarks with `hyperfine`) [OUTDATED]
+This document provides a comprehensive analysis of `axes`'s performance compared to other popular task runners. The goal is to empirically validate our design philosophy: **delivering advanced orchestration at class-leading speed and efficiency.**
 
-## 1. Introduction and Methodology
+All benchmarks were executed using `hyperfine` for statistical accuracy and `/usr/bin/time -v` for detailed resource usage analysis.
 
-This document presents a comparative performance analysis of `axes` against the task runners `just` and `make`, using the statistical benchmarking tool `hyperfine`. The objective is to rigorously evaluate the execution latency and scalability of each tool under different workloads.
+## Test Environment
 
-Unlike a single timing measurement, `hyperfine` executes each command multiple times (`--runs 100`) after a warm-up phase (`--warmup 10`), providing a `mean` and standard deviation (`± σ`). This method minimizes the impact of system fluctuations and offers a much more accurate view of each tool's real performance in a "hot run" scenario.
+* **OS:** Linux (via WSL2 on Windows 11)
+* **Hardware:** Intel Core i7-1165G7, 16GB RAM, NVMe SSD
+* **Tools:**
+  * `axes`: v0.3.0-beta
+  * `just`: 1.43.0
+  * `make`: GNU Make 4.3
+  * `task`: v3.45.4
 
-For `axes`, a "hot run" implies that the Abstract Syntax Tree (AST) binary cache has already been generated in a previous run, simulating the most common use case in a developer's workflow.
+## The Benchmark Harness: Dogfooding `axes`
 
-### Test Scenarios
+To ensure our benchmarks are reproducible and easy to run, we've created a powerful benchmark harness **using `axes` itself**. The configuration lives in [`examples/stress_tests/.axes/axes.toml`](./stress_tests/.axes/axes.toml) and is a perfect example of advanced `axes` features.
 
-The following scenarios were defined, varying the number of declared scripts in each tool's configuration file:
+### How to Run the Benchmarks Yourself
 
-* **Low:** 100 basic scripts.
-* **Mid:** 1,000 basic scripts.
-* **High:** 10,000 basic scripts.
-* **Big:** 100,000 basic scripts.
-* **Divided:** 100,000 scripts split across two projects with inheritance (`axes` only).
+1. **Navigate to the examples directory:**
 
-## 2. Results Analysis
+    ```sh
+    cd examples/
+    ```
 
-### 2.1. Latency Comparison (Mean Execution Time)
+2. **Use the `hyperfine` script:** The `stress_tests` project defines a `hyperfine` script that acts as a flexible wrapper. You can select which tests to run using flags.
 
-Mean latency is the primary metric for evaluating the agility of the tool in daily use.
+    ```sh
+    # Run a comparative benchmark for the "high load" scenario
+    # -ah: axes-high, -jh: just-high, -mh: make-high, -th: task-high
+    # --high: Use the high-intensity hyperfine settings (100 runs)
+    axes stress_tests/hyperfine -ah -jh -mh -th --high
+    ```
 
-| Scenario | `axes` (ms ± σ) | `just` (ms ± σ) | `make` (ms ± σ) |
-| :-------- | :-------------: | :-------------: | :-------------: |
-| **Low** (100) | 3.4 ± 0.2 | 40.3 ± 2.5 | **1.9 ± 0.2** |
-| **Mid** (1,000) | **3.9 ± 0.2** | 46.7 ± 2.2 | 4.5 ± 0.3 |
-| **High** (10,000) | **9.4 ± 0.5** | 106.2 ± 3.6 | 170.6 ± 4.2 |
-| **Big** (100,000) | **65.6 ± 2.1** | 650.6 ± 14.5 | N/A* |
+3. **Use the `time` script:** To get detailed memory and resource usage for a single run.
 
-<small><i>*N/A: `make` was omitted from the `hyperfine` test in the "Big" scenario due to its extremely high latency (over 100 seconds), documented in previous tests, which makes it unviable for fast statistical benchmarking.</i></small>
+    ```sh
+    # Get resource usage for axes on the "high load" test
+    axes stress_tests/time -ah
+    ```
 
-#### Scalability Analysis and Inflection Points
+## 1. Startup Latency
 
-1. **`Low` Scenario (100 scripts):** In very small configurations, `make` is the undisputed leader at ~1.9ms. Its simplicity and maturity as a C binary give it an advantage in minimal startup overhead. `axes` follows closely at ~3.4ms, demonstrating extremely low baseline latency. `just` is noticeably slower, with a baseline latency of ~40.3ms.
+Startup time is critical for a CLI tool's "feel." This benchmark measures the time taken to simply print the version (`--version`).
 
-2. **`Mid` Scenario (1,000 scripts): The First Inflection Point.** At only 1,000 scripts, `axes` already outperforms `make` (`3.9ms` vs `4.5ms`). This is the first indication that the text parsing cost of `make` is starting to become a relevant factor, while the binary deserialization cost of `axes` remains almost constant.
+| Tool | Average Time (Mean ± σ) | Relative Speed |
+| :--- | :---: | :---: |
+| `make` | **813.1 µs ± 54.7 µs** | **1.21x Faster** |
+| `just` | 980.6 µs ± 127.2 µs | 1.00x |
+| **`axes`** | **982.9 µs ± 94.5 µs** | **1.00x** (Baseline) |
+| `task` | 13.7 ms ± 0.5 ms | 13.9x Slower |
 
-3. **`High` Scenario (10,000 scripts): Architectural Dominance.** At 10,000 scripts, the architectural advantage of `axes` is overwhelming.
-    * `axes` maintains an exceptional latency of **9.4ms**.
-    * `just` exceeds 100ms.
-    * `make` exceeds 170ms.
-    * According to `hyperfine` data, at this point, `axes` is **11.3 times faster than `just`** and **18.2 times faster than `make`**. The Ahead-of-Time (AOT) compilation strategy to a binary AST proves fundamentally superior to the run-time text parsing approach at this scale.
+### Analysis
 
-4. **`Big` Scenario (100,000 scripts): Extreme Scalability.** `axes` maintains excellent performance at **65.6ms**, while `just` degrades to **650.6ms**. `axes` is almost **10 times faster than `just`** in this high-complexity scenario.
-
-### 2.2. Inheritance Engine Performance (`Divided` vs. `Big`)
-
-This benchmark is crucial as it measures the overhead (or optimization) of one of `axes`'s key features: the orchestration of nested projects.
-
-| `axes` Scenario (100,000 scripts) | Mean Time (ms ± σ) | Relative Performance |
-| :-------------------------------- | :----------------: | :------------------: |
-| **Big** (Single File) | 65.6 ± 2.1 | 1.00x |
-| **Divided** (2 Files with Inheritance) | **44.2 ± 2.0** | **1.48x Faster** |
-
-#### Inheritance Architecture Analysis
-
-The result is counter-intuitive and extremely positive: managing 100,000 scripts split across an inheritance hierarchy is almost **50% faster** than managing them in a single monolithic file.
-
-This strongly validates several architectural decisions:
-
-* **Concurrent Loading:** The `ConfigLoader` processes the two files (`parent` and `into`) in parallel using `rayon`. Concurrency in disk reading and binary cache deserialization is more efficient than processing a single, larger file sequentially.
-* **In-Memory Merge Efficiency:** The operation of merging configuration layers in the `ResolvedConfig` is computationally very cheap, proving that the complexity of inheritance introduces no performance penalty on the "hot path."
-* **Data Locality:** It is plausible that working with smaller, separate cache files results in better OS filesystem cache performance and CPU cache performance.
-
-**The conclusion is unequivocal: the orchestration engine of `axes` is not an overhead, but an optimization.**
-
-## 3. Technical Conclusions
-
-1. **Sub-linear Scalability:** While `just` and `make` show linear or worse growth in latency as configuration complexity increases, `axes` demonstrates sub-linear growth thanks to its binary AST cache architecture.
-
-2. **Validation of the AOT Model:** The strategy of "compiling" the `axes.toml` on the first run and then simply deserializing the AST on subsequent executions is fundamentally more scalable than any run-time text parsing approach.
-
-3. **Orchestration as Optimization:** Advanced features of `axes`, such as inheritance and concurrent loading, not only do not compromise performance but actively enhance it in large-scale scenarios. This positions `axes` as a unique solution that offers orchestrator capabilities with speed superior to that of simple executors.
-
-The raw benchmarks used to build the above analysis are provided below.
-
-## Benchmarks
-
->
-> *All benchmarks has divided by:*
->
-> * Low: 100 basic scripts.
-> * Mid: 1000 basic scripts.
-> * High: 10000 basic scripts.
-> * Big: 100000 basic scripts.
-> * Divided: 50000 + 50000 basic scripts divided into two inherited projects.
-
-### Hyperfine datas
-
-[.../axes/stress_tests:hyperfine]
-→ hyperfine --shell=none "axes ./low_test/script_90"     "just --justfile low_test/justfile script_90"    "make -f low_test/makefile.mk script_90"      --warmup 10 --runs 100
-Benchmark 1: axes ./low_test/script_90
-  Time (mean ± σ):       3.4 ms ±   0.2 ms    [User: 2.3 ms, System: 2.6 ms]
-  Range (min … max):     3.1 ms …   4.0 ms    100 runs
-
-Benchmark 2: just --justfile low_test/justfile script_90
-  Time (mean ± σ):      40.3 ms ±   2.5 ms    [User: 2.3 ms, System: 1.8 ms]
-  Range (min … max):    37.2 ms …  56.6 ms    100 runs
-
-Benchmark 3: make -f low_test/makefile.mk script_90
-  Time (mean ± σ):       1.9 ms ±   0.2 ms    [User: 1.3 ms, System: 0.4 ms]
-  Range (min … max):     1.7 ms …   2.4 ms    100 runs
-
-Summary
-  make -f low_test/makefile.mk script_90 ran
-    1.79 ± 0.18 times faster than axes ./low_test/script_90
-   21.15 ± 2.18 times faster than just --justfile low_test/justfile script_90
+`axes` achieves a sub-millisecond startup time, making it feel instantaneous. This is a direct result of our **explicit initialization** architecture, where costly operations like loading the global index are deferred until a command that actually needs them is run. For simple commands like `--version`, no disk I/O occurs.
 
 ---
 
-[.../axes/stress_tests:hyperfine]
-→ hyperfine --shell=none  "axes ./mid_test/script_900"     "just --justfile mid_test/justfile script_900"    "make -f mid_test/makefile.mk script_900"     --warmup 10 --runs 100
-Benchmark 1: axes ./mid_test/script_900
-  Time (mean ± σ):       3.9 ms ±   0.2 ms    [User: 1.9 ms, System: 3.5 ms]
-  Range (min … max):     3.5 ms …   4.6 ms    100 runs
+## 2. Execution Performance & Memory Efficiency at Scale
 
-Benchmark 2: just --justfile mid_test/justfile script_900
-  Time (mean ± σ):      46.7 ms ±   2.2 ms    [User: 4.5 ms, System: 5.1 ms]
-  Range (min … max):    43.6 ms …  54.1 ms    100 runs
+This is the true test of a task runner's architecture. We measure both execution time and peak memory usage across four different workloads, from a simple script to an extreme stress test.
 
-Benchmark 3: make -f mid_test/makefile.mk script_900
-  Time (mean ± σ):       4.5 ms ±   0.3 ms    [User: 3.5 ms, System: 0.7 ms]
-  Range (min … max):     4.1 ms …   5.7 ms    100 runs
+| Benchmark Scenario |    Tool    | Time (Mean)  |  Peak Memory  |
+|:-------------------|:----------:|:------------:|:-------------:|
+|    **Low Load**    |   `make`   | **~1.9 ms**  | **~2.4 MB**   |
+|   (100 commands)   | **`axes`** |   ~3.6 ms    |   ~4.6 MB     |
+|                    |   `task`   |   ~21.5 ms   |   ~20.4 MB    |
+|                    |   `just`   |   ~38.4 ms   |   ~4.5 MB     |
+|     ―――――――――      |     ――     |    ――――――    |    ――――――     |
+|  **Medium Load**   | **`axes`** | **~4.1 ms**  | **~5.5 MB**   |
+|   (1k commands)    |   `make`   |   ~4.5 ms    |   ~2.7 MB     |
+|                    |   `just`   |   ~42.2 ms   |   ~6.1 MB     |
+|                    |   `task`   |   ~58.8 ms   |   ~27.5 MB    |
+|     ―――――――――      |     ――     |    ――――――    |    ――――――     |
+|   **High Load**    | **`axes`** | **~10.5 ms** | **~10.0 MB**  |
+|   (10k commands)   |   `just`   |   ~73.9 ms   |   ~23.1 MB    |
+|                    |   `make`   |   ~172.8 ms  |   ~5.9 MB     |
+|                    |   `task`   |   ~740.2 ms  |   ~107.6 MB   |
+|     ―――――――――      |     ――     |    ――――――    |    ――――――     |
+|  **Stress Test**   |   `axes`   |   ~79.6 ms   |   ~57.6 MB    |
+|  (100k commands)   | **`axes`(divided)** | **~54.0 ms** | **~56.2 MB**  |
+|                    |   `just`   |   ~359.1 ms  |   ~190.7 MB   |
+|                    |   `make`   | *TLE (>90s)* |   ~37.6 MB    |
+|                    |   `task`   | *TLE (>90s)* |   ~903.1 MB   |
 
-Summary
-  axes ./mid_test/script_900 ran
-    1.16 ± 0.10 times faster than make -f mid_test/makefile.mk script_900
-   12.01 ± 0.79 times faster than just --justfile mid_test/justfile script_900
+* **TLE:** Time Limit Exceeded. The tool was unable to complete the benchmark.
 
----
+### What's the Data Tells
 
-[.../axes/stress_tests:hyperfine]
-→ hyperfine --shell=none   "axes ./high_test/script_9000"     "just --justfile high_test/justfile script_9000"    "make -f high_test/makefile.mk script_9000"    --warmup 10 --runs 100
-Benchmark 1: axes ./high_test/script_9000
-  Time (mean ± σ):       9.4 ms ±   0.5 ms    [User: 4.5 ms, System: 6.6 ms]
-  Range (min … max):     8.0 ms …  10.7 ms    100 runs
+#### **The Scalability Curve**
 
-Benchmark 2: just --justfile high_test/justfile script_9000
-  Time (mean ± σ):     106.2 ms ±   3.6 ms    [User: 38.9 ms, System: 24.4 ms]
-  Range (min … max):    99.0 ms … 115.9 ms    100 runs
+![Scalability Curve Graph](../media/benchmark_execution_time.png)
 
-Benchmark 3: make -f high_test/makefile.mk script_9000
-  Time (mean ± σ):     170.6 ms ±   4.2 ms    [User: 167.3 ms, System: 3.5 ms]
-  Range (min … max):   164.3 ms … 188.9 ms    100 runs
+![Memory Max Uses Curve Graph](../media/benchmark_peak_memory.png)
 
-Summary
-  axes ./high_test/script_9000 ran
-   11.35 ± 0.74 times faster than just --justfile high_test/justfile script_9000
-   18.24 ± 1.11 times faster than make -f high_test/makefile.mk script_9000
+The benchmarks reveal a clear status about architectural design:
 
----
+1. **Simple Tasks (`Low Load`):** `make`, written in C, is the undisputed champion of minimal overhead. Its raw execution speed is phenomenal for trivial scripts. `axes` is highly competitive, while `just` and `task` show significant startup/parsing overhead even for simple tasks.
 
-[.../axes/stress_tests:hyperfine]
-→ hyperfine --shell=none    "axes ./big_test/script_90000" "axes ./big_divided_test/into/script_90000"    "just --justfile big_test/justfile script_90000"       --warmup 10 --runs 100
-Benchmark 1: axes ./big_test/script_90000
-  Time (mean ± σ):      65.6 ms ±   2.1 ms    [User: 43.8 ms, System: 22.6 ms]
-  Range (min … max):    62.6 ms …  73.8 ms    100 runs
+2. **The Crossover Point (`Medium Load`):** At a thousand commands, `axes`'s architecture begins to pay off. The one-time cost of deserializing its binary AST is now smaller than the cost of `make` parsing its text-based `Makefile`. **`axes` takes the lead.**
 
-Benchmark 2: axes ./big_divided_test/into/script_90000
-  Time (mean ± σ):      44.2 ms ±   2.0 ms    [User: 40.1 ms, System: 24.7 ms]
-  Range (min … max):    41.3 ms …  50.8 ms    100 runs
+3. **Dominance at Scale (`High Load` & `Stress Test`):** As complexity increases, the performance of tools that parse text on every run (`make`, `just`) degrades significantly. `task`'s performance and memory usage collapse completely, likely due to an inefficient internal representation of the script. In contrast, `axes`'s performance scales in a near-linear fashion. Its **AOT + JIT** model proves to be drastically superior:
+    * **Time:** In the most extreme test, `axes` is **4.5x faster** than its closest competitor and orders of magnitude faster than tools that failed to complete.
+    * **Memory:** `axes` demonstrates exceptional memory efficiency. It uses **15.7x less memory** than `task`, which balloons to nearly a gigabyte of RAM. This is a direct result of our zero-copy parameter engine and compact AST representation.
 
-Benchmark 3: just --justfile big_test/justfile script_90000
-  Time (mean ± σ):     650.6 ms ±  14.5 ms    [User: 390.7 ms, System: 214.6 ms]
-  Range (min … max):   624.3 ms … 692.3 ms    100 runs
+## Conclusion: An Architecture Built for Complexity
 
-Summary
-  axes ./big_divided_test/into/script_90000 ran
-    1.48 ± 0.08 times faster than axes ./big_test/script_90000
-   14.73 ± 0.74 times faster than just --justfile big_test/justfile script_90000
+These benchmarks empirically validate the core design principles of `axes`:
+
+* **AOT Compilation is Superior:** Paying the parsing cost once into a binary format is architecturally superior to re-parsing text on every run, especially at scale.
+* **Memory Efficiency Matters:** A focus on zero-copy operations and efficient data structures allows `axes` to handle massive workloads that cause other tools to fail.
+* **Scalability is a Feature:** `axes` is not just fast—it is engineered to *stay* fast as your projects grow from a handful of scripts to thousands of orchestrated commands.
+
+`axes` provides the features of a high-level orchestrator with the performance and resource efficiency of a low-level executor, offering a solution without compromise.
