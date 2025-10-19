@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="#"><img src="https://img.shields.io/badge/build-passing-brightgreen" alt="CI/CD Status"></a>
-  <a href="https://github.com/retypeos/axes/releases"><img src="https://img.shields.io/badge/version-v0.2.6--beta-blue" alt="Última Versión"></a>
+  <a href="https://github.com/retypeos/axes/releases"><img src="https://img.shields.io/badge/version-v0.3.0--beta-blue" alt="Última Versión"></a>
   <a href="https://deepwiki.com/RetypeOS/axes"><img src="https://deepwiki.com/badge.svg" alt="Preguntar a DeepWiki"></a>
   <a href="https://github.com/retypeos/axes/blob/main/LICENSE"><img src="https://img.shields.io/github/license/retypeos/axes?color=lightgrey" alt="Licencia"></a>
 
@@ -80,7 +80,7 @@ A medida que aumenta el número de comandos en un script, las ventajas arquitect
   <sub>
     <b>TLE:</b> Límite de Tiempo Excedido (Time Limit Exceeded). La herramienta no pudo completar el benchmark en un tiempo razonable.<br>
     Benchmarks ejecutados con <code>hyperfine</code> y <code>/usr/bin/time -v</code> en Linux (WSL2 en Windows 11, i7-1165G7, 16GB RAM).<br>
-    La metodología y resultados completos están en nuestro <a href="./examples/BENCHMARKS.md"><code>BENCHMARKS.md</code></a>.
+    La metodología y resultados completos están en nuestro <a href="./BENCHMARKS.md"><code>BENCHMARKS.md</code></a>.
   </sub>
 </p>
 
@@ -180,7 +180,7 @@ Ejecute un script en el directorio actual. La sintaxis es simple y predecible.
 $ axes build --release
 
 # Ejecuta el script 'test' en un sub-proyecto específico.
-$ axes mi-app/api test
+$ axes mi-app/api/test
 ```
 
 #### 2. Flujos de Trabajo Multiplataforma y DRY
@@ -222,7 +222,7 @@ at_exit  = "docker-compose down"       # Se ejecuta al salir.
 ```sh
 $ axes mi-app/api start  # Inicia una sesión. `at_start` se ejecuta automáticamente.
 
-(axes: mi-app/api) $ axes test  # Ya no necesita repetir el contexto.
+(axes: mi-app/api) $ axes test  # Ya no necesita repetir el  y el enrutado ahora es relativo.
 (axes: mi-app/api) $ exit       # `at_exit` se ejecuta al salir.
 ```
 
@@ -255,8 +255,8 @@ APP_NAME = "mi-monorepo"
 [scripts]
 # Un script 'lint' que delega la ejecución en paralelo y modo silencioso.
 lint = [
-    "@> axes web lint",
-    "@> axes api lint",
+    "@> axes web/lint",
+    "@> axes api/lint",
 ]
 ```
 
@@ -285,8 +285,6 @@ El comando `axes lint`, ejecutado desde la raíz, ahora ejecutará los linters d
 `axes` le da un control granular sobre cómo se ejecuta cada comando utilizando prefijos simples:
 
 - `# Mensaje...`: **Comentario/Impresión.** Imprime el texto en la consola en lugar de ejecutarlo. Perfecto para mostrar mensajes de estado.
-  - En lugar de usar: `echo 'Iniciando build...'` - Lento, ineficiente y puede requerir un parseo especial.
-  - Puede usar: `# Iniciando build...` - Más simple y respeta el contenido en sí.
 
 - `@ <comando>`: **Modo Silencioso.** El comando se ejecuta, pero `axes` no imprimirá el comando en sí en la consola. Útil para tareas de limpieza o scripts ruidosos.
   - `@ rm -rf ./cache`
@@ -300,9 +298,9 @@ El comando `axes lint`, ejecutado desde la raíz, ahora ejecutará los linters d
 [scripts.test-all]
 run = [
     "# --- Iniciando todas las pruebas en paralelo ---",
-    "> axes api test",
-    "> axes web test",
-    "> axes integration test",
+    "> axes api/test",
+    "> axes web/test",
+    "> axes integration run test", # Forma base con `run`.
     "# --- Todas las pruebas completadas ---"
 ]
 ```
@@ -312,8 +310,8 @@ Los modificadores pueden combinarse en cualquier orden (ej. `@-` o `->@`) para u
 **El Flujo de Trabajo Unificado:**
 
 - `axes lint`: Desde la raíz, ejecuta el linting en **ambos** subproyectos en paralelo.
-- `axes api run`: Inicia solo el servidor de la API.
-- `axes web build`: Construye solo la imagen Docker del frontend, utilizando variables globales.
+- `axes api/run`: Inicia solo el servidor de la API.
+- `axes web/build`: Construye solo la imagen Docker del frontend, utilizando variables globales.
 
 `axes` crea un **lenguaje cohesivo** sobre un conjunto de herramientas heterogéneas, haciendo que la experiencia de desarrollo sea predecible y simple, sin importar la complejidad del stack.
 
@@ -326,16 +324,6 @@ Los modificadores pueden combinarse en cualquier orden (ej. `@-` o `->@`) para u
 3. **Verificar:** Abra una **nueva terminal** y ejecute `axes --version`.
 
 Nuestra arquitectura única **AOT + JIT** produce un **caché binario agnóstico a la plataforma**. Esto significa que su equipo puede hacer commit del directorio `.axes-cache` al control de versiones. Si un desarrollador en Windows compila la configuración, sus compañeros en macOS y Linux se beneficiarán instantáneamente de las ejecuciones "calientes", saltándose el costo inicial de compilación.
-
----
-
-## Confianza Arquitectónica
-
-`axes` está diseñado con **confianza arquitectónica** gracias a su base en Rust y a su sistema de caché único.
-
-- **Garantía de Ingeniería:** La lógica central, el **Compilador AST**, y el motor de ejecución están diseñados para ser **agnósticos a la plataforma**. La velocidad superior que se obtiene de la **Compilación Anticipada (AOT)** es consistente en todos los sistemas operativos.
-
-- **Característica de Colaboración en Equipo:** `axes` crea un caché binario optimizado que puede ser **compartido a través de diferentes sistemas operativos** (ej. a través de una unidad de red o una carpeta de proyecto compartida). Si un desarrollador compila el flujo de trabajo en Windows, otro desarrollador en Linux se beneficia instantáneamente de la **Ruta de Ejecución Caliente**, saltándose el costoso parseo inicial.
 
 Continuamente probamos y mejoramos la experiencia en todas las plataformas. Si encuentra algún problema específico de la plataforma, por favor [**Abra un Issue**](https://github.com/retypeos/axes/issues).
 

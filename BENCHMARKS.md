@@ -16,7 +16,7 @@ All benchmarks were executed using `hyperfine` for statistical accuracy and `/us
 
 ## The Benchmark Harness: Dogfooding `axes`
 
-To ensure our benchmarks are reproducible and easy to run, we've created a powerful benchmark harness **using `axes` itself**. The configuration lives in [`examples/stress_tests/.axes/axes.toml`](./stress_tests/.axes/axes.toml) and is a perfect example of advanced `axes` features.
+To ensure our benchmarks are reproducible and easy to run, we've created a powerful benchmark harness **using `axes` itself**. The configuration lives in [`examples/stress_tests/.axes/axes.toml`](./examples/stress_tests/.axes/axes.toml) and is a perfect example of advanced `axes` features.
 
 ### How to Run the Benchmarks Yourself
 
@@ -92,9 +92,9 @@ This is the true test of a task runner's architecture. We measure both execution
 
 #### **The Scalability Curve**
 
-![Scalability Curve Graph](../media/benchmark_execution_time.png)
+![Scalability Curve Graph](./media/benchmark_execution_time.png)
 
-![Memory Max Uses Curve Graph](../media/benchmark_peak_memory.png)
+![Memory Max Uses Curve Graph](./media/benchmark_peak_memory.png)
 
 The benchmarks reveal a clear status about architectural design:
 

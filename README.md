@@ -177,7 +177,7 @@ Run a script in the current directory. The syntax is simple and predictable.
 $ axes build --release
 
 # Executes the 'test' script in a specific sub-project.
-$ axes my-app/api test
+$ axes my-app/api/test
 ```
 
 #### 2. Cross-Platform and DRY Workflows
@@ -252,8 +252,8 @@ APP_NAME = "mi-monorepo"
 [scripts]
 # A 'lint' script that delegates execution in parallel and silent mode.
 lint = [
-    "@> axes web lint",
-    "@> axes api lint",
+    "@> axes web/lint",
+    "@> axes api/lint",
 ]
 ```
 
@@ -282,8 +282,6 @@ The `axes lint` command, run from the root, will now run the linters of both sub
 `axes` gives you granular control over how each command is executed using simple prefixes:
 
 - `# Message...`: **Comment/Print.** Prints the text to the console instead of executing it. Perfect for showing status messages.
-  - Instead of using: `echo 'Starting build...'` - Slow, inefficient, and may require special parsing.
-  - You can use: `# Starting build...` - Simpler and respects the content itself.
 
 - `@ <command>`: **Silent Mode.** The command is executed, but `axes` will not print the command itself to the console. Useful for cleanup tasks or noisy scripts.
   - `@ rm -rf ./cache`
@@ -297,9 +295,9 @@ The `axes lint` command, run from the root, will now run the linters of both sub
 [scripts.test-all]
 run = [
     "# --- Starting all tests in parallel ---",
-    "> axes api test",
-    "> axes web test",
-    "> axes integration test",
+    "> axes api/test",
+    "> axes web/test",
+    "> axes integration run test", # Explicit way to run 'test' in `integration` project.
     "# --- All tests completed ---"
 ]
 ```
@@ -309,8 +307,8 @@ Modifiers can be combined in any order (e.g., `@-` or `->@`) for powerful, preci
 **The Unified Workflow:**
 
 - `axes lint`: From the root, runs linting on **both** sub-projects in parallel.
-- `axes api run`: Starts only the API server.
-- `axes web build`: Builds only the frontend's Docker image, using global variables.
+- `axes api/run`: Starts only the API server.
+- `axes web/build`: Builds only the frontend's Docker image, using global variables.
 
 `axes` creates a **cohesive language** over a set of heterogeneous tools, making the development experience predictable and simple, no matter the stack's complexity.
 
