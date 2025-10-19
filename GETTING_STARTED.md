@@ -80,14 +80,14 @@ Before starting, it is crucial to understand how `axes` refers to projects. Just
 
 | Context | Description                                                                 | Example (from `.../innovatech-website/blog`) |
 | :------ | :-------------------------------------------------------------------------- | :----------------------------------- |
-| `name`  | A direct child of the root project (default name is `global`).              | `axes innovatech-website info`       |
-| `/`     | The level separator in the hierarchy.                                       | `axes innovatech-website/blog info`  |
-| `.`     | The project in the current work directory.                                  | `axes . info` (resolves to `innovatech-website/blog`)    |
-| `_`     | The project whose root directory is *exactly* the current directory.        | `axes _ info` (resolves to `innovatech-website/blog`)    |
-| `..`    | The parent of the current context project or search on superior path.       | `axes .. info` (resolves to `innovatech-website`)  |
-| `**`    | (Double asterisk) Resolves to the last project you used in the **entire system.** Useful for quickly returning. | `axes ** start`    |
-| `*`     | (Single asterisk) Resolves to the last child you used **of the current parent project**. | `axes mi-super-app/* start`    |
-| `alias!`| A custom shortcut you create.                                               | `axes blog! info` (if `blog!` points to our project)  |
+| `name`  | A direct child of the root project (`global`).                              | `axes innovatech-website info`       |
+| `/`     | The hierarchy separator.                                                    | `axes innovatech-website/blog info`  |
+| `.`     | The nearest project found in the current directory or any parent directory. | `axes . info` (resolves to `innovatech-website/blog`)    |
+| `_`     | **(Ephemeral)** The project in the current directory, executed without using the global index. | `axes _ info` (compiles `axes.toml` only in memory) |
+| `..`    | The parent of the current project (from session or CWD).                    | `axes .. info` (resolves to `innovatech-website`)  |
+| `**`    | The last project used anywhere in the system.                               | `axes ** start`    |
+| `*`     | The last child used of the current parent project.                          | `axes innovatech-website/* start`    |
+| `alias!`| A custom shortcut you create.                                               | `axes blog! info`  |
 
 Throughout this tutorial, we will use these contexts so you can see how fluid and powerful they are.
 
@@ -221,11 +221,12 @@ description = "The Innovatech online store."
 test_module = "pytest tests/test_<params::0>.py"
 ```
 
-To run a script on a **different** project, you will be use the `run` command explicitly or ./script_name. This removes ambiguity and makes your intent clear.
+To run a script on a **different** project, you will be use the `run` command explicitly or /script_name. This removes ambiguity and makes your intent clear. [This will be changed maybe to get more robust sintax]
 
 ```sh
 # From the innovatech-website/ directory
 axes store run test_module payments  # --> will execute `pytest tests/test_payments.py` (Explicit mode with `run`)
+# Or her shortcut
 axes store/test_module products  # --> will execute `pytest tests/test_products.py` (Implicit mode with <ctx>/script_name [args...])
 ```
 
@@ -279,21 +280,21 @@ company_name = "Innovatech Inc."
 [scripts]
 check_copyright = "echo \"© $(date +%Y) <vars::company_name>. All rights reserved.\""
 
-# A script that calls the scripts of its children.
+# A script that calls the build scripts of its children in parallel.
 build_all = [
-    "# 🚀 Building the entire website...",
-    # The `>` prefix indicates that the command must be executed in PARALLEL.
-    # We use the explicit `run` command for clarity and robustness.
+    "# 🚀 Building the entire website in parallel...",
     "@> axes blog/build",
     "@> axes store/build" # Assuming `store` also has a `build` script.
 ]
 
-# A quality script that runs in sequence.
-quality_check = [
-    "# linting...",
-    "@ axes blog/lint",  # Assuming `lint` scripts in the children.
-    "@ axes store/lint",
-    "# ✅ Code quality verified!"
+# A quality script that runs checks in sequence.
+quality = [
+    "#  Linter checks...",
+    "axes blog/lint",
+    "axes store/lint",
+    "# Running unit tests...",
+    "axes blog/test",
+    "axes store/test"
 ]
 ```
 

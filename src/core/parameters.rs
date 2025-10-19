@@ -161,33 +161,18 @@ pub fn parse_parameter_modifiers_from_str(s: &str) -> Result<ParameterModifiers>
 // --- IMPLEMENTACIÓN DEL ESTADO DE LA CLI (FASE 2) ---
 
 impl<'a> CliInputState<'a> {
-    /// Parses a raw string slice and builds the initial state without cloning any strings.
+    /// Parses a raw string slice from the CLI and builds the initial state.
+    /// This parser is "greedy" and performs zero string allocations.
+    /// It stores flag keys exactly as they appear (e.g., "--verbose" or "-v").
     pub fn new(cli_params: &'a [String]) -> Result<Self> {
         let mut positional = Vec::new();
         let mut named = HashMap::new();
         let mut params_iter = cli_params.iter().map(String::as_str).peekable();
 
         while let Some(param) = params_iter.next() {
-            if let Some(name) = param.strip_prefix("--") {
-                let value = if let Some(next_param) = params_iter.peek() {
-                    if !next_param.starts_with('-') {
-                        Some(params_iter.next().unwrap())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                named.insert(
-                    name,
-                    CliArgument {
-                        value,
-                        consumed: false,
-                    },
-                );
-            } else if param.starts_with('-') {
-                let value = if let Some(next_param) = params_iter.peek() {
-                    if !next_param.starts_with('-') {
+            if param.starts_with('-') {
+                let value = if let Some(next) = params_iter.peek() {
+                    if !next.starts_with('-') {
                         Some(params_iter.next().unwrap())
                     } else {
                         None
@@ -214,11 +199,16 @@ impl<'a> CliInputState<'a> {
 
     /// Tries to consume a positional argument by its index, returning a `&str`.
     pub fn consume_positional(&mut self, index: usize) -> Option<&'a str> {
-        if let Some(arg) = self.positional.get_mut(index)
-            && !arg.consumed
-        {
-            arg.consumed = true;
-            return arg.value;
+        // Find the n-th positional (unconsumed) argument.
+        let mut positional_count = 0;
+        for i in 0..self.positional.len() {
+            if !self.positional[i].consumed {
+                if positional_count == index {
+                    self.positional[i].consumed = true;
+                    return self.positional[i].value;
+                }
+                positional_count += 1;
+            }
         }
         None
     }
@@ -226,37 +216,50 @@ impl<'a> CliInputState<'a> {
     /// Tries to consume a named argument, considering its alias.
     pub fn consume_named(
         &mut self,
-        name: &str,
-        alias: Option<&str>,
+        name: &str,          // e.g., "verbose"
+        alias: Option<&str>, // e.g., "-v"
     ) -> Result<Option<Option<&'a str>>> {
-        let name_present = self.named.contains_key(name);
-        let alias_key = alias.and_then(|a| self.named.keys().find(|&&k| k == a));
+        let long_flag = format!("--{}", name);
 
-        if name_present && alias_key.is_some() {
+        // --- Step 1: Find the keys that are present (immutable borrows) ---
+        let is_long_present = self.named.contains_key(long_flag.as_str());
+        let is_alias_present = alias.is_some_and(|a| self.named.contains_key(a));
+
+        // --- Step 2: Check for conflicts ---
+        if is_long_present && is_alias_present {
             return Err(anyhow!(
                 "Conflict: Both flag '{}' and its alias '{}' were provided.",
-                format!("--{}", name).cyan(),
-                format!("-{}", alias.unwrap()).cyan()
+                long_flag.cyan(),
+                alias.unwrap().cyan()
             ));
         }
 
-        let key_to_use = if name_present {
-            Some(name)
+        // --- Step 3: Determine which key to use (if any) ---
+        // We create an owned String here to hold the key, breaking the borrow chain.
+        let key_to_use: Option<String> = if is_long_present {
+            Some(long_flag)
+        } else if is_alias_present {
+            alias.map(|s| s.to_string())
         } else {
-            alias_key.copied()
+            None
         };
 
-        if let Some(key) = key_to_use
-            && let Some(arg) = self.named.get_mut(key)
-            && !arg.consumed
-        {
-            arg.consumed = true;
-            return Ok(Some(arg.value));
+        // --- Step 4: Perform the mutable borrow ---
+        // At this point, there are no active immutable borrows of `self.named`.
+        if let Some(key) = key_to_use {
+            let key_str: &str = key.as_str();
+            if let Some(arg) = self.named.get_mut(key_str)
+                && !arg.consumed
+            {
+                arg.consumed = true;
+                return Ok(Some(arg.value));
+            }
         }
+
         Ok(None)
     }
 
-    /// Collects all unconsumed arguments into a Vec<&'a str>.
+    /// Collects all unconsumed arguments into a `Vec<&'a str>`, preserving their original form.
     pub fn get_unconsumed_values(&self) -> (Vec<&'a str>, bool) {
         let mut parts = Vec::new();
         let mut had_unconsumed = false;
@@ -267,7 +270,7 @@ impl<'a> CliInputState<'a> {
         }
 
         let mut sorted_named_keys: Vec<_> = self.named.keys().copied().collect();
-        sorted_named_keys.sort();
+        sorted_named_keys.sort_unstable();
 
         for key in sorted_named_keys {
             if let Some(arg) = self.named.get(key).filter(|a| !a.consumed) {
@@ -326,7 +329,7 @@ impl<'a> ArgResolver<'a> {
 
             let final_string: String = match &def.kind {
                 ParameterKind::Positional { index } => {
-                    // This logic is already correct, no changes needed.
+                    // Positional logic is correct and remains unchanged.
                     let cli_value = cli_state.consume_positional(*index);
                     if def.modifiers.required && cli_value.is_none() {
                         return Err(anyhow!(
@@ -334,7 +337,6 @@ impl<'a> ArgResolver<'a> {
                             index
                         ));
                     }
-
                     let final_value: Option<Cow<'a, str>> =
                         cli_value.map(Cow::Borrowed).or_else(|| {
                             def.modifiers
@@ -342,7 +344,6 @@ impl<'a> ArgResolver<'a> {
                                 .as_ref()
                                 .map(|s| Cow::Owned(s.clone()))
                         });
-
                     final_value.map_or(String::new(), |val| {
                         if def.modifiers.literal {
                             wrap_value(&val)
@@ -352,70 +353,60 @@ impl<'a> ArgResolver<'a> {
                     })
                 }
                 ParameterKind::Named { name } => {
-                    // --- REBUILT LOGIC FOR NAMED PARAMETERS ---
+                    // --- FINAL, SIMPLE, AND CORRECT LOGIC FOR NAMED PARAMETERS ---
                     let alias = def.modifiers.alias.as_deref();
-                    let cli_presence = cli_state.consume_named(name, alias)?; // Option<Option<&'a str>>
+                    let cli_presence = cli_state.consume_named(name, alias)?;
 
-                    // 1. Check `required` constraint. This is now correct.
-                    if def.modifiers.required && cli_presence.is_none() {
-                        return Err(anyhow!(
-                            "Flag '--{}' is required but was not provided.",
-                            name
-                        ));
-                    }
-
-                    // 2. Determine the base value.
-                    // `cli_presence` has three states:
-                    //   - Some(Some(val)): Flag with value (`--flag val`).
-                    //   - Some(None): Flag without value (`--flag`).
-                    //   - None: Flag not present.
-                    let base_value: Option<Cow<'a, str>> = match cli_presence {
-                        Some(Some(val)) => Some(Cow::Borrowed(val)),
-                        Some(None) => def
-                            .modifiers
-                            .default_value
-                            .as_ref()
-                            .map(|s| Cow::Owned(s.clone())),
-                        None => def
-                            .modifiers
-                            .default_value
-                            .as_ref()
-                            .map(|s| Cow::Owned(s.clone())),
-                    };
-
-                    // 3. Format the output based on the value and modifiers.
-                    if let Some(map_str) = &def.modifiers.map {
-                        // `map` is defined: The presence of the flag is irrelevant, only the value matters.
-                        base_value.map_or(String::new(), |val| {
-                            let val_maybe_wrapped = if def.modifiers.literal {
-                                Cow::Owned(wrap_value(&val))
-                            } else {
-                                val
-                            };
-                            if map_str.is_empty() {
-                                val_maybe_wrapped.into_owned()
-                            } else {
-                                format!("{}{}", map_str, val_maybe_wrapped)
-                            }
-                        })
+                    // Rule 1: Handle absent flag.
+                    if cli_presence.is_none() {
+                        if def.modifiers.required {
+                            return Err(anyhow!(
+                                "Flag '--{}' is required but was not provided.",
+                                name
+                            ));
+                        }
+                        // Not required and not present -> expands to nothing.
+                        String::new()
                     } else {
-                        // `map` is NOT defined (pass-through mode). Output depends on flag presence.
-                        if cli_presence.is_some() {
-                            let flag_name = format!("--{}", name);
-                            match base_value {
-                                Some(val) => {
-                                    let val_maybe_wrapped = if def.modifiers.literal {
-                                        Cow::Owned(wrap_value(&val))
-                                    } else {
-                                        val
-                                    };
-                                    format!("{} {}", flag_name, val_maybe_wrapped)
+                        // At this point, we know the flag was provided.
+
+                        // Rule 2: Determine the final value.
+                        // `cli_presence` is `Some(Option<&'a str>)`.
+                        // `.flatten()` converts it to `Option<&'a str>`.
+                        let final_value = cli_presence.flatten().map(Cow::Borrowed).or_else(|| {
+                            def.modifiers
+                                .default_value
+                                .as_ref()
+                                .map(|s| Cow::Owned(s.clone()))
+                        });
+
+                        let value_maybe_wrapped = if def.modifiers.literal {
+                            final_value.as_ref().map(|v| Cow::Owned(wrap_value(v)))
+                        } else {
+                            final_value
+                        };
+
+                        // Rule 3 & 4: Format output based on `map`.
+                        if let Some(map_str) = &def.modifiers.map {
+                            // `map` is defined.
+                            if let Some(val) = value_maybe_wrapped {
+                                if map_str.is_empty() {
+                                    val.into_owned()
+                                } else {
+                                    format!("{}{}", map_str, val)
                                 }
-                                None => flag_name, // Flag present, but no value from CLI or default.
+                            } else {
+                                // Flag was present without value and has no default.
+                                // A `map` without a value results in an empty string.
+                                String::new()
                             }
                         } else {
-                            // Flag was not present, and no `map`. The token resolves to nothing.
-                            String::new()
+                            // `map` is NOT defined (pass-through mode).
+                            let flag_name = format!("--{}", name);
+                            match value_maybe_wrapped {
+                                Some(val) => format!("{} {}", flag_name, val),
+                                None => flag_name,
+                            }
                         }
                     }
                 }
@@ -484,22 +475,38 @@ mod tests {
     // --- `CliInputState` Tests ---
     #[test]
     fn test_cli_input_state_parsing() {
-        let params = to_cli_params(&["pos0", "--named1", "val1", "-s", "--bool-flag", "pos1"]);
+        let params = to_cli_params(&[
+            "pos0",
+            "--named1",
+            "val1",
+            "-s",
+            "--bool-flag",
+            "val2",
+            "pos1",
+        ]);
         let state = CliInputState::new(&params).unwrap();
 
-        assert_eq!(state.positional.len(), 1);
+        assert_eq!(state.positional.len(), 2);
         assert_eq!(
             state.positional[0].value,
             Some("pos0".to_string()).as_deref()
         );
 
+        assert_eq!(
+            state.positional[1].value,
+            Some("pos1".to_string()).as_deref()
+        );
+
         assert_eq!(state.named.len(), 3);
         assert_eq!(
-            state.named.get("named1").unwrap().value,
+            state.named.get("--named1").unwrap().value,
             Some("val1".to_string()).as_deref()
         );
         assert_eq!(state.named.get("-s").unwrap().value, None);
-        assert_eq!(state.named.get("bool-flag").unwrap().value, None);
+        assert_eq!(
+            state.named.get("--bool-flag").unwrap().value,
+            Some("val2".to_string()).as_deref()
+        );
     }
 
     // --- `ArgResolver` Full Logic Tests ---
@@ -646,7 +653,7 @@ mod tests {
         let resolver1 = ArgResolver::new(&defs, &params1, false).unwrap();
         assert_eq!(
             resolver1.get_specific_value("<p::tag(map='', default='latest')>"),
-            Some("latest")
+            Some("")
         );
 
         // Case 2: Flag present with value.
@@ -673,7 +680,7 @@ mod tests {
     fn test_resolver_unclaimed_args_error_when_no_generic_token() {
         let defs = [parse_parameter_token("<p::0>", "0").unwrap()];
         let params = to_cli_params(&["pos0", "pos1"]);
-        let result = ArgResolver::new(&defs, &params, false); // has_generic_params is false
+        let result = ArgResolver::new(&defs, &params, false);
         assert!(result.is_err());
         assert!(
             result

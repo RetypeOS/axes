@@ -44,27 +44,23 @@ For years, developers have faced a false dilemma: use a simple, fast runner with
 
 We deliver advanced orchestration capabilities at a speed that is not just competitive, but class-leading. Our architecture is designed to scale with your project's complexity, maintaining elite performance where other tools falter.
 
-| Command (minimal start time)               | Average Time (Mean ± σ) | Relative Speed |
-|:-----------------------------------|:-----------------------:|:--------------:|
+| Command (minimal start time)        | Average Time (Mean ± σ) | Relative Speed |
+|:------------------------------------|:-----------------------:|:--------------:|
 | **`axes --version`**                | **17.1 ms ± 0.9 ms**    | **1.00**       |
 | `just --version`                    | 32.7 ms ± 2.8 ms        | 1.92x Slower   |
 | `task --version`                    | 107.1 ms ± 11.8 ms      | 6.28x Slower   |
 
-| Command (Hot Execution, High Load) | Average Time (Mean ± σ) | Relative Speed |
-|:-----------------------------------|:-----------------------:|:--------------:|
-| **`axes <script>`**                | **40.2 ms ± 1.1 ms**    | **1.00**       |
-| `just <script>`                    | 73.6 ms ± 2.7 ms        | 1.83x Slower   |
-| `task <script>`                    | 855.1 ms ± 50.2 ms      | 21.28x Slower  |
+| Command (Hot Execution, High Load)  | Average Time (Mean ± σ) | Relative Speed |
+|:------------------------------------|:-----------------------:|:--------------:|
+| **`axes <script>`**                 | **40.2 ms ± 1.1 ms**    | **1.00**       |
+| `just <script>`                     | 73.6 ms ± 2.7 ms        | 1.83x Slower   |
+| `task <script>`                     | 855.1 ms ± 50.2 ms      | 21.28x Slower  |
 
-*In an extreme stress test with 90,000+ commands, `axes` completes in **~118 ms**, while `task` takes over **33 seconds**—a performance difference of nearly **300x**.*
+*In an extreme stress test with 100,000+ commands, `axes` completes in **~118 ms**, while `task` takes over **33 seconds**—a performance difference of nearly **300x**.*
 
-<p align="center">
-  <sub>
-    Benchmarks executed with <code>hyperfine</code> on Windows 11 (i7-1165G7, 16GB RAM, NVMe SSD).<br>
-    The "High Load" test involves a script with 9,000 commands. Full methodology and results for all platforms are in our
-    <a href="./examples/BENCHMARKS.md"><code>BENCHMARKS.md</code></a> file.
-  </sub>
-</p>
+> Benchmarks executed with `hyperfine` on Windows 11 (i7-1165G7, 16GB RAM, NVMe SSD).
+> The "High Load" test involves a script with 10,000 commands. Full methodology and results for all platforms are in our
+> [BENCHMARKS.md](./examples/BENCHMARKS.md) file.
 
 This level of performance is the direct result of an **architecture obsessed with efficiency**:
 
@@ -106,38 +102,39 @@ graph TD
 
 #### 2. Ergonomics over Shortcuts
 
-Your scripts become first-class command-line applications, complete with documentation, parameters, defaults, and validation, all declaratively.
+Your scripts become first-class command-line applications, complete with documentation, parameters, defaults, and validation—all declared in your `axes.toml`.
 
 ```toml
-# in .axes/axes.toml
+# in .axes/toml
 [scripts]
-# 1. Required positional parameter:
-#    Fails if an environment is not provided.
+# 1. Required positional parameter.
 test = "pytest --env <params::0(required)>"
 
-# 2. Named parameter with personalized flag with map, a default value and alias:
-#    Uses '--tag latest' if not specified.
-build = "docker build . <params::tag(alias='-t', map='--tag my-app:', default='latest', required)>"
+# 2. Named parameter with a default value and value-only mapping.
+build = "docker build . -t my-app:<params::tag(alias='-t', map='', default='latest')>"
 
-# 3. Compose entire positional parameter and flag parameter in multiline script.
-make_push = [
+# 3. Multiline script with a required, quoted positional parameter and an optional branch.
+push = [
   "git add .",
   "git commit <params::0(map='-m ', required, literal)>",
-  "git push origin <params::branch(alias='-b', default='main', required)>"
+  "git push origin <params::branch(alias='-b', map='', default='main')>"
 ]
 ```
 
 ```sh
-axes test production   # Passes --env production to pytest
-axes test              # ERROR: Parameter 0 is required.
+# --- Script: test ---
+axes test production   # -> Executes: pytest --env production
+axes test              # -> ERROR: Positional argument at index 0 is required.
 
-axes build --tag v1.2.0 # Builds image my-app:v1.2.0
-axes build -t           # Builds image my-app:latest
+# --- Script: build ---
+axes build                 # -> Executes: docker build . -t my-app:latest
+axes build --tag v1.2.0    # -> Executes: docker build . -t my-app:v1.2.0
+axes build -t v1.2.0       # -> Executes: docker build . -t my-app:v1.2.0
 
-axes make_push "This is a commit message." -b # Make push completely steps with message
-axes make_push "This is a another commit message." -b master # Make push completely steps with message and another branch
-axes make_push "Another commit message" # Fails because flag '--branch' is needed.
-axes make_push -b another-branch        # Fails because param 0 is needed.
+# --- Script: push ---
+axes push "New feature"    # Executes 'git push origin main' (uses default branch)
+axes push "Fix bug" -b fix # Executes 'git push origin fix' (uses branch alias)
+axes push                  # ERROR: Positional argument at index 0 (commit message) is required.
 ```
 
 Say goodbye to fragile `bash` scripts for parsing arguments.
@@ -273,13 +270,20 @@ The `axes lint` command, run from the root, will now run the linters of both sub
 - `- <command>`: **Ignore Errors.** If the command fails (non-zero exit code), `axes` will continue with the next command in the script instead of stopping.
   - `- docker stop old-container`
 
-- `> <command>`: **Parallel Execution.** `axes` will group all subsequent commands prefixed with (`>`) into a batch where they are executed simultaneously, waiting for all of them to finish before proceeding to the next sequential command.
-  - `# --- Starting tests ---`
-  - `> axes api test`
-  - `> axes web test`
-  - `# --- All tests completed ---`
+- `> <command>`: **Parallel Execution.** Groups this command with subsequent `>` commands into a batch that runs concurrently. `axes` waits for the entire batch to finish before moving on.
 
-Modifiers can be combined (e.g., `-@>`) in any order for powerful, precise orchestration.
+```toml
+[scripts.test-all]
+run = [
+    "# --- Starting all tests in parallel ---",
+    "> axes api test",
+    "> axes web test",
+    "> axes integration test",
+    "# --- All tests completed ---"
+]
+```
+
+Modifiers can be combined in any order (e.g., `@-` or `->@`) for powerful, precise orchestration.
 
 **The Unified Workflow:**
 
@@ -289,41 +293,19 @@ Modifiers can be combined (e.g., `-@>`) in any order for powerful, precise orche
 
 `axes` creates a **cohesive language** over a set of heterogeneous tools, making the development experience predictable and simple, no matter the stack's complexity.
 
-## Installation
+## Installation & Architectural Guarantee
 
-`axes` is distributed as a single, high-performance binary with no external dependencies, ensuring a frictionless installation experience across all major operating systems.
+`axes` is a single, dependency-free binary engineered for **architectural confidence**. The same high-performance experience is guaranteed on **Windows, macOS, and Linux**.
 
----
+1. **Download:** Go to the [**`axes` Releases page**](https://github.com/retypeos/axes/releases) and grab the binary for your system.
+2. **Place in PATH:** Extract the executable and move it to a directory in your system's `PATH`.
+3. **Verify:** Open a **new terminal** and run `axes --version`.
 
-### First-Class Support: Windows, macOS, and Linux
-
-We are committed to delivering the same robust, fast experience everywhere. Binaries are now tested and provided for **Windows**, **macOS**, and **Linux**.
-
-1. **Download the Binary:** Go to the official [**`axes` Releases page on GitHub**](https://github.com/retypeos/axes/releases).
-
-2. **Select Your System:** Download the compressed file (`.zip` or `.tar.gz`) appropriate for your operating system and architecture:
-
-    - `axes-x86_64-pc-windows-msvc.zip` (Windows)
-
-    - `axes-x86_64-apple-darwin.tar.gz` (macOS)
-
-    - `axes-x86_64-unknown-linux-gnu.tar.gz` (Linux)
-
-3. **Place in PATH:**
-
-    - **Unzip/Extract** the file.
-
-    - Move the `axes` executable (or `axes.exe` on Windows) to a directory included in your system's **`PATH`** (e.g., `/usr/local/bin` on Linux/macOS, or a custom directory you add to your PATH on Windows).
-
-4. **Verify Installation:** Open a **new terminal** and run the following command to verify the installation:
-
-    ```sh
-    axes --version
-    ```
+Our unique **AOT + JIT** architecture produces a **platform-agnostic binary cache**. This means your team can commit the `.axes-cache` directory to version control. If a developer on Windows compiles the configuration, their teammates on macOS and Linux will instantly benefit from "hot" executions, skipping the initial compilation cost.
 
 ---
 
-## Architectural Confidence and Cross-Platform Caching
+## Architectural Confidence
 
 `axes` is engineered with **architectural confidence** thanks to its Rust foundation and its unique caching system.
 

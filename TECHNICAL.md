@@ -48,46 +48,50 @@ This is the most critical pillar for performance in "hot" executions. `axes` is 
 
 - ⚙️ **[Full Architecture Deep Dive (`TECHNICAL.md`)](./TECNICAL.md):** For those interested in the engineering behind our performance.
 
-### 1.3. Flow Diagram: Cold Path vs. Hot Path
+### 1.3. Flow Diagram: The AOT + JIT Lifecycle
 
-The following diagram illustrates the fundamental difference in workflow between the first execution of a script and subsequent executions.
+The following diagram illustrates the lifecycle of a script execution, highlighting the AOT (Ahead-of-Time) compilation on the "cold path" and the JIT (Just-in-Time) optimization on the "hot path".
 
 ```mermaid
 graph TD
     subgraph "Configuration Lifecycle in `axes`"
-        
-        A["<br><b>Start</b><br>axes command executed"] --> B{"<br>Does <code>axes.toml</code> hash match<br>the hash in <code>GlobalIndex</code>?"}
+        A["<br><b>Start</b><br>axes command executed"] --> B{"<br>Is a valid binary cache<br>available for all hierarchy layers?"};
 
-        B -- "<b>❄️ No (Cold Path / Cache Miss)</b>" --> C_IO["<br><b>[Disk I/O + CPU]</b><br>1. Read <code>axes.toml</code>"]
-        C_IO --> C_CPU["<br><b>[CPU Intensive]</b><br>2. Parse TOML and Compile Scripts to AST (`Task`)"]
-        C_CPU --> D_IO["<br><b>[Disk I/O]</b><br>3. Serialize and Write AST to Binary Cache (<code>.bin</code>)"]
-        D_IO --> E["<br><b>[In Memory]</b><br>Use the newly compiled AST"]
+        B -- "<b>❄️ No (Cold Path / Cache Miss)</b>" --> C_IO["<br><b>[AOT COMPILATION]</b><br>1. Read `axes.toml` (Disk I/O)"]
+        C_IO --> C_CPU["<br>2. Compile to <b>Universal AST</b> (CPU Intensive)"]
+        C_CPU --> D_IO["<br>3. Write Universal AST to<br>Binary Cache (Disk I/O)"]
+        D_IO --> E["<br><b>[In Memory]</b><br>Load newly compiled Universal AST"]
         
-        B -- "<b>🔥 Yes (Hot Path / Cache Hit)</b>" --> H_IO["<br><b>[Minimal Disk I/O]</b><br>1. Read Binary Cache (<code>.bin</code>)"]
-        H_IO --> H_CPU["<br><b>[Minimal CPU]</b><br>2. Deserialize AST from binary"]
-        H_CPU --> E
+        B -- "<b>🔥 Yes (Hot Path / Cache Hit)</b>" --> H_IO["<br><b>[Minimal I/O + CPU]</b><br>1. Deserialize Universal AST<br>from Binary Cache"]
+        H_IO --> E
         
-        E --> F["[Independent of axes]<br><b>Execution</b><br>The `TaskExecutor` operates on the in-memory AST"]
+        E --> I_JIT["<br><b>[JIT OPTIMIZATION]</b><br>Specialize Universal AST to<br>Platform-Specific Task (In-Memory)"]
+        
+        I_JIT --> F["<br><b>Execution</b><br>TaskExecutor operates on the<br>simple, platform-specialized task list"]
         F --> G["<br><b>End</b><br>"]
-
     end
 
     %% Low-cost nodes (in-memory operations, decisions)
     style A fill:#e6f7ff,stroke:#0050b3,stroke-width:1px,color:#055
     style B fill:#e6f7ff,stroke:#0050b3,stroke-width:2px,color:#055
-    style E fill:#e6f7ff,stroke:#0050b3,stroke-width:1px,color:#055
-    style F fill:#808080,stroke:#0050b3,stroke-width:2px
-    style G fill:#f0f0f0,stroke:#595959,stroke-width:1px,color:#055
+    style E fill:#d6f7ff,stroke:#0050b3,stroke-width:1px,color:#055
+    style I_JIT fill:#d6f7ff,stroke:#0050b3,stroke-width:1px,color:#055
+    style F fill:#d6f7ff,stroke:#0050b3,stroke-width:2px,color:#055
+    style G fill:#d6f7ff,stroke:#595959,stroke-width:1px,color:#055
 
     %% Hot Path Nodes (Optimized I/O and CPU)
     style H_IO fill:#d9f7be,stroke:#237804,stroke-width:2px,color:#055
-    style H_CPU fill:#d9f7be,stroke:#237804,stroke-width:1px,color:#055
     
     %% Cold Path Nodes (High Cost)
     style C_IO fill:#fff1b8,stroke:#d48806,stroke-width:2px,color:#055
     style C_CPU fill:#ffd8bf,stroke:#d46b08,stroke-width:2px,color:#055
-    style D_IO fill:#ffccc7,stroke:#cf1322,stroke-width:2px,color:#055
+    style D_IO fill:#ffdfd7,stroke:#cf1322,stroke-width:2px,color:#055
 ```
+
+This **AOT + JIT** architecture provides the best of both worlds:
+
+- **AOT Compilation** pays the expensive parsing and compilation cost only once, creating a **portable, universal cache**.
+- **JIT Specialization** performs a final, ultra-fast, in-memory transformation that provides the `TaskExecutor` with a simple, flat list of commands, ensuring the hot path has zero decision-making overhead.
 
 This architecture of compilation and caching is what allows us to offer the power of complex orchestration at a speed that rivals that of the simplest executors. Furthermore, the use of hashes for cache filenames allows this cache to be **shared across team members** via a network drive or a distributed caching system, ensuring the compilation cost is paid **only once for the entire team**.
 
@@ -183,45 +187,54 @@ The performance and robustness of `axes` are not just the result of algorithms, 
   - **Purpose:** Acts as an immutable "identity tag" for the project. It stores its own `self_uuid`, `name`, and `parent_uuid`.
   - **Robustness and Self-Repair:** This file is the key to `axes`'s resilience. If the `GlobalIndex` is corrupted or deleted, the `axes register` command can traverse the file system and use the `project_ref.bin` files to **rebuild the global index** with complete fidelity. It allows a project to be moved or renamed in the file system and then "re-registered" without losing its historical identity or relationships.
 
-### 3.2. The Command Transformation Chain: From Text to AST
+### 3.2. The Command Transformation Chain: From User Syntax to Optimized AST
 
-To achieve both flexibility for the user and performance for the executor, `axes` uses a data model transformation chain. This is the key to the serialization robustness we have achieved.
+To achieve both user-friendly syntax and extreme execution performance, `axes` uses a multi-stage data model transformation chain. This is the key to our architectural robustness.
 
 ```mermaid
 graph LR
-    A("<b>1. User</b><br><code>axes.toml</code>") --> B{"<b>2. TOML Deserializer</b><br>(<code>serde_toml</code>)"};
+    A("<b>1. User Syntax</b><br><code>axes.toml</code>") --> B{"<b>2. TOML Deserializer</b><br>(<code>serde_toml</code>)"};
     
-    subgraph "Loading and Compilation Phase (Cache Miss)"
-        B --> C["<b>3. Flexible Model: <code>ProjectConfig</code></b><br>Uses <code>TomlCommand</code> and <code>TomlOpenWithConfig</code> with <code>#[serde(flatten)]</code> for maximum syntactic flexibility."];
-        C --> D["<b>4. Canonical Model: <code>CanonicalCommand</code></b><br>Normalizes all syntax variants (simple, sequence, by platform) into a single standardized struct."];
-        D --> E["<b>5. Cache Model (AST): <code>CachedProjectConfig</code></b><br>Contains `Tasks`. Commands have been compiled into this optimized binary representation. It is 100% compatible with <code>bincode</code>."];
+    subgraph "AOT Compilation Phase (Cache Miss)"
+        B --> C["<b>3. Flexible Syntax Models</b><br><code>TomlScript</code>, <code>TomlVar</code><br>Uses <code>#[serde(untagged)]</code><br>to accept multiple formats."];
+        C --> D["<b>4. Compiler (`compiler.rs`)</b><br>Transforms flexible syntax into<br>the universal, platform-agnostic AST."];
+        D --> E["<b>5. Universal AST Model</b><br><code>Task</code>, <code>CachedVar</code><br>Contains <code>PlatformExecution</code> blocks.<br>100% `bincode`-compatible."];
     end
     
     E --> F{"<b>6. Binary Serializer</b><br>(<code>bincode</code>)"};
     F --> G("<b>7. Disk Cache</b><br><code>.bin</code>");
 
-    subgraph "Execution Phase (Cache Hit)"
+    subgraph "Execution Phase (Hot Path)"
         G --> H{"<b>8. Binary Deserializer</b><br>(<code>bincode</code>)"};
-        H --> I["<b>9. In-Memory Cache Model: <code>CachedProjectConfig</code></b><br>The AST is loaded directly, without text parsing."];
+        H --> I["<b>9. In-Memory Universal AST</b><br>Loaded directly, bypassing text parsing."];
+        I --> J["<b>10. JIT Specializer</b><br><code>specialize_task_for_platform()</code><br>Selects commands for the current OS."];
+        J --> K["<b>11. Platform-Specialized AST</b><br><code>PlatformSpecializedTask</code><br>A simple, flat list of commands."];
     end
     
-    I --> J("<b>10. <code>TaskExecutor</code></b><br>Operates directly on the in-memory AST.");
+    K --> L("<b>12. <code>TaskExecutor</code></b><br>Operates on the flat AST<br>with zero overhead.");
 
+    %% Styles
     style A fill:#f0f0f0,stroke:#333,color:#055
     style G fill:#f0f0f0,stroke:#333,color:#055
     style C fill:#e6f7ff,stroke:#096dd9,color:#055
     style D fill:#bae7ff,stroke:#096dd9,color:#055
     style E fill:#d9f7be,stroke:#237804,color:#055
     style I fill:#d9f7be,stroke:#237804,color:#055
+    style J fill:#d9f7be,stroke:#237804,color:#055
+    style K fill:#d9f7be,stroke:#237804,color:#055
 ```
 
-- **`TomlCommand` and `TomlOpenWithConfig`:** These are "read-only" structs designed with maximum user flexibility, using attributes like `#[serde(untagged)]` and `#[serde(flatten)]`. Their sole purpose is to deserialize `axes.toml` without errors, accepting multiple syntax forms.
-- **`Command` and `CanonicalCommand`:** They act as a normalization layer. After initial parsing, all `TomlCommand` variants are converted into a `CanonicalCommand`. This simplifies subsequent compilation logic, as it only has to deal with a single, well-defined structure.
-- **`Task`, `CommandExecution`, `TemplateComponent` (The AST):** This is the final product of compilation. It is an optimized in-memory representation for execution, which breaks down each command into its logical parts (literals, parameters, dynamic sub-commands). This is the structure serialized with `bincode` in the cache. Being a regular Rust `struct` without "magic" `serde` attributes, its binary serialization and deserialization is deterministic, ultra-fast, and robust.
+- **`TomlScript`, `TomlVar`:** These "read-only" structs are designed with maximum user flexibility, using attributes like `#[serde(untagged)]` and `#[serde(deny_unknown_fields)]` to provide an ergonomic and error-resistant configuration experience.
+- **`Task`, `CachedVar` (The Universal AST):** This is the final product of AOT compilation. It is an optimized in-memory representation for storage, containing `PlatformExecution` blocks that hold the logic for all operating systems. This structure is what gets serialized with `bincode` into the cache.
+- **`PlatformSpecializedTask` (The JIT-Optimized AST):** This is a transient, in-memory-only structure created just before execution. It represents the fastest possible execution path, as all platform-specific decisions have already been made.
 
-### 3.3. The Argument Resolver (`ArgResolver`)
+### 3.3. The Argument Resolver (`ArgResolver`): Zero-Copy Parameter Handling
 
-The `ArgResolver` is the component that bridges the parameters defined in a `Task` with the arguments provided by the user on the command line.
+The `ArgResolver` is a high-performance component that validates and resolves all script parameters *before* execution begins.
+
+- **Pre-Execution Contract Validation:** The system first collects all parameter definitions (`<params::...>`) from the entire (potentially composed) script. This forms a complete "contract." The `ArgResolver` is then constructed once, validating the user's CLI arguments against this contract. This catches all errors—required parameters missing, flag conflicts—upfront.
+- **Zero-Copy Performance:** The `ArgResolver` is engineered to be extremely memory-efficient. It uses Rust's lifetime system to **borrow** command-line arguments directly from the input `Vec<String>` instead of cloning them. This means that for a command like `axes run -- --long-arg-1 --long-arg-2`, no new string allocations are made for the parameters, minimizing memory overhead.
+- **Immutable Result:** The `ArgResolver` produces an immutable `HashMap` of resolved values. The `TaskExecutor` then performs fast lookups into this map, eliminating any parsing or validation overhead during the hot execution loop.
 
 - **Pre-Parsing and Validation:** Before execution, the system (`run::handle`, `start::handle`, etc.) traverses the flattened `Task` and collects **all** parameter definitions (`ParameterDef`) into a single list. This list represents the complete "contract" of the script.
 - **Single-Pass Resolution:** The `ArgResolver` is constructed once with this contract and the user arguments. In its constructor, it performs all validation:

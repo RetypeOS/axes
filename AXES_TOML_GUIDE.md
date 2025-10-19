@@ -12,14 +12,13 @@ The `axes.toml` file is the brain of each of your projects. This is where you tr
 
 Before diving into the details, remember the most important concept: **inheritance**.
 
-Every `axes` project inherits the complete configuration from its parent project. When `axes` executes a command in the context of `my-app/api`, it first reads the `axes.toml` of `my-app/api`, then if object to search not exist in the configuration, search in `my-app`, then in your parent, and finally that of `global`.
+Every `axes` project inherits the complete configuration from its parent. When `axes` needs a value (like a script or variable), it follows a clear search path:
 
-This means a child project can:
+1. It looks in the **current project's** `axes.toml`.
+2. If not found, it looks in the **parent's** `axes.toml`.
+3. ...and so on, up to the **`global`** project.
 
-* **Use** variables and scripts defined in its parents.
-* **Override** variables and scripts to specialize behavior.
-
-> **Merge Rule:** The child's configuration always takes precedence. If `my-app` defines `[vars] version = "1.0"` and `my-app/api` defines `[vars] version = "1.1"`, the value for `api` will be `1.1`.
+The **first value found wins**. This means a child's configuration always takes precedence and can **override** its parents' definitions. Environment variables (`[env]`) are the only exception: they are **merged**, with child values overriding parent values for the same key.
 
 ### Anatomy of an `axes.toml`
 
@@ -144,92 +143,132 @@ description = "The main authentication service."
 
 ## 2. Interpolation Variables `[vars]`
 
-The `[vars]` section is your best tool for following the **DRY (Don't Repeat Yourself)** principle. Define values here once and reuse them in multiple scripts.
+The `[vars]` section is your tool for DRY (Don't Repeat Yourself) code. Define values once and reuse them across multiple scripts via the `<vars::...>` token.
 
-**Definition:**
+### Variable Definition
+
+Variables must resolve to a single-line value.
+
+**A. Simple Form (String):**
 
 ```toml
 [vars]
-output_dir = "build/release"
-compiler_flags = "--optimization-level 3 -DNDEBUG"
+image_name = "my-app/api"
+```
+
+**B. Extended Form (Table):**
+Use a table to add a description or define platform-specific values. You **must** use the `value` key.
+
+```toml
+[vars.binary_path]
+desc = "Path to the compiled application binary."
+value = { windows = "target\\release\\app.exe", default = "target/release/app" }
 ```
 
 **Usage:**
-To use a variable, use the syntax `<vars::variable_name>`. `axes` will replace the token with the variable's value before executing the command.
 
 ```toml
 [scripts]
-# Uses the variables defined above.
-build = "c++ <vars::compiler_flags> -o <vars::output_dir>/app main.cpp"
-```
-
-Variables can also compose each other and use other `axes` tokens:
-
-```toml
-[vars]
-# The artifact directory depends on the project name.
-artifact_dir = "artifacts/<name>"
-# The final file name is composed of another variable.
-final_zip = "<vars::artifact_dir>/<name>.zip"
+run = "<vars::binary_path> --serve"
 ```
 
 ## 3. Scripts and Workflows `[scripts]`
 
-This is the main section of `axes`. A "script" is a named entry point for a task you want to perform. Each key in the `[scripts]` table defines a command you can run with `axes <script_name>`.
+This is the core of `axes`, where you define your project's tasks. Each key in the `[scripts]` table becomes a command you can run.
 
 ### 3.1. Command Syntax
 
-You can define a command in several ways, from the simplest to the most complete.
+`axes` provides a highly flexible syntax for defining scripts, from simple one-liners to complex, cross-platform workflows.
 
 #### **A. Simple Command (String)**
 
-The most basic form. `axes` will treat it as the default command for your current operating system.
+The most basic form. A single string to be executed.
 
 ```toml
 [scripts]
-check = "cargo check"
-serve = "python -m http.server 8000"
+test = "cargo test -- --nocapture"
 ```
 
-#### **B. Command Sequence (Array of Strings)**
+#### **B. Command Sequence (Array)**
 
-For workflows that require multiple steps, define the script as a list of strings. `axes` will execute each command in order and stop if any of them fail (unless you use an execution modifier).
+For multi-step workflows. `axes` executes each command in order and stops if any fail.
 
 ```toml
 [scripts]
 deploy = [
-    "echo 'Building the application...'",
+    "# 1. Building assets...",
     "npm run build",
-    "echo 'Deploying to the server...'",
+    "# 2. Publishing to server...",
     "scp -r ./dist/* user@server:/var/www/my-app",
 ]
 ```
 
+**or:**
+
+```toml
+[scripts]
+deploy = [
+    {default = "# 1. Building assets..."},
+    {default = "npm run build"},
+    {windows = "# 2. Publishing to server on Windows...", macos = "# 2. Publishing to server on Mac OS...", linux = "# 2. Publishing to server on Linux...", default = "# 2. Publishing to server on another OS..."},
+    {default = "scp -r ./dist/* user@server:/var/www/my-app"},
+]
+```
+
+Each item in the array can be a `String` or a `Platform Block` (see below).
+
+> **Note:** `TOML` files do not allow lists of different types, so if you use this syntax, the entire script must be of dictionary or string type; they cannot be combined.
+
 #### **C. Extended Structure (Table)**
 
-To add a description or define cross-platform behavior, use a TOML table.
+To add a description or use more advanced syntax, define the script as a TOML table.
 
-* **With Description:**
+* **With `run` key:**
 
     ```toml
-    [scripts]
-    lint = { desc = "Runs the linter to find style issues.", run = "eslint ." }
-    test = { desc = "Runs the complete test suite.", run = ["npm run test:unit", "npm run test:e2e"] }
+    [scripts.lint]
+    desc = "Runs the linter to find style issues."
+    run = "eslint ." # `run` can be a String or an Array
     ```
 
-    The `desc` will be shown in commands like `axes <ctx> info`.
-
-* **Cross-Platform:**
-    Define a single script that behaves differently depending on the operating system. `axes` will automatically select the correct command.
+* **Direct Platform Keys (for single-line scripts):**
+    This is the recommended, ergonomic syntax for cross-platform commands. The `run` key is not needed.
 
     ```toml
     [scripts.browse]
-    desc = "Opens the local documentation in the default browser."
+    desc = "Opens local documentation in the default browser."
+    windows = "start http://localhost:8080"
+    macos = "open http://localhost:8080"
+    linux = "xdg-open http://localhost:8080"
+    # `default` is a fallback for other systems.
+    default = "echo 'Visit http://localhost:8080 in your browser.'"
+    ```
+
+* **A**
+
+* **Table array for complex secuences (multiline scripts):**
+    This is the most powerful and explicit syntax. It is ideal for multi-line scripts where one or more lines have platform logic. Use `[[scripts.name.run]]` for each step in the sequence.
+
+    ```toml
+    [scripts.browse]
+    desc = "Opens local documentation in the default browser."
+
+    [[run]]
+    default = "# --- Starting server... please wait... ---"
+
+    [[run]]
     windows = "start http://localhost:8080"
     macos = "open http://localhost:8080"
     linux = "xdg-open http://localhost:8080"
     default = "echo 'Visit http://localhost:8080 in your browser.'"
+
+    [[run]]
+    default = "# --- Server opened! ---"
     ```
+
+> **Note** We strongly recommend that you learn the optimal ways to define these structures in TOML; there are other more optimal ways to define this data.
+
+The `desc` field is highly recommended as it improves the output of `axes info` and `axes run`.
 
 ### **3.2. Execution Modifiers (Prefixes)**
 
@@ -240,7 +279,7 @@ You can control how each line in a sequence is executed using special prefixes. 
 | Prefix | Name                  | Description                                                                                                   |
 | :----- | :-------------------- | :------------------------------------------------------------------------------------------------------------ |
 | `-`    | **Ignore Errors**     | `axes` will continue to the next command in a sequence even if this one fails (exits with a non-zero code).    |
-| `>`    | **Parallel Execution**| `axes` launches this command and immediately continues with the next, without waiting for it to finish.       |
+| `>`    | **Parallel Execution**|  Groups this command with all subsequent `>` commands into a **batch**. `axes` executes all commands in the batch concurrently and **waits for all of them to finish** before proceeding to the next sequential command.       |
 | `@`    | **Silent Mode**       | `axes` will not print the command (`→ my_command`) to the console before executing it. Useful for clean output. |
 | `#`    | **Echo Mode**         | The entire line is treated as a string to be printed to the console, not as a command to be executed.         |
 | `\|`   | **Terminator**        | Explicitly tells the prefix parser to stop. Useful for commands that start with a special character.        |
@@ -330,10 +369,10 @@ These tokens are resolved to their final values during the expansion (JIT compil
 
 | Token             | Expansion Value                                                     |
 | :---------------- | :------------------------------------------------------------------ |
-| `<name>`    | The full qualified name of the project (e.g., `my-app/api`).        |
-| `<path>`    | The absolute physical path to the project root directory.           |
-| `<uuid>`    | The project's universal unique identifier.                          |
-| `<version>` | The version defined in the project's `axes.toml`.                   |
+| `<name>`          | The full qualified name of the project (e.g., `my-app/api`).        |
+| `<path>`          | The absolute physical path to the project root directory.           |
+| `<uuid>`          | The project's universal unique identifier.                          |
+| `<version>`       | The version defined in the project's `axes.toml`.                   |
 
 #### **Variable Tokens**
 
@@ -539,15 +578,27 @@ APP_ENV = "development"
 
 ### 6.2. Session and Tooling Options `[options]`
 
-#### **Session Hooks: `at_start` and `at_exit`**
-
-These are full scripts that run automatically when entering and exiting an interactive session (`axes <ctx> start`). They can accept parameters passed to the `start` command.
-
-**Example:**
+This table controls `axes`'s behavior for sessions, opening projects, and more.
 
 ```toml
 [options]
-at_start = { desc = "Activates venv and spins up the DB.", run = [
+# Specifies the shell to use for `axes start`. E.g., "bash", "powershell".
+shell = "zsh"
+
+# Template for the interactive session prompt. Supports all `axes` tokens.
+prompt = "(<#cyan><name><#reset>) 🚀 "
+
+# A custom root directory for all binary cache files. Supports `~` and env vars.
+cache_dir = "~/.axes-caches"
+```
+
+#### **Session Hooks: `at_start` and `at_exit`**
+
+These are full `axes` scripts that run automatically when entering (`axes start`) and exiting an interactive session.
+
+```toml
+[options]
+at_start = { desc = "Activates venv and starts services.", run = [
     "source .venv/bin/activate",
     "docker-compose up -d <params::service(default='db')>"
 ]}
@@ -556,15 +607,22 @@ at_exit = "docker-compose down"
 
 #### **`open` Command Configuration: `[options.open_with]`**
 
-Define shortcuts for the `axes <ctx> open` command. Each entry is a full script and can accept parameters.
-
-**Example:**
+Define shortcuts for the `axes <ctx> open` command. Each entry is a **full script definition**, allowing descriptions and platform-specific logic.
 
 ```toml
 [options.open_with]
-edit = { desc = "Opens the project in VS Code.", run = "code \"<path>\"" }
-terminal = "wt -d \"<path>/<params::0(default='.')>\"" # Windows Terminal in subfolder
-default = "edit"
+# Sets the default action for `axes open`.
+default = "editor"
+
+# Each key is an `app_key`.
+[options.open_with.editor]
+desc = "Opens the project in Visual Studio Code."
+run = "code \"<path>\""
+
+[options.open_with.terminal]
+desc = "Opens a new terminal in the project root."
+windows = "wt -d \"<path>\""
+default = "gnome-terminal --working-directory=\"<path>\""
 ```
 
 ---

@@ -8,100 +8,87 @@
 
 # Hoja de Ruta del Proyecto `axes`
 
-¡Bienvenido a la hoja de ruta de `axes`! Este documento describe la visión a corto y largo plazo para el proyecto. Es una guía para los desarrolladores principales y un punto de partida para los miembros de la comunidad que deseen contribuir.
+¡Bienvenido a la hoja de ruta de `axes`! Este documento describe nuestra ambiciosa visión para transformar `axes` de un orquestador de clase mundial en el sistema de construcción inteligente y definitivo para el desarrollo moderno. Sirve como una guía para nuestra misión principal y un llamado a la acción para los colaboradores de la comunidad.
 
 ## Cómo Contribuir
 
-¡Tu ayuda es bienvenida! Si ves una tarea que te interese, especialmente las marcadas con `[contribución bienvenida]`, el proceso ideal es:
+Tu experiencia es invaluable. Si ves una característica que te entusiasma, especialmente aquellas marcadas con `[contribución bienvenida]`, el proceso ideal es:
 
-1. Asegúrate de que no haya un Pull Request abierto para esa tarea.
-2. Abre un "Issue" en GitHub para discutir tu enfoque y que podamos asignártelo. Esto evita trabajo duplicado.
-3. ¡Empieza a trabajar en tu Pull Request!
+1. Revisa los Issues o Pull Requests existentes para evitar duplicar trabajo.
+2. Abre un nuevo Issue para discutir tu estrategia de implementación. Esto nos permite alinearnos en la arquitectura y asignarte la tarea.
+3. ¡Construyamos juntos el futuro de `axes`!
 
-## Estado Actual: `v0.2.0-beta`
+## Estado Actual: `v0.3.0-beta` — Hito de Arquitectura "Juggernaut"
 
-`axes` se encuentra en su primera fase **Beta**. Esto significa:
+Con la versión `v0.3.0`, hemos reestructurado con éxito el núcleo de `axes`. Esta versión "Juggernaut" establece una nueva base de rendimiento, robustez y consistencia multiplataforma.
 
-* **Núcleo Estable:** La arquitectura principal (dispatcher, handlers, interpolador, sistema de caché) es robusta y está bien probada.
-* **API de `axes.toml` Definida:** La sintaxis del `axes.toml`, incluyendo `[scripts]`, herencia y el sistema `<params::...>`, está completa en características para la v1.0.
-* **Listo para Probar:** La herramienta está lista para ser usada en proyectos reales. Se esperan bugs, y el feedback de los usuarios es crucial en esta fase.
+* **AST Universal y Caché Portable:** El motor de compilación ha sido reescrito. `axes` ahora genera un **Árbol de Sintaxis Abstracta (AST) agnóstico a la plataforma**, lo que significa que los archivos de caché binaria son **100% portables** entre Windows, macOS y Linux. Esta es una característica revolucionaria para equipos multiplataforma.
+* **Optimización Just-In-Time (JIT):** Se introdujo un paso final de "especialización" en memoria antes de la ejecución. Esto nos da la flexibilidad de una caché universal con la velocidad pura e intransigente de un ejecutor específico de la plataforma. Los benchmarks confirman que `axes` es ahora significativamente más rápido que sus predecesores y competidores en escenarios realistas de alta carga.
+* **Sintaxis Mejorada y Robustez:** La sintaxis de `axes.toml` para scripts y variables es ahora más potente, ergonómica y estrictamente validada para prevenir errores del usuario.
+* **Ejecución Efímera (`_`):** Ahora es posible ejecutar scripts en proyectos no registrados, una característica potente para CI/CD y flujos de trabajo temporales.
 
 ---
 
-## Hoja de Ruta Inmediata (El Camino a la v1.0)
+## El Camino a `v1.0` — De Orquestador a Sistema de Construcción Inteligente
 
-Estos son los hitos que nos llevarán a una versión 1.0 estable y pulida.
+Nuestro camino hacia `v1.0` se centra en construir sobre la nueva arquitectura "Juggernaut". Estabilizaremos, mejoraremos la experiencia del usuario y luego entregaremos la característica fundamental de un sistema de construcción inteligente: el caché de artefactos.
 
-### Hito 1: La Experiencia de Usuario "Premium" (v0.3.0)
+### **Hito 1: El Hito de "Pulido y Estabilidad" (`v0.4.0`)**
 
-**Objetivo:** Hacer que la interacción diaria con `axes` sea lo más fluida, rápida e intuitiva posible.
+**Objetivo:** Consolidar la arquitectura `v0.3.0`, refinar la experiencia del usuario y asegurar una estabilidad a prueba de fallos. Esta es nuestra prioridad inmediata.
 
-* `[ ]` **Implementar Autocompletado de la Shell:** `[contribución bienvenida]`
-  * **Descripción:** Integrar `clap_complete` para generar scripts de autocompletado para `bash`, `zsh`, `fish`, etc. Debe autocompletar dinámicamente contextos de proyecto, acciones y nombres de scripts.
-  * **Valor:** La mejora de calidad de vida más importante para la usabilidad diaria.
-* `[ ]` **Implementar la TUI de Bienvenida:**
-  * **Descripción:** Al ejecutar `axes` sin argumentos, lanzar una TUI (Interfaz de Usuario de Terminal) de solo lectura que muestre el árbol de proyectos y permita explorar los scripts disponibles.
-  * **Valor:** Transforma la primera impresión y facilita enormemente la "descubribilidad" en ecosistemas complejos.
-* `[ ]` **Estandarizar y Embellecer la Salida:** `[contribución bienvenida]`
-  * **Descripción:** Crear un módulo `ui/printer` y usar una crate como `cli-table` para estandarizar la salida de `info`, `alias list`, etc., en tablas bien formateadas.
-  * **Valor:** Proporciona una identidad visual cohesiva y profesional a la herramienta.
+* `[ ]` **Revisión Arquitectónica Final y Correcciones Menores:**
+  * **Descripción:** Llevar a cabo una revisión exhaustiva de todos los módulos y manejadores del núcleo, aplicando optimizaciones finales, mejorando la documentación y corrigiendo cualquier error menor descubierto después de la refactorización de v0.3.0.
+  * **Valor:** Asegura que la nueva base sea impecable antes de construir sobre ella nuevas características importantes.
+* `[ ]` **Implementar Autocompletado de Shell:** `[contribución bienvenida]`
+  * **Descripción:** Proporcionar autocompletado dinámico y sensible al contexto para `bash`, `zsh` y `fish`. El motor debe sugerir inteligentemente contextos de proyecto, alias y scripts disponibles para un contexto dado.
+  * **Valor:** La mejora de calidad de vida más impactante para la descubribilidad y usabilidad diaria.
+* `[ ]` **Implementar la TUI "Orquestadora" (MVP):**
+  * **Descripción:** Al ejecutar `axes` sin argumentos, lanzar una Interfaz de Usuario de Terminal (TUI) básica e interactiva. Esta TUI visualizará el árbol de proyectos y permitirá a los usuarios navegar y seleccionar scripts disponibles para el contexto actual.
+  * **Valor:** Transforma la primera impresión de `axes` en una experiencia guiada y premium, haciendo que los monorepos complejos sean instantáneamente navegables.
 
-### Hito 2: Control de Herencia y Lógica de Scripts Avanzada (v0.4.0)
+### **Hito 2: El Hito de "Construcción Inteligente" (`v0.5.0`)**
 
-**Objetivo:** Dar a los usuarios un control granular sobre la configuración heredada y desbloquear patrones de scripting avanzados.
+**Objetivo:** Transformar `axes` de un *ejecutor* de tareas en un sistema de construcción eficiente que evita el trabajo redundante.
 
-* `[ ]` **Implementar Herencia Privada/Pública con `_`:**
-  * **Descripción:** Modificar el `config_resolver` para que las claves en `[vars]`, `[env]`, y `[scripts]` que comiencen con un guion bajo (`_`) no sean heredadas por los proyectos hijos.
-  * **Valor:** Permite la encapsulación y la definición de "helpers" internos en un proyecto padre sin contaminar el espacio de nombres de los hijos.
-* `[ ]` **Implementar Comandos Multiplataforma en Secuencias:**
-  * **Descripción:** Extender el parser del `axes.toml` para que dentro de una secuencia de `[scripts]`, se pueda definir un paso individual como una tabla multiplataforma.
+* `[ ]` **Implementar Caché de Artefactos (MVP):**
+  * **Descripción:** Introducir un mecanismo de caché de tareas basado en sumas de verificación de archivos de entrada. Una nueva sección `[scripts.mi_script.cache]` en `axes.toml` permitirá a los usuarios declarar `sources` (archivos/patrones de archivos de entrada). `axes` calculará una suma de verificación de estado y omitirá la ejecución del script si ninguna fuente ha cambiado desde la última ejecución exitosa.
+  * **Valor:** Esta es la característica fundamental para la productividad del desarrollador, ahorrando una inmensa cantidad de tiempo en flujos de trabajo diarios y pipelines de CI/CD al evitar costosas re-compilaciones, re-pruebas y re-empaquetados.
 
-        ```toml
-        # Sintaxis a soportar
-        deploy = [
-            "<scripts::build>",
-            { windows = "win-deploy.ps1", linux = "./deploy.sh" },
-            "echo 'Desplegado!'"
-        ]
-        ```
+### **Hito 3: El Hito de "Ecosistema y Estabilidad" (`v1.0.0`)**
 
-  * **Valor:** Desbloquea la capacidad de crear flujos de trabajo complejos que son, paso a paso, completamente multiplataforma.
+**Objetivo:** Preparar `axes` para su lanzamiento oficial y listo para producción con características que fomentan la confianza a largo plazo y simplifican la integración.
 
-### Hito 3: Estabilización y Ecosistema (v1.0.0)
-
-**Objetivo:** Preparar `axes` para su lanzamiento oficial, enfocándose en la robustez y en facilitar su adopción.
-
-* `[ ]` **Implementar `axes validate`:**
-  * **Descripción:** Un comando que escanee todo el `index.bin` en busca de inconsistencias (rutas que ya no existen, enlaces de padre rotos) y ofrezca reportes o reparaciones interactivas.
-  * **Valor:** Una herramienta de diagnóstico crucial para la confianza del usuario a largo plazo.
+* `[ ]` **Implementar comando `axes doctor`:**
+  * **Descripción:** Un comando de verificación de salud exhaustivo que encuentra y ofrece corregir inconsistencias como enlaces padre rotos en el índice, proyectos cuyas rutas ya no existen y archivos de caché huérfanos. Esto evoluciona el comando `repair` existente.
+  * **Valor:** Una herramienta de diagnóstico y reparación crucial que fomenta la confianza del usuario.
 * `[ ]` **Soporte Nativo para Archivos `.env`:** `[contribución bienvenida]`
-  * **Descripción:** Añadir una clave `[env].load = ".env"` al `axes.toml` que cargue automáticamente las variables de un archivo `.env` en el entorno de ejecución de los scripts.
-  * **Valor:** Una integración muy solicitada que simplifica enormemente la gestión de secretos y configuraciones locales.
-* `[ ]` **Congelación de la API y Documentación Final:**
-  * **Descripción:** Realizar una revisión final de todas las APIs (CLI y `axes.toml`) y declararlas estables para la v1.0. Completar y pulir toda la documentación.
-  * **Valor:** La garantía de estabilidad que los usuarios necesitan para adoptar `axes` en producción.
+  * **Descripción:** Agregar una clave como `[env].load = ".env"` para descubrir y cargar automáticamente variables desde un archivo `.env` especificado en el entorno de ejecución del script.
+  * **Valor:** Una característica altamente solicitada que se alinea con las prácticas modernas de desarrollo.
+* `[ ]` **Congelación de la API Final y Revisión de la Documentación:**
+  * **Descripción:** Realizar una revisión final de la sintaxis de `axes.toml` y los contratos de comandos CLI. Declararlos estables para `v1.0`. Asegurar que toda la documentación esté completa, pulida y llena de ejemplos del mundo real.
+  * **Valor:** La promesa de estabilidad esencial para la adopción en entornos de producción.
 
 ---
 
-## Ideas a Largo Plazo (Post-v1.0 / El Futuro)
+## **El Futuro (Post-`v1.0`)**
 
-Estas son características más ambiciosas que se considerarán una vez que el núcleo del sistema sea estable.
+Estas son características ambiciosas y revolucionarias que exploraremos una vez que la base de `v1.0` sea sólida.
 
-* `[ ]` **Motor de Plantillas (`init` 2.0):** Transformar `init` en un motor de andamiaje completo que use plantillas de `~/.config/axes/templates/`.
-* `[ ]` **Cambio de Sesión (`axes switch <contexto>`):** La capacidad de cambiar de una sesión de proyecto a otra sin necesidad de `exit` y volver a entrar.
-* `[ ]` **Centralización de Cachés:** Mover todos los archivos de caché (`.axes/*.bin`) a un directorio centralizado (`~/.config/axes/cache/`) para mantener limpios los directorios de los proyectos.
-* `[ ]` **Integración con Git:** Añadir tokens dinámicos como `<git::branch>` o `<git::commit_hash>`.
+* `[ ]` **El Demonio `axes` (Daemon):** Un proceso en segundo plano de larga ejecución para un caché de construcción casi instantáneo y reactividad.
+* `[ ]` **Caché Remoto:** Compartir el caché de artefactos a través de un equipo o una granja de CI.
+* `[ ]` **Motor de Plantillas (`init 2.0`):** Un potente motor de andamiaje para generar nuevos proyectos a partir de plantillas.
+* `[ ]` **Características de Scripting Avanzado:** Scopes privados (prefijo `_` para elementos no heredables), claves de caché avanzadas y tokens dinámicos (`<git::branch>`).
 
 ---
 
-## ¡Ayúdanos a Probar! (Peticiones de Testing para la Beta)
+## **Llamada a Probadores (Fase Beta)**
 
-¡La mejor forma de contribuir ahora mismo es probando `axes` en tus flujos de trabajo! Estamos especialmente interesados en feedback sobre las siguientes áreas:
+La contribución más valiosa en este momento es **usar `axes v0.3.0` y darnos feedback**. Estamos particularmente interesados en:
 
-1. **El Sistema de Parámetros:** Intenta crear scripts complejos usando `<params::...>` en todas sus variantes. ¿Es intuitivo? ¿Encuentras algún caso borde que no funcione?
-2. **La Composición de Scripts:** Crea scripts que se llamen unos a otros (`<scripts::...>`) y que usen ejecución paralela (`>`). Intenta romper la detección de ciclos.
-3. **Operaciones de Refactorización:** Usa `link`, `rename`, `unregister` y `delete` (con sus flags) en un monorepo de prueba. ¿Es el comportamiento siempre el esperado? ¿Son los mensajes claros?
-4. **Cancelación con `Ctrl+C`:** Lanza un script de larga duración (ej. `[scripts] wait = "sleep 30"`) e intenta cancelarlo. ¿Responde la herramienta como esperas?
+1. **Caché Multiplataforma:** Si trabajas en un equipo con múltiples sistemas operativos, intenta subir tu directorio `.axes-cache` al repositorio. ¿Funciona sin problemas para tus colegas?
+2. **El Contexto `_`:** Lleva el modo de ejecución efímera al límite en tus pipelines de CI o pruebas locales.
+3. **Monorepos del Mundo Real:** Integra `axes` en uno de tus proyectos complejos existentes. ¿Qué desafíos enfrentaste? ¿Qué características faltaron?
 
 **¿Cómo reportar feedback?**
-Por favor, abre un "Issue" en nuestro [repositorio de GitHub](https://github.com/RetypeOS/axes/issues). ¡Cualquier feedback es increíblemente valioso
+Por favor, abre un Issue en nuestro [repositorio de GitHub](https://github.com/retypeos/axes/issues). Cada pieza de feedback es un paso hacia la construcción de una herramienta mejor.
