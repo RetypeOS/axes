@@ -18,7 +18,7 @@ Your expertise is invaluable. If you see a feature that excites you, especially 
 
 ## Current Status: `v0.3.0-beta` — The "Juggernaut" Architecture Milestone
 
-With version `v0.3.0`, we have successfully re-engineered the core of `axes`. This "Juggernaut" release establishes a new foundation of performance, robustness, and cross-platform consistency.
+With version `v0.3.0`, we have successfully re-engineered the core of `axes`. This release establishes a new foundation of performance, robustness, and cross-platform consistency.
 
 * **Universal AST & Portable Cache:** The compilation engine has been rewritten. `axes` now generates a **platform-agnostic Abstract Syntax Tree (AST)**, meaning binary cache files are **100% portable** between Windows, macOS, and Linux. This is a game-changing feature for multi-platform teams.
 * **Just-In-Time (JIT) Optimization:** A final, in-memory "specialization" step was introduced before execution. This gives us the flexibility of a universal cache with the raw, uncompromising speed of a platform-specific runner. Benchmarks confirm `axes` is now significantly faster than its predecessors and competitors in realistic, high-load scenarios.
@@ -73,6 +73,9 @@ Our path to `v1.0` is focused on building upon the new "Juggernaut" architecture
 
 These are ambitious, game-changing features that we will explore once the `v1.0` foundation is solid.
 
+* `[ ]` **Semantic Cache Deduplication:**
+  * **Description:** Evolve the binary cache format to use structural deduplication (interning). Instead of storing thousands of identical script structures (e.g., simple `echo` commands), store them once and use lightweight pointers.
+  * **Value:** Further reduce cache size and deserialization time for massive monorepos with highly redundant `axes.toml` files, pushing our performance and efficiency to its theoretical limits.
 * `[ ]` **The `axes` Daemon:** A long-running background process for near-instantaneous build caching and reactivity.
 * `[ ]` **Remote Caching:** Sharing the artifact cache across a team or CI farm.
 * `[ ]` **Templating Engine (`init 2.0`):** A powerful scaffolding engine to generate new projects from templates.
@@ -85,8 +88,7 @@ These are ambitious, game-changing features that we will explore once the `v1.0`
 The most valuable contribution right now is to **use `axes v0.3.0` and give us feedback**. We are particularly interested in:
 
 1. **Cross-Platform Cache:** If you work in a multi-OS team, try committing your `.axes-cache` directory. Does it work seamlessly for your colleagues?
-2. **The `_` Context:** Push the ephemeral execution mode to its limits in your CI pipelines or local tests.
-3. **Real-World Monorepos:** Integrate `axes` into one of your existing complex projects. What challenges did you face? What features were missing?
+2. **Real-World Monorepos:** Integrate `axes` into one of your existing complex projects. What challenges did you face? What features were missing?
 
 **How to report feedback?**
 Please open an Issue in our [GitHub repository](https://github.com/retypeos/axes/issues). Every piece of feedback is a step toward building a better tool.

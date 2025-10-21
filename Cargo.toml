@@ -48,6 +48,9 @@ tokio = { version = "1.47.1", features = ["rt-multi-thread", "process", "signal"
 blake3 = "1.8.2"
 scopeguard = "1.2.0"
 
+# Compression
+lz4_flex = "0.11.5"
+
 # Pendient to order
 
 [build-dependencies]

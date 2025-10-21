@@ -40,8 +40,8 @@ _params_hyperfine = """
 <params::task-low(      alias='-tl', map=' ', default='task -f --dir ./low_test script_90'              literal )>\
 <params::task-mid(      alias='-tm', map=' ', default='task -f --dir ./mid_test script_900'             literal )>\
 <params::task-high(     alias='-th', map=' ', default='task -f --dir ./high_test script_9000'           literal )>\
-<params::task-big(      alias='-tb', map=' ', default='task -f --dir ./big_test script_90000'           literal )>\
-<params(literal)>\
+<params::task-big(      alias='-tb', map=' ', default='task -f --dir ./big_test script_90000'           literal )> \
+ <params(literal)>\
 """
 
 # --- Parameters for `time` ---

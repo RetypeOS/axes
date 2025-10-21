@@ -22,7 +22,7 @@ Cargo.lock
 target/
 .venv/
 
-# My personal data files
+# Retype15 personal data files
 VISION.md
 TODO_old.md
 my_todo.md
@@ -33,9 +33,9 @@ axes
 axes.sh
 axesrs.txt
 
-#.axes/config.cache.bin
 flamegraph_old.html
 justfile
 Taskfile.yml
 src/axes_src.txt
 axes_doc.txt
+examples/stress_tests/very_big_test/
