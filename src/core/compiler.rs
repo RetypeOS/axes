@@ -4,11 +4,11 @@
 
 use anyhow::{Context, Result, anyhow};
 use lazy_static::lazy_static;
+use lz4_flex;
 use regex::Regex;
 use std::{collections::HashMap, fs, path::PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
-use lz4_flex;
 
 use crate::{
     core::{cache, color, parameters, paths},
@@ -495,7 +495,7 @@ fn read_cached_layer(path: &std::path::Path) -> Result<CachedProjectConfig> {
     // 1. Read the compressed bytes from disk.
     let compressed_bytes = fs::read(path)
         .with_context(|| format!("Failed to read cache file at '{}'", path.display()))?;
-    
+
     // ROBUSTNESS: Handle empty file case gracefully.
     if compressed_bytes.is_empty() {
         return Err(anyhow!("Cache file is empty."));
@@ -504,16 +504,24 @@ fn read_cached_layer(path: &std::path::Path) -> Result<CachedProjectConfig> {
     // 2. Decompress the data using LZ4.
     // `decompress_size_prepended` is extremely fast and safe. It reads the expected
     // decompressed size from the first few bytes, preventing DoS attacks with "zip bombs".
-    log::trace!("Decompressing cache layer from {} bytes.", compressed_bytes.len());
-    let decompressed_bytes = lz4_flex::decompress_size_prepended(&compressed_bytes)
-        .map_err(|e| anyhow!("Failed to decompress cache file: {}. It might be corrupt.", e))?;
+    log::trace!(
+        "Decompressing cache layer from {} bytes.",
+        compressed_bytes.len()
+    );
+    let decompressed_bytes =
+        lz4_flex::decompress_size_prepended(&compressed_bytes).map_err(|e| {
+            anyhow!(
+                "Failed to decompress cache file: {}. It might be corrupt.",
+                e
+            )
+        })?;
     log::trace!("Decompressed to {} bytes.", decompressed_bytes.len());
-    
+
     // 3. Deserialize the raw bytes using bincode.
     let (cached_layer, _): (CachedProjectConfig, usize) =
         bincode::serde::decode_from_slice(&decompressed_bytes, bincode::config::standard())
             .context("Failed to deserialize cache data after decompression. The cache is likely from an incompatible version of `axes`.")?;
-    
+
     Ok(cached_layer)
 }
 
@@ -523,25 +531,38 @@ fn write_cached_layer(path: &std::path::Path, layer: &CachedProjectConfig) -> Re
     // 1. Ensure the parent directory exists.
     if let Some(parent_dir) = path.parent() {
         fs::create_dir_all(parent_dir).with_context(|| {
-            format!("Failed to create cache directory '{}'", parent_dir.display())
+            format!(
+                "Failed to create cache directory '{}'",
+                parent_dir.display()
+            )
         })?;
     }
-    
+
     // 2. Serialize the AST to raw bytes using bincode.
     let decompressed_bytes = bincode::serde::encode_to_vec(layer, bincode::config::standard())
         .context("Failed to serialize cache layer.")?;
-    log::trace!("Serialized cache layer to {} bytes.", decompressed_bytes.len());
+    log::trace!(
+        "Serialized cache layer to {} bytes.",
+        decompressed_bytes.len()
+    );
 
     // 3. Compress the raw bytes using LZ4.
     // `compress_prepend_size` is very fast and adds a small header with the original
     // size, which is used for safe decompression.
     let compressed_bytes = lz4_flex::compress_prepend_size(&decompressed_bytes);
-    log::trace!("Compressed cache layer to {} bytes.", compressed_bytes.len());
-    
+    log::trace!(
+        "Compressed cache layer to {} bytes.",
+        compressed_bytes.len()
+    );
+
     // 4. Write the final compressed bytes to disk.
-    fs::write(path, &compressed_bytes)
-        .with_context(|| format!("Failed to write compressed cache file to '{}'", path.display()))?;
-        
+    fs::write(path, &compressed_bytes).with_context(|| {
+        format!(
+            "Failed to write compressed cache file to '{}'",
+            path.display()
+        )
+    })?;
+
     Ok(())
 }
 
