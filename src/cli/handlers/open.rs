@@ -1,7 +1,7 @@
 use crate::{
     cli::handlers::commons,
     core::task_executor,
-    models::{GlobalIndex, ResolvedConfig, ResolvedOpenWithConfig},
+    models::{ResolvedConfig, ResolvedOpenWithConfig},
     state::AppStateGuard,
 };
 use anyhow::{Result, anyhow};
@@ -29,16 +29,20 @@ struct OpenArgs {
 
 // --- Main Handler ---
 
-pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGuard) -> Result<()> {
+pub fn handle(
+    context: Option<String>,
+    args: Vec<String>,
+    state_guard: &mut AppStateGuard,
+) -> Result<()> {
     let open_args = OpenArgs::try_parse_from(&args)?;
-    let config = commons::resolve_config_for_context(context, index)?;
+    let config = commons::resolve_config_for_context(context, state_guard)?;
     let options = config.get_options()?;
 
     if open_args.list {
         return list_open_commands(&config.qualified_name, &options.open_with);
     }
 
-    execute_open_command(open_args, config, options.open_with, index)
+    execute_open_command(open_args, config, options.open_with)
 }
 
 // --- Subcommand Logic ---
@@ -81,7 +85,6 @@ fn execute_open_command(
     open_args: OpenArgs,
     config: ResolvedConfig,
     open_with: ResolvedOpenWithConfig,
-    index: &mut GlobalIndex,
 ) -> Result<()> {
     // 1. Determine which application key to use.
     let app_key_to_use = open_args
@@ -117,7 +120,7 @@ fn execute_open_command(
         config.qualified_name.cyan(),
         app_key_to_use.cyan()
     );
-    task_executor::execute_task(&task_specialized, &config, &resolver, index)?;
+    task_executor::execute_task(&task_specialized, &config, &resolver)?;
 
     Ok(())
 }

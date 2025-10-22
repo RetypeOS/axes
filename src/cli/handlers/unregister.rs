@@ -32,14 +32,18 @@ struct UnregisterArgs {
 
 // --- Main Handler ---
 
-pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGuard) -> Result<()> {
+pub fn handle(
+    context: Option<String>,
+    args: Vec<String>,
+    state_guard: &mut AppStateGuard,
+) -> Result<()> {
     // 1. Parse & Resolve
     let unregister_args = UnregisterArgs::try_parse_from(&args)?;
     let final_context = unregister_args
         .context
         .or(context)
         .ok_or_else(|| anyhow!(t!("error.context_required"), command = "unregister"))?;
-    let config = commons::resolve_config_for_context(Some(final_context), index)?;
+    let config = commons::resolve_config_for_context(Some(final_context), state_guard)?;
 
     if config.uuid == index_manager::GLOBAL_PROJECT_UUID {
         return Err(anyhow!(t!("unregister.error.cannot_unregister_global")));
@@ -47,7 +51,7 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGu
 
     // 2. Plan
     let plan = commons::prepare_operation_plan(
-        index,
+        state_guard,
         &config,
         unregister_args.recursive,
         unregister_args.reparent_to.clone(),
@@ -55,13 +59,13 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGu
     )?;
 
     // 3. Confirm
-    if !confirm_unregister_operation(index, &plan)? {
+    if !confirm_unregister_operation(state_guard.index(), &plan)? {
         return Ok(());
     }
 
     // 4. Execute
     execute_unregister_plan(
-        index,
+        state_guard,
         &config,
         &plan,
         unregister_args.recursive,
@@ -103,7 +107,7 @@ fn confirm_unregister_operation(
 
 /// Encapsulates the execution logic after confirmation.
 fn execute_unregister_plan(
-    index: &mut GlobalIndex,
+    state_guard: &mut AppStateGuard,
     config: &ResolvedConfig,
     plan: &commons::OperationPlan,
     is_recursive: bool,
@@ -120,7 +124,7 @@ fn execute_unregister_plan(
     if !is_recursive {
         let new_parent_uuid = reparent_to
             .as_ref()
-            .map(|ctx| context_resolver::resolve_context(ctx, index).map(|(uuid, _)| uuid))
+            .map(|ctx| context_resolver::resolve_context(ctx, state_guard).map(|(uuid, _)| uuid))
             .transpose()?
             .unwrap_or(index_manager::GLOBAL_PROJECT_UUID);
 
@@ -129,8 +133,11 @@ fn execute_unregister_plan(
             config.uuid,
             new_parent_uuid
         );
-        let reparent_op_warnings =
-            index_manager::reparent_children(index, config.uuid, new_parent_uuid)?;
+        let reparent_op_warnings = index_manager::reparent_children(
+            state_guard.index_mut(),
+            config.uuid,
+            new_parent_uuid,
+        )?;
         all_warnings.extend(reparent_op_warnings);
     }
 
@@ -138,7 +145,8 @@ fn execute_unregister_plan(
         "Removing {} UUID(s) from the index.",
         plan.uuids_to_remove.len()
     );
-    let removed_count = index_manager::remove_from_index(index, &plan.uuids_to_remove);
+    let removed_count =
+        index_manager::remove_from_index(state_guard.index_mut(), &plan.uuids_to_remove);
 
     // Final feedback
     println!(

@@ -27,7 +27,11 @@ pub struct RegisterArgs {
 
 // --- Main Handler ---
 
-pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGuard) -> Result<()> {
+pub fn handle(
+    context: Option<String>,
+    args: Vec<String>,
+    state_guard: &mut AppStateGuard,
+) -> Result<()> {
     if env::var("AXES_PROJECT_UUID").is_ok() {
         return Err(anyhow!(t!("register.error.in_session")));
     }
@@ -50,7 +54,8 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGu
     })?;
 
     let suggested_parent_uuid = if let Some(parent_context) = &register_args.parent {
-        let (uuid, name) = crate::core::context_resolver::resolve_context(parent_context, index)?;
+        let (uuid, name) =
+            crate::core::context_resolver::resolve_context(parent_context, state_guard)?;
         println!("Using '{}' as the suggested parent.", name.cyan());
         Some(uuid)
     } else {
@@ -62,7 +67,7 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGu
         suggested_parent_uuid,
     };
 
-    onboarding_manager::register_project(&initial_path, index, &options)
+    onboarding_manager::register_project(&initial_path, state_guard, &options)
         .with_context(|| format!(t!("register.error.failed"), path = initial_path.display()))?;
 
     Ok(())

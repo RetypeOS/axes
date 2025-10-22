@@ -1,9 +1,6 @@
 use crate::{
     core::{color, commons::wrap_value, parameters::ArgResolver},
-    models::{
-        CommandAction, GlobalIndex, PlatformSpecializedTask, ResolvedConfig, RunSpec,
-        TemplateComponent,
-    },
+    models::{CommandAction, PlatformSpecializedTask, ResolvedConfig, RunSpec, TemplateComponent},
     system::executor,
 };
 use anyhow::{Context, Result, anyhow};
@@ -18,9 +15,8 @@ pub fn execute_task(
     specialized_task: &PlatformSpecializedTask,
     config: &ResolvedConfig,
     resolver: &ArgResolver,
-    index: &mut GlobalIndex,
 ) -> Result<()> {
-    execute_task_inner(specialized_task, config, resolver, index, 0)
+    execute_task_inner(specialized_task, config, resolver, 0)
 }
 
 // --- Internal Recursive Executor ---
@@ -42,7 +38,6 @@ fn execute_task_inner(
     specialized_task: &PlatformSpecializedTask,
     config: &ResolvedConfig,
     resolver: &ArgResolver,
-    index: &mut GlobalIndex,
     depth: u32,
 ) -> Result<()> {
     // A batch of commands to be executed in parallel.
@@ -62,8 +57,7 @@ fn execute_task_inner(
         match &command_exec.action {
             CommandAction::Execute(template) => {
                 // Render the final command string from the template components.
-                let rendered_string =
-                    assemble_final_command(template, config, resolver, index, depth)?;
+                let rendered_string = assemble_final_command(template, config, resolver, depth)?;
 
                 // Skip execution if the rendered command is empty after trimming whitespace.
                 if !rendered_string.trim().is_empty() {
@@ -86,8 +80,7 @@ fn execute_task_inner(
                 }
             }
             CommandAction::Print(template) => {
-                let rendered_string =
-                    assemble_final_command(template, config, resolver, index, depth)?;
+                let rendered_string = assemble_final_command(template, config, resolver, depth)?;
                 println!("{}", rendered_string);
             }
         }
@@ -108,7 +101,6 @@ pub fn assemble_final_command(
     template: &[TemplateComponent],
     config: &ResolvedConfig,
     resolver: &ArgResolver,
-    _index: &mut GlobalIndex,
     _depth: u32,
 ) -> Result<String> {
     let mut final_command = String::with_capacity(template.len() * 50);
@@ -147,13 +139,7 @@ pub fn assemble_final_command(
                 let command_to_run = match spec {
                     RunSpec::Literal(cmd) => {
                         let temp_template = vec![TemplateComponent::Literal(cmd.clone())];
-                        assemble_final_command(
-                            &temp_template,
-                            config,
-                            resolver,
-                            _index,
-                            _depth + 1,
-                        )?
+                        assemble_final_command(&temp_template, config, resolver, _depth + 1)?
                     }
                 };
                 let env = config.get_env()?;

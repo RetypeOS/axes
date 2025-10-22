@@ -32,7 +32,7 @@ struct InfoArgs {
 pub fn handle(
     dispatcher_context: Option<String>,
     args: Vec<String>,
-    index: &mut AppStateGuard,
+    state_guard: &mut AppStateGuard,
 ) -> Result<()> {
     // 1. Parse all handler-specific arguments.
     let info_args = InfoArgs::try_parse_from(&args)?;
@@ -44,7 +44,8 @@ pub fn handle(
         .unwrap_or_else(|| ".".to_string());
 
     // 3. Lazily resolve the full configuration for the context.
-    let config = commons::resolve_config_for_context(Some(final_context), index)?;
+    let config = commons::resolve_config_for_context(Some(final_context), state_guard)?;
+    let index = state_guard.index();
 
     // 4. Print each section of the configuration.
     print_metadata(&config, index)?;

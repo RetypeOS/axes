@@ -1,7 +1,7 @@
 use crate::{
     cli::handlers::commons,
     core::{parameters::ArgResolver, task_executor},
-    models::{CommandAction, GlobalIndex, ResolvedConfig, Task, TemplateComponent},
+    models::{CommandAction, ResolvedConfig, Task, TemplateComponent},
     state::AppStateGuard,
     system::shell,
 };
@@ -98,9 +98,9 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGu
 
     // 4. Dispatch to either dry-run or actual session launch.
     if start_args.dry_run {
-        dry_run_session(&config, flattened_start, flattened_exit, &resolver, index)
+        dry_run_session(&config, flattened_start, flattened_exit, &resolver)
     } else {
-        shell::launch_session(&config, flattened_start, flattened_exit, &resolver, index)
+        shell::launch_session(&config, flattened_start, flattened_exit, &resolver)
             .map_err(Into::into)
     }
 }
@@ -113,15 +113,14 @@ fn dry_run_session(
     task_start: Option<Arc<Task>>,
     task_exit: Option<Arc<Task>>,
     resolver: &ArgResolver,
-    index: &mut GlobalIndex,
 ) -> Result<()> {
     println!(
         "\n📋 Dry-run for session in '{}'",
         config.qualified_name.cyan()
     );
 
-    display_hook_plan("at_start", task_start, config, resolver, index)?;
-    display_hook_plan("at_exit", task_exit, config, resolver, index)?;
+    display_hook_plan("at_start", task_start, config, resolver)?;
+    display_hook_plan("at_exit", task_exit, config, resolver)?;
 
     Ok(())
 }
@@ -132,7 +131,6 @@ fn display_hook_plan(
     task: Option<Arc<Task>>,
     config: &ResolvedConfig,
     resolver: &ArgResolver,
-    index: &mut GlobalIndex,
 ) -> Result<()> {
     println!("\n--- Hook: [{}] ---", hook_name.yellow());
 
@@ -157,7 +155,7 @@ fn display_hook_plan(
                 CommandAction::Execute(t) => ("".normal(), t),
             };
             let rendered_string =
-                task_executor::assemble_final_command(template, config, resolver, index, 0)?;
+                task_executor::assemble_final_command(template, config, resolver, 0)?;
             println!("{}{}", action_prefix, rendered_string.green());
         }
     }

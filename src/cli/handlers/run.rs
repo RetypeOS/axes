@@ -47,7 +47,7 @@ struct RunArgs {
 pub fn handle(
     context: Option<String>,
     mut args: Vec<String>,
-    index: &mut AppStateGuard,
+    state_guard: &mut AppStateGuard,
 ) -> Result<()> {
     let script_name_opt = if args.is_empty() {
         None
@@ -55,7 +55,7 @@ pub fn handle(
         Some(args.remove(0))
     };
     let script_params = args;
-    let config = commons::resolve_config_for_context(context, index)?;
+    let config = commons::resolve_config_for_context(context, state_guard)?;
 
     match script_name_opt {
         Some(script_name) => {
@@ -76,9 +76,9 @@ pub fn handle(
             let task_specialized = config.specialize_task_for_platform(&task_flattened);
 
             if is_dry_run {
-                dry_run_script(&script_name, &task_specialized, &config, &resolver, index)
+                dry_run_script(&script_name, &task_specialized, &config, &resolver)
             } else {
-                execute_script(&script_name, &task_specialized, &config, &resolver, index)
+                execute_script(&script_name, &task_specialized, &config, &resolver)
             }
         }
         None => {
@@ -87,7 +87,7 @@ pub fn handle(
             if !script_params.is_empty() {
                 log::warn!("Arguments provided to 'axes run' without a script name are ignored.");
             }
-            list_available_scripts(&config, index)
+            list_available_scripts(&config, state_guard.index())
         }
     }
 }
@@ -145,7 +145,6 @@ fn execute_script(
     task: &PlatformSpecializedTask,
     config: &ResolvedConfig,
     resolver: &ArgResolver,
-    index: &mut GlobalIndex,
 ) -> Result<()> {
     if task.commands.is_empty() {
         println!("{}", t!("run.info.empty_script").yellow());
@@ -166,7 +165,7 @@ fn execute_script(
         println!("\n[{}:{}]", prefix_path.dimmed(), script_name.cyan());
     }
 
-    task_executor::execute_task(task, config, resolver, index)?;
+    task_executor::execute_task(task, config, resolver)?;
     Ok(())
 }
 
@@ -192,7 +191,6 @@ fn dry_run_script(
     task: &PlatformSpecializedTask,
     config: &ResolvedConfig,
     resolver: &ArgResolver,
-    index: &mut GlobalIndex,
 ) -> Result<()> {
     let prefix_path = format_prefix_path(&config.qualified_name);
     println!(
@@ -226,8 +224,7 @@ fn dry_run_script(
         };
 
         // assemble_final_command now uses the pre-built resolver
-        let rendered_string =
-            task_executor::assemble_final_command(template, config, resolver, index, 0)?;
+        let rendered_string = task_executor::assemble_final_command(template, config, resolver, 0)?;
 
         if prefixes.is_empty() {
             println!("{}{}", action_prefix, rendered_string.green());

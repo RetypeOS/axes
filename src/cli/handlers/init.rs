@@ -9,7 +9,7 @@ use super::commons;
 use crate::{
     constants::{AXES_DIR, PROJECT_CONFIG_FILENAME, PROJECT_REF_FILENAME},
     core::{context_resolver, index_manager},
-    models::{GlobalIndex, ProjectConfig, ProjectRef},
+    models::{ProjectConfig, ProjectRef},
     state::AppStateGuard,
 };
 
@@ -58,7 +58,7 @@ struct ProjectDetails {
 pub fn handle(
     _context: Option<String>,
     args: Vec<String>,
-    index: &mut AppStateGuard,
+    state_guard: &mut AppStateGuard,
 ) -> Result<()> {
     let init_args = InitArgs::try_parse_from(&args)?;
     let target_dir = env::current_dir()?;
@@ -75,7 +75,7 @@ pub fn handle(
     }
 
     // 2. Gather all project details, interactively or from args.
-    let details = gather_project_details(init_args, &target_dir, index)?;
+    let details = gather_project_details(init_args, &target_dir, state_guard)?;
 
     // 3. Create the configuration object.
     let mut project_config =
@@ -89,7 +89,7 @@ pub fn handle(
 
     // 4. Perform filesystem and index operations.
     let (new_uuid, _) = index_manager::add_project_to_index(
-        index,
+        state_guard.index_mut(),
         details.name.clone(),
         target_dir.clone(),
         Some(details.parent_uuid),
@@ -119,7 +119,8 @@ pub fn handle(
     println!(
         "  {:<15} {}",
         "Parent:".blue(),
-        index_manager::build_qualified_name(details.parent_uuid, index).unwrap_or_default()
+        index_manager::build_qualified_name(details.parent_uuid, state_guard.index())
+            .unwrap_or_default()
     );
     println!("  {:<15} {}", "Config file:".blue(), config_path.display());
     println!("\n{}", t!("init.success.next_steps").dimmed());
@@ -133,16 +134,16 @@ pub fn handle(
 fn gather_project_details(
     args: InitArgs,
     target_dir: &Path,
-    index: &mut GlobalIndex,
+    state_guard: &mut AppStateGuard,
 ) -> Result<ProjectDetails> {
     let is_interactive = !args.autosolve;
 
     // --- Resolve name and parent first for early validation ---
     let name = resolve_project_name(&args.name, target_dir, is_interactive)?;
-    let parent_uuid = resolve_parent_project(&args.parent, is_interactive, index)?;
+    let parent_uuid = resolve_parent_project(&args.parent, is_interactive, state_guard)?;
 
     // --- Early collision check ---
-    if index_manager::is_sibling_name_taken(index, parent_uuid, &name, None) {
+    if index_manager::is_sibling_name_taken(state_guard.index(), parent_uuid, &name, None) {
         return Err(anyhow!(t!("init.error.name_collision"), name = name));
     }
 
@@ -221,16 +222,17 @@ fn resolve_project_name(
 fn resolve_parent_project(
     parent_arg: &Option<String>,
     is_interactive: bool,
-    index: &mut GlobalIndex,
+    state_guard: &mut AppStateGuard,
 ) -> Result<Uuid> {
     if let Some(parent_context) = parent_arg {
-        let (uuid, qualified_name) = context_resolver::resolve_context(parent_context, index)?;
+        let (uuid, qualified_name) =
+            context_resolver::resolve_context(parent_context, state_guard)?;
         println!("  {} {}", "Parent Project:".dimmed(), qualified_name);
         return Ok(uuid);
     }
 
     if is_interactive {
-        return commons::choose_parent_interactive(index);
+        return commons::choose_parent_interactive(state_guard);
     }
 
     println!(
@@ -242,7 +244,7 @@ fn resolve_parent_project(
 }
 
 fn parse_key_value_pairs(pairs: &[String]) -> Result<HashMap<String, String>> {
-    let mut map = HashMap::with_capacity(pairs.len()); // OPTIMIZATION: Pre-allocate.
+    let mut map = HashMap::with_capacity(pairs.len());
     for pair in pairs {
         let (key, value) = pair
             .split_once('=')

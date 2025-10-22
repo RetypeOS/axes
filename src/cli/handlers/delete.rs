@@ -25,12 +25,16 @@ struct DeleteArgs {
     reparent_to: Option<String>,
 }
 
-pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGuard) -> Result<()> {
+pub fn handle(
+    context: Option<String>,
+    args: Vec<String>,
+    state_guard: &mut AppStateGuard,
+) -> Result<()> {
     // 1. Parse arguments and resolve target project.
     let delete_args = DeleteArgs::try_parse_from(&args)?;
     let context_str =
         context.ok_or_else(|| anyhow!(t!("error.context_required"), command = "delete"))?;
-    let config = commons::resolve_config_for_context(Some(context_str), index)?;
+    let config = commons::resolve_config_for_context(Some(context_str), state_guard)?;
 
     if config.uuid == index_manager::GLOBAL_PROJECT_UUID {
         return Err(anyhow!(t!("delete.error.cannot_delete_global")));
@@ -38,7 +42,7 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGu
 
     // 2. [REFACTORED] Prepare the operational plan using the unified function.
     let plan = commons::prepare_operation_plan(
-        index,
+        state_guard,
         &config,
         delete_args.recursive,
         delete_args.reparent_to.clone(),
@@ -86,17 +90,21 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGu
     // 6. EXECUTE PLAN - INDEX MUTATION (IN-MEMORY)
     if !delete_args.recursive {
         let new_parent_uuid = match delete_args.reparent_to {
-            Some(ctx) => context_resolver::resolve_context(&ctx, index)?.0,
+            Some(ctx) => context_resolver::resolve_context(&ctx, state_guard)?.0,
             None => index_manager::GLOBAL_PROJECT_UUID,
         };
         // This function now returns warnings which we will display at the end.
-        let reparent_op_warnings =
-            index_manager::reparent_children(index, config.uuid, new_parent_uuid)?;
+        let reparent_op_warnings = index_manager::reparent_children(
+            state_guard.index_mut(),
+            config.uuid,
+            new_parent_uuid,
+        )?;
 
         // Combine warnings from planning and execution.
         let all_warnings = [&plan.reparent_warnings[..], &reparent_op_warnings[..]].concat();
 
-        let removed_count = index_manager::remove_from_index(index, &plan.uuids_to_remove);
+        let removed_count =
+            index_manager::remove_from_index(state_guard.index_mut(), &plan.uuids_to_remove);
 
         // 7. Final feedback for non-recursive delete.
         println!(
@@ -113,7 +121,8 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGu
         }
     } else {
         // Feedback for recursive delete
-        let removed_count = index_manager::remove_from_index(index, &plan.uuids_to_remove);
+        let removed_count =
+            index_manager::remove_from_index(state_guard.index_mut(), &plan.uuids_to_remove);
         println!(
             "\n{} {}",
             t!("common.success"),

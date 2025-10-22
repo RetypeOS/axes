@@ -18,6 +18,7 @@ use crate::{
         CommandAction, GlobalIndex, IndexEntry, ParameterDef, ResolvedConfig, Task,
         TemplateComponent,
     },
+    state::AppStateGuard,
 };
 
 use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
@@ -26,13 +27,13 @@ use colored::Colorize;
 
 pub fn resolve_config_for_context(
     context_str: Option<String>,
-    index: &mut GlobalIndex,
+    state_guard: &mut AppStateGuard,
 ) -> Result<ResolvedConfig> {
     let final_context_str = context_str.unwrap_or_else(|| ".".to_string());
 
     if final_context_str == "_" {
         // Ephemeral context: load from current directory without relying on the index for the project itself.
-        let mut loader = crate::core::config_loader::ConfigLoader::new(index);
+        let mut loader = crate::core::config_loader::ConfigLoader::new(state_guard.index_mut());
         let cwd = std::env::current_dir()?;
         return loader
             .resolve_ephemeral(&cwd)
@@ -40,8 +41,9 @@ pub fn resolve_config_for_context(
     }
 
     // Original logic for registered projects
-    let (uuid, _qualified_name) = context_resolver::resolve_context(&final_context_str, index)?;
-    let mut loader = crate::core::config_loader::ConfigLoader::new(index);
+    let (uuid, _qualified_name) =
+        context_resolver::resolve_context(&final_context_str, state_guard)?;
+    let mut loader = crate::core::config_loader::ConfigLoader::new(state_guard.index_mut());
     loader.resolve(uuid)
 }
 
@@ -57,7 +59,7 @@ pub struct OperationPlan {
 /// [NEW UNIFIED FUNCTION] Prepares a comprehensive plan for an operation.
 /// This is a "dry run" that calculates effects without modifying the index.
 pub fn prepare_operation_plan(
-    index: &mut GlobalIndex,
+    state_guard: &mut AppStateGuard,
     config: &ResolvedConfig,
     recursive: bool,
     reparent_to: Option<String>,
@@ -67,7 +69,7 @@ pub fn prepare_operation_plan(
 
     let new_parent_uuid = reparent_to
         .as_ref()
-        .map(|ctx| context_resolver::resolve_context(ctx, index))
+        .map(|ctx| context_resolver::resolve_context(ctx, state_guard))
         .transpose()?
         .map(|(uuid, _)| uuid);
 
@@ -77,7 +79,10 @@ pub fn prepare_operation_plan(
         }
         plan.uuids_to_remove.push(config.uuid);
         plan.uuids_to_remove
-            .extend(index_manager::get_all_descendants(index, config.uuid));
+            .extend(index_manager::get_all_descendants(
+                state_guard.index(),
+                config.uuid,
+            ));
 
         let summary_line = if is_destructive {
             format!(
@@ -99,7 +104,11 @@ pub fn prepare_operation_plan(
         ));
 
         let final_parent_uuid = new_parent_uuid.unwrap_or(index_manager::GLOBAL_PROJECT_UUID);
-        let final_parent_entry = index.projects.get(&final_parent_uuid).unwrap(); // Safe
+        let final_parent_entry = state_guard
+            .index()
+            .projects
+            .get(&final_parent_uuid)
+            .unwrap(); // Safe
 
         plan.summary_lines.push(format!(
             t!("plan.summary.reparent_to"),
@@ -107,7 +116,7 @@ pub fn prepare_operation_plan(
         ));
 
         let (warnings, conflicts) =
-            check_reparent_collisions(index, config.uuid, final_parent_uuid)?;
+            check_reparent_collisions(state_guard.index(), config.uuid, final_parent_uuid)?;
         if !conflicts.is_empty() {
             return Err(anyhow!(
                 t!("plan.error.reparent_collision"),
@@ -122,7 +131,13 @@ pub fn prepare_operation_plan(
         plan.paths_to_purge = plan
             .uuids_to_remove
             .iter()
-            .filter_map(|uuid| index.projects.get(uuid).map(|e| e.path.clone()))
+            .filter_map(|uuid| {
+                state_guard
+                    .index()
+                    .projects
+                    .get(uuid)
+                    .map(|e| e.path.clone())
+            })
             .collect();
     }
 
@@ -181,7 +196,7 @@ fn check_reparent_collisions(
 }
 
 /// Interactive, multi-modal parent selector.
-pub fn choose_parent_interactive(index: &mut GlobalIndex) -> Result<Uuid> {
+pub fn choose_parent_interactive(state_guard: &mut AppStateGuard) -> Result<Uuid> {
     loop {
         let items = &[
             "Enter a context path (e.g., 'my-app/api', 'g!', '*')",
@@ -198,14 +213,14 @@ pub fn choose_parent_interactive(index: &mut GlobalIndex) -> Result<Uuid> {
         match selection {
             0 => {
                 // Enter a context path
-                if let Some(uuid) = select_parent_by_context(index)? {
+                if let Some(uuid) = select_parent_by_context(state_guard)? {
                     return Ok(uuid);
                 }
                 // If it returns None, the user cancelled, so we loop again.
             }
             1 => {
                 // Browse projects visually
-                return select_parent_by_browsing(index);
+                return select_parent_by_browsing(state_guard.index());
             }
             2 => {
                 // Use 'global'
@@ -218,7 +233,7 @@ pub fn choose_parent_interactive(index: &mut GlobalIndex) -> Result<Uuid> {
 
 /// Handles the "Enter context" workflow. Returns `Ok(Some(Uuid))` on success,
 /// `Ok(None)` if the user cancels, and `Err` on I/O failure.
-fn select_parent_by_context(index: &mut GlobalIndex) -> Result<Option<Uuid>> {
+fn select_parent_by_context(state_guard: &mut AppStateGuard) -> Result<Option<Uuid>> {
     loop {
         let input: String = Input::with_theme(&ColorfulTheme::default())
             .with_prompt("Enter context path (leave empty to go back)")
@@ -228,7 +243,7 @@ fn select_parent_by_context(index: &mut GlobalIndex) -> Result<Option<Uuid>> {
             return Ok(None); // User wants to go back to the main menu
         }
 
-        match context_resolver::resolve_context(&input, index) {
+        match context_resolver::resolve_context(&input, state_guard) {
             Ok((uuid, qualified_name)) => {
                 let prompt = format!("Resolved to '{}'. Use this as the parent?", qualified_name);
                 if Confirm::with_theme(&ColorfulTheme::default())

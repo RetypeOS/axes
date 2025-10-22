@@ -24,32 +24,34 @@ struct LinkArgs {
 
 // --- Main Handler ---
 
-pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGuard) -> Result<()> {
+pub fn handle(
+    context: Option<String>,
+    args: Vec<String>,
+    state_guard: &mut AppStateGuard,
+) -> Result<()> {
     // 1. Parse arguments and resolve the project to be moved.
     let link_args = LinkArgs::try_parse_from(&args)?;
     let context_str =
         context.ok_or_else(|| anyhow!(t!("error.context_required"), command = "link"))?;
 
-    let config = commons::resolve_config_for_context(Some(context_str), index)?;
+    let config = commons::resolve_config_for_context(Some(context_str), state_guard)?;
     let project_to_move_uuid = config.uuid;
     let old_qualified_name = config.qualified_name.clone();
 
-    // This call will only set the dirty flag if a change occurs.
-    context_resolver::update_last_used_caches(config.uuid, index)
-        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-
     // 2. Resolve the new parent project.
     let (new_parent_uuid, new_parent_qualified_name) =
-        context_resolver::resolve_context(&link_args.new_parent, index).with_context(|| {
-            anyhow!(
-                t!("link.error.cannot_resolve_parent"),
-                parent = link_args.new_parent
-            )
-        })?;
+        context_resolver::resolve_context(&link_args.new_parent, state_guard).with_context(
+            || {
+                anyhow!(
+                    t!("link.error.cannot_resolve_parent"),
+                    parent = link_args.new_parent
+                )
+            },
+        )?;
 
     // 3. Perform critical pre-flight safety checks.
     if validate_link_operation(
-        index,
+        state_guard.index(),
         project_to_move_uuid,
         new_parent_uuid,
         &old_qualified_name,
@@ -71,12 +73,17 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGu
     );
 
     // 4. Perform the link operation. The index manager now handles the `project_ref.bin` update internally.
-    index_manager::link_project(index, project_to_move_uuid, new_parent_uuid)
-        .with_context(|| anyhow!(t!("link.error.link_failed"), name = old_qualified_name))?;
+    index_manager::link_project(
+        state_guard.index_mut(),
+        project_to_move_uuid,
+        new_parent_uuid,
+    )
+    .with_context(|| anyhow!(t!("link.error.link_failed"), name = old_qualified_name))?;
 
     // 5. Provide clear, detailed feedback to the user.
-    let new_qualified_name = index_manager::build_qualified_name(project_to_move_uuid, index)
-        .unwrap_or_else(|| t!("common.label.unknown").to_string());
+    let new_qualified_name =
+        index_manager::build_qualified_name(project_to_move_uuid, state_guard.index())
+            .unwrap_or_else(|| t!("common.label.unknown").to_string());
 
     println!("\n{}", t!("common.success").green().bold());
     println!("  {:<15} {}", "Project Moved:".blue(), old_qualified_name);
