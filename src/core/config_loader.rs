@@ -18,6 +18,7 @@ use std::{
 use uuid::Uuid;
 
 /// Orchestrates the loading of configuration layers for a project hierarchy.
+#[derive(Debug)]
 pub struct ConfigLoader<'a> {
     index: &'a mut GlobalIndex,
 }

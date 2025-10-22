@@ -1,4 +1,21 @@
-// src/bin/axes.rs
+//! # `axes` Main Entry Point
+//!
+//! This binary file serves as the main entry point for the `axes` application.
+//! Its primary responsibilities are minimal and well-defined:
+//!
+//! 1.  **Initialization**: It initializes logging (in debug builds) and parses command-line
+//!     arguments using `clap`.
+//! 2.  **Execution**: It orchestrates the core application logic by calling `run_app`, which
+//!     in turn delegates to the command dispatcher.
+//! 3.  **Error Handling**: It provides a centralized, user-friendly error reporting mechanism
+//!     for the entire application, handling specific cases like `clap`'s help/version exits
+//!     and Ctrl+C interruptions.
+//! 4.  **State Persistence**: After the application logic has completed, it efficiently checks
+//!     if the global state has been modified (using the journaling state manager) and, if so,
+//!     saves the updated state back to disk.
+//!
+//! This lean structure ensures that the application's entry point is simple and focused on
+//! orchestration, while the complex logic is delegated to other modules.
 
 use anyhow::Result;
 use axes::{
@@ -71,7 +88,14 @@ fn main() {
     }
 }
 
-/// This function contain the application logic, separating it from state management.
+/// A wrapper function that contains the core application logic.
+///
+/// It acquires a lock on the global application state and passes it to the
+/// command dispatcher. This cleanly separates the application's "business logic"
+/// from the state persistence and error handling concerns in `main`.
+///
+/// # Arguments
+/// * `cli` - The parsed command-line arguments.
 fn run_app(cli: Cli) -> Result<()> {
     // Get a mutable guard to the global index.
     // This guard will automatically set the dirty flag if any handler mutates the index.

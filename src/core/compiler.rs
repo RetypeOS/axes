@@ -26,16 +26,18 @@ lazy_static! {
     static ref TOKEN_RE: Regex = Regex::new(r"\\?<([^>]+)>").unwrap();
 }
 
-/// The `CompilerError` enum represents the possible errors that can occur during the compilation of a `axes.toml` file.
+/// Represents errors that can occur during the compilation of `axes.toml` files.
 #[derive(Error, Debug)]
 pub enum CompilerError {
-    /// An I/O error occurred while processing the configuration.
+    /// An I/O error occurred while reading the configuration file.
     #[error("I/O error while processing configuration: {0}")]
     Io(#[from] std::io::Error),
-    /// The TOML file could not be parsed.
+    /// The TOML content of `axes.toml` is invalid and could not be parsed.
     #[error("Failed to parse TOML file at '{path}': {source}")]
     TomlParse {
+        /// The path to the file that failed to parse.
         path: std::path::PathBuf,
+        /// The underlying parsing error from the `toml` crate.
         #[source]
         source: toml::de::Error,
     },

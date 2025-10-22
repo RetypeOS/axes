@@ -15,66 +15,78 @@ use std::{env, path::Path};
 use thiserror::Error;
 use uuid::Uuid;
 
-// The `ContextError` enum represents the possible errors that can occur during context resolution.
+/// Represents errors that can occur during the resolution of a context string (e.g., `my-app/backend`).
 #[derive(Error, Debug)]
 pub enum ContextError {
-    /// A filesystem error occurred.
+    // --- Wrapped Errors ---
+    /// A filesystem error occurred during path resolution.
     #[error("Filesystem Error: {0}")]
     Io(#[from] std::io::Error),
-    /// An error occurred while accessing the index.
+    /// An error occurred while accessing the global index.
     #[error("Index Error: {0}")]
     Index(#[from] crate::core::index_manager::IndexError),
-    /// An error occurred while decoding the cache.
+    /// An error occurred while decoding a binary file (e.g., `project_ref.bin`).
     #[error("Error decoding cache: {0}")]
     BincodeDecode(#[from] bincode::error::DecodeError),
-    /// An error occurred while encoding the cache.
+    /// An error occurred while encoding a binary file.
     #[error("Error encoding cache: {0}")]
     BincodeEncode(#[from] bincode::error::EncodeError),
-    /// An error occurred in the user interface.
+    /// An error occurred during an interactive prompt (e.g., user pressed Ctrl+C).
     #[error("User Interface Error: {0}")]
     Dialoguer(#[from] DialoguerError),
-    /// The context was not provided.
+
+    // --- Semantic Errors ---
+    /// An empty context string was provided where one was required.
     #[error("Empty context not provided.")]
     EmptyContext,
-    /// The context `**` can only be used at the beginning of the path.
+    /// The `**` token was used in a position other than the start of the context string.
     #[error("Context '**' can only be used at the beginning of the path.")]
     GlobalRecentNotAtStart,
-    /// The context `_` can only be used at the beginning of a path when outside a session.
+    /// The `_` token was used in a position other than the start of the context string.
     #[error("Context '_' can only be used at the beginning of a path when outside a session.")]
     StrictLocalPathNotAtStart,
-    /// Cannot go further up the hierarchy, as the current project is a root project.
+    /// A `..` token was used on a project that has no parent.
     #[error("Cannot go further up the hierarchy. Already at a root project.")]
     AlreadyAtRoot,
-    /// No projects have been used recently, so `**` cannot be resolved.
+    /// The `**` token was used but no projects have been accessed recently.
     #[error("No projects have been used recently. Cannot resolve '**'.")]
     NoLastUsedProject,
-    /// The parent project has not used any children recently, so `*` cannot be resolved.
-    #[error(
-        "Parent project '{parent_name}' has not used any children recently. Cannot resolve '*'."
-    )]
-    NoLastUsedChild { parent_name: String },
-    /// No axes project was found in the current directory or any parent directories.
-    #[error("No axes project found in current directory or any parent directories.")]
-    ProjectNotFoundFromPath,
-    /// No axes project was found in the current directory.
-    #[error("No axes project found in current directory.")]
-    ProjectNotFoundInCwd,
-    /// A root project with the given name was not found.
-    #[error("Root project with name '{name}' not found.")]
-    RootProjectNotFound { name: String },
-    /// A child project with the given name was not found for the parent project.
-    #[error("Child project '{child_name}' not found for parent '{parent_name}'.")]
-    ChildProjectNotFound {
-        child_name: String,
+    /// The `*` token was used on a parent that has no last-used child.
+    #[error("Parent project '{parent_name}' has not used any children recently. Cannot resolve '*'.")]
+    NoLastUsedChild {
+        /// The name of the parent project.
         parent_name: String,
     },
-    /// An alias with the given name was not found.
+    /// A project context was inferred from the current path (`.`), but no project was found.
+    #[error("No axes project found in current directory or any parent directories.")]
+    ProjectNotFoundFromPath,
+    /// A project context was specified as the current directory (`_`), but no project is registered there.
+    #[error("No axes project found in current directory.")]
+    ProjectNotFoundInCwd,
+    /// The first part of a context path did not match any known root project.
+    #[error("Root project with name '{name}' not found.")]
+    RootProjectNotFound {
+        /// The name of the root project that was not found.
+        name: String,
+    },
+    /// A part of a context path did not match any child of the preceding project.
+    #[error("Child project '{child_name}' not found for parent '{parent_name}'.")]
+    ChildProjectNotFound {
+        /// The name of the child that was not found.
+        child_name: String,
+        /// The name of the parent that was being searched.
+        parent_name: String,
+    },
+    /// An alias (e.g., `my-alias!`) was used that is not defined.
     #[error("Alias '{name}!' not found.")]
-    AliasNotFound { name: String },
-    /// The project name for the alias could not be resolved.
+    AliasNotFound {
+        /// The name of the alias that was not found.
+        name: String,
+    },
+    /// The qualified name for a project could not be constructed, likely due to a broken parent link.
     #[error("Could not resolve project name for alias (possible broken parent link).")]
     AliasResolutionError,
-    /// The operation was cancelled by the user.
+    /// The user cancelled an interactive operation.
     #[error("Operation cancelled by user.")]
     Cancelled,
 }
@@ -96,7 +108,7 @@ type ContextResult<T> = Result<T, ContextError>;
 /// or a `ContextError` if resolution fails.
 pub fn resolve_context(
     context: &str,
-    state_guard: &mut AppStateGuard,
+    state_guard: &mut AppStateGuard<'_>,
 ) -> ContextResult<(Uuid, String)> {
     let context = context.trim();
 

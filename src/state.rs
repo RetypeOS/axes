@@ -37,6 +37,7 @@ use uuid::Uuid;
 /// when a mutation is first requested. At the end of the application lifecycle, it can
 /// efficiently determine if a save-to-disk operation is truly necessary by comparing the final
 /// state against the initial snapshot.
+#[derive(Debug)]
 pub struct AppState {
     state: IndexState,
 }
@@ -47,6 +48,7 @@ pub struct AppState {
 /// request read-only (`.index()`) or mutable (`.index_mut()`) access. This makes the intent
 /// of the code clearer and enables fine-grained, intelligent updates that minimize performance
 /// overhead.
+#[derive(Debug)]
 pub struct AppStateGuard<'a> {
     guard: MutexGuard<'a, AppState>,
 }
@@ -54,6 +56,7 @@ pub struct AppStateGuard<'a> {
 // --- Private Implementation Details ---
 
 /// An internal enum representing the two possible conditions of the `GlobalIndex`.
+#[derive(Debug)]
 enum IndexState {
     /// The index has not been touched. It contains the state as it was loaded from disk.
     /// This is the default state for read-only commands.
