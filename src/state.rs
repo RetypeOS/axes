@@ -1,3 +1,25 @@
+//! # Application State Management
+//!
+//! This module provides a high-performance, journaling-based state management system for the application.
+//! It is designed to minimize expensive clone and write operations by intelligently tracking changes
+//! to the `GlobalIndex`.
+//!
+//! ## Key Components
+//!
+//! - `AppState`: The core struct that holds the state, transitioning from `Pristine` to `Dirty`
+//!   on the first mutation.
+//! - `AppStateGuard`: A custom `MutexGuard` that provides a safe and explicit API for accessing
+//!   and modifying the state.
+//! - `get_app_state` & `lock_app_state`: Singleton accessors to the global state, ensuring that
+//!   all interactions are thread-safe.
+//!
+//! ## Design Philosophy
+//!
+//! The state is loaded once at the beginning of the application's lifecycle. A snapshot of the
+//! original state is taken only when a mutable operation is requested. This "copy-on-write"
+//! strategy ensures that read-only operations are extremely fast and that the application only
+//! saves the state back to disk if actual changes have occurred.
+//!
 // src/state.rs
 
 use crate::core::index_manager;
@@ -122,6 +144,12 @@ impl<'a> AppStateGuard<'a> {
     ///
     /// It performs read-only checks first and only requests mutable access if the new
     /// data is different from the existing data, preventing unnecessary state clones.
+        ///
+    /// # Arguments
+    ///
+    /// * `uuid` - The UUID of the project to update.
+    /// * `new_hash` - The new configuration hash to set.
+    /// * `new_cache_dir` - The new cache directory to set.
     pub fn update_project_cache_info(
         &mut self,
         uuid: Uuid,
@@ -159,9 +187,13 @@ impl<'a> AppStateGuard<'a> {
 
     /// Intelligently updates `last_used` and `last_used_child` metadata.
     ///
-    // It first performs a series of read-only checks to determine if any updates are
-    // necessary. It only requests mutable access if a change is guaranteed to happen,
-    // avoiding unnecessary clone operations for idempotent updates.
+    /// It first performs a series of read-only checks to determine if any updates are
+    /// necessary. It only requests mutable access if a change is guaranteed to happen,
+    /// avoiding unnecessary clone operations for idempotent updates.
+    ///
+    /// # Arguments
+    ///
+    /// * `final_uuid` - The UUID of the project that was last used.
     pub fn update_last_used_caches(&mut self, final_uuid: Uuid) {
         // Phase 1: Read-Only Analysis
         let mut needs_update = false;

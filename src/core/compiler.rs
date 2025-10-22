@@ -1,14 +1,8 @@
-// This module is responsible for the Ahead-of-Time (AOT) compilation of `axes.toml` files.
-// Its primary goal is to transform the user-friendly, flexible TOML syntax into a
-// platform-agnostic, optimized Abstract Syntax Tree (AST) that can be cached and executed efficiently.
-
-use anyhow::{Context, Result, anyhow};
-use lazy_static::lazy_static;
-use lz4_flex;
-use regex::Regex;
-use std::{collections::HashMap, fs, path::PathBuf};
-use thiserror::Error;
-use uuid::Uuid;
+//! # Compiler
+//!
+//! This module is responsible for the Ahead-of-Time (AOT) compilation of `axes.toml` files.
+//! Its primary goal is to transform the user-friendly, flexible TOML syntax into a
+//! platform-agnostic, optimized Abstract Syntax Tree (AST) that can be cached and executed efficiently.
 
 use crate::{
     core::{cache, color, parameters, paths},
@@ -19,16 +13,26 @@ use crate::{
         TomlVarValue,
     },
 };
+use anyhow::{anyhow, Context, Result};
+use lazy_static::lazy_static;
+use lz4_flex;
+use regex::Regex;
+use std::{collections::HashMap, fs, path::PathBuf};
+use thiserror::Error;
+use uuid::Uuid;
 
 lazy_static! {
     // Regex to capture potential tokens, with an optional escape character `\`.
     static ref TOKEN_RE: Regex = Regex::new(r"\\?<([^>]+)>").unwrap();
 }
 
+/// The `CompilerError` enum represents the possible errors that can occur during the compilation of a `axes.toml` file.
 #[derive(Error, Debug)]
 pub enum CompilerError {
+    /// An I/O error occurred while processing the configuration.
     #[error("I/O error while processing configuration: {0}")]
     Io(#[from] std::io::Error),
+    /// The TOML file could not be parsed.
     #[error("Failed to parse TOML file at '{path}': {source}")]
     TomlParse {
         path: std::path::PathBuf,
@@ -41,6 +45,14 @@ pub enum CompilerError {
 
 /// Compiles a user-facing `TomlScript` into a platform-agnostic `Task` (AST).
 /// This is the main entry point for script compilation.
+///
+/// # Arguments
+///
+/// * `toml_script` - The `TomlScript` to compile.
+///
+/// # Returns
+///
+/// A `Result` containing the compiled `Task` on success, or an error if compilation fails.
 pub fn compile_script(toml_script: TomlScript) -> Result<Task> {
     match toml_script {
         TomlScript::Simple(s) => {
@@ -91,6 +103,14 @@ pub fn compile_script(toml_script: TomlScript) -> Result<Task> {
 
 /// Compiles a user-facing `TomlVar` into a platform-agnostic `CachedVar` (AST).
 /// This is the main entry point for variable compilation.
+///
+/// # Arguments
+///
+/// * `toml_var` - The `TomlVar` to compile.
+///
+/// # Returns
+///
+/// A `Result` containing the compiled `CachedVar` on success, or an error if compilation fails.
 pub fn compile_var(toml_var: TomlVar) -> Result<CachedVar> {
     match toml_var {
         TomlVar::Simple(s) => {
@@ -129,6 +149,14 @@ pub fn compile_var(toml_var: TomlVar) -> Result<CachedVar> {
 // --- MAIN TASK LOGIC (called by ConfigLoader) ---
 
 /// The main entry point for compiling a project layer from `axes.toml` to `CachedProjectConfig`.
+///
+/// # Arguments
+///
+/// * `entry` - The `IndexEntry` for the project to compile.
+///
+/// # Returns
+///
+/// A `Result` containing the compiled `CachedProjectConfig` on success, or an error if compilation fails.
 pub fn load_and_compile_layer(entry: &IndexEntry) -> Result<CachedProjectConfig> {
     let config_path = entry.path.join(".axes").join("axes.toml");
     if !config_path.exists() {
@@ -216,6 +244,16 @@ pub fn load_and_compile_layer(entry: &IndexEntry) -> Result<CachedProjectConfig>
 
 /// The task executed in parallel by `ConfigLoader` for each layer in the hierarchy.
 /// It handles cache validation (hit/miss) and triggers re-compilation if necessary.
+///
+/// # Arguments
+///
+/// * `uuid` - The UUID of the project to load.
+/// * `index` - A reference to the `GlobalIndex`.
+///
+/// # Returns
+///
+/// A `Result` containing a tuple of the loaded `CachedProjectConfig` and an optional `IndexUpdate`
+/// on success, or an error if loading fails.
 pub fn load_layer_task(
     uuid: Uuid,
     index: &GlobalIndex,
@@ -291,14 +329,26 @@ pub fn load_layer_task(
 /// A struct to hold the parsed execution prefixes from a command string.
 #[derive(Debug, Default)]
 pub struct Prefixes {
+    /// Ignore errors.
     pub ignore_errors: bool,
+    /// Run in parallel.
     pub run_in_parallel: bool,
+    /// Silent mode.
     pub silent_mode: bool,
-    pub is_echo: bool, // Represents the '#' prefix
+    /// Represents the '#' prefix.
+    pub is_echo: bool,
 }
 
 /// Parses `axes` execution prefixes (`@`, `-`, `>`, `#`) from the start of a line.
 /// Returns the parsed prefixes and a slice of the string containing the actual command.
+///
+/// # Arguments
+///
+/// * `line` - The line to parse.
+///
+/// # Returns
+///
+/// A tuple containing the parsed `Prefixes` and a slice of the string containing the actual command.
 pub fn parse_prefixes(line: &str) -> (Prefixes, &str) {
     let mut prefixes = Prefixes::default();
     if let Some(command_text) = line.strip_prefix('#') {
@@ -335,6 +385,14 @@ pub fn parse_prefixes(line: &str) -> (Prefixes, &str) {
 
 /// Transforms a command string into a sequence of `TemplateComponent`s,
 /// merging adjacent literal components for optimization.
+///
+/// # Arguments
+///
+/// * `text` - The text to tokenize.
+///
+/// # Returns
+///
+/// A `Result` containing a vector of `TemplateComponent`s on success, or an error if tokenization fails.
 pub fn tokenize_string(text: &str) -> Result<Vec<TemplateComponent>> {
     let mut components = Vec::with_capacity(text.len() / 20);
 
@@ -376,8 +434,17 @@ pub fn tokenize_string(text: &str) -> Result<Vec<TemplateComponent>> {
     Ok(components)
 }
 
-/// [NEW HELPER FUNCTION] Parses the inner content of a token like `<...>`
+/// Parses the inner content of a token like `<...>`
 /// This refactor makes `tokenize_string` cleaner and improves error handling.
+///
+/// # Arguments
+///
+/// * `content` - The content of the token to parse.
+/// * `full_match` - The full match of the token.
+///
+/// # Returns
+///
+/// A `Result` containing the parsed `TemplateComponent` on success, or an error if parsing fails.
 fn parse_token_content(content: &str, full_match: &str) -> Result<TemplateComponent> {
     let trimmed_content = content.trim();
     if let Some(param_spec) = trimmed_content.strip_prefix("params::") {
@@ -426,6 +493,14 @@ fn parse_token_content(content: &str, full_match: &str) -> Result<TemplateCompon
 }
 
 /// Compiles a single `TomlCommand` (one line of a script) into a `PlatformExecution` block.
+///
+/// # Arguments
+///
+/// * `toml_command` - The `TomlCommand` to compile.
+///
+/// # Returns
+///
+/// A `Result` containing the compiled `PlatformExecution` on success, or an error if compilation fails.
 fn compile_toml_command_to_platform_execution(
     toml_command: TomlCommand,
 ) -> Result<PlatformExecution> {
@@ -444,6 +519,15 @@ fn compile_toml_command_to_platform_execution(
 }
 
 /// Compiles a `PlatformCommand` struct into a `PlatformExecution` struct.
+///
+/// # Arguments
+///
+/// * `platform_command` - The `PlatformCommand` to compile.
+/// * `parse_action_prefixes` - Whether to parse action prefixes.
+///
+/// # Returns
+///
+/// A `Result` containing the compiled `PlatformExecution` on success, or an error if compilation fails.
 fn compile_platform_command_to_platform_execution(
     platform_command: PlatformCommand,
     parse_action_prefixes: bool,
@@ -463,6 +547,15 @@ fn compile_platform_command_to_platform_execution(
 
 /// The lowest-level compilation function.
 /// Takes a raw string, tokenizes it, and (optionally) parses `axes` prefixes.
+///
+/// # Arguments
+///
+/// * `s` - The string to compile.
+/// * `parse_action_prefixes` - Whether to parse action prefixes.
+///
+/// # Returns
+///
+/// A `Result` containing the compiled `CommandExecution` on success, or an error if compilation fails.
 fn compile_string_to_command_execution(
     s: &str,
     parse_action_prefixes: bool,
@@ -491,6 +584,15 @@ fn compile_string_to_command_execution(
 
 /// Reads and deserializes a `CachedProjectConfig` from a compressed binary file.
 /// This function is on the hot path for "cache hit" scenarios.
+///
+/// # Arguments
+///
+/// * `path` - The path to the cache file.
+///
+/// # Returns
+///
+/// A `Result` containing the deserialized `CachedProjectConfig` on success, or an error if the file
+/// cannot be read or deserialized.
 fn read_cached_layer(path: &std::path::Path) -> Result<CachedProjectConfig> {
     // 1. Read the compressed bytes from disk.
     let compressed_bytes = fs::read(path)
@@ -527,6 +629,15 @@ fn read_cached_layer(path: &std::path::Path) -> Result<CachedProjectConfig> {
 
 /// Serializes and writes a `CachedProjectConfig` to a compressed binary file.
 /// This function is on the "cold path" (cache miss).
+///
+/// # Arguments
+///
+/// * `path` - The path to the cache file.
+/// * `layer` - The `CachedProjectConfig` to serialize.
+///
+/// # Returns
+///
+/// A `Result` indicating success or failure.
 fn write_cached_layer(path: &std::path::Path, layer: &CachedProjectConfig) -> Result<()> {
     // 1. Ensure the parent directory exists.
     if let Some(parent_dir) = path.parent() {
