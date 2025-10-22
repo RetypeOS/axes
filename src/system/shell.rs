@@ -1,6 +1,6 @@
 use crate::{
     core::{parameters::ArgResolver, task_executor},
-    models::{CommandAction, GlobalIndex, ResolvedConfig, Task},
+    models::{CommandAction, ResolvedConfig, Task},
     system::shells_config,
 };
 use anyhow::Result;
@@ -50,7 +50,6 @@ pub fn launch_session(
     task_start: Option<Arc<Task>>,
     task_exit: Option<Arc<Task>>,
     resolver: &ArgResolver,
-    index: &mut GlobalIndex,
 ) -> Result<(), ShellError> {
     // 1. Determine which shell to use.
     let shells_config = shells_config::load_shells_config()?;
@@ -77,12 +76,11 @@ pub fn launch_session(
             if let Some(cmd_exec) = config.select_platform_exec(plat_exec) {
                 let rendered_command = match &cmd_exec.action {
                     CommandAction::Execute(template) => {
-                        task_executor::assemble_final_command(template, config, resolver, index, 0)?
+                        task_executor::assemble_final_command(template, config, resolver, 0)?
                     }
                     CommandAction::Print(template) => {
-                        let text = task_executor::assemble_final_command(
-                            template, config, resolver, index, 0,
-                        )?;
+                        let text =
+                            task_executor::assemble_final_command(template, config, resolver, 0)?;
                         format!("echo \"{}\"", text.replace('"', "\\\""))
                     }
                 };
@@ -98,7 +96,7 @@ pub fn launch_session(
         // We can create a temporary template to pass to our powerful assembler.
         let template = crate::core::compiler::tokenize_string(prompt_template)?;
         Some(task_executor::assemble_final_command(
-            &template, config, resolver, index, 0,
+            &template, config, resolver, 0,
         )?)
     } else {
         None
@@ -178,7 +176,7 @@ pub fn launch_session(
         let task_specialized = config.specialize_task_for_platform(task_universal);
 
         // Pass the optimized, specialized task to the executor.
-        task_executor::execute_task(&task_specialized, config, resolver, index)?;
+        task_executor::execute_task(&task_specialized, config, resolver)?;
     }
 
     Ok(())

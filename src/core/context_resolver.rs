@@ -1,4 +1,7 @@
-use crate::models::{GlobalIndex, IndexEntry};
+use crate::{
+    models::{GlobalIndex, IndexEntry},
+    state::AppStateGuard,
+};
 use dialoguer::{Error as DialoguerError, Select, theme::ColorfulTheme};
 use std::{env, path::Path};
 use thiserror::Error;
@@ -56,7 +59,10 @@ type ContextResult<T> = Result<T, ContextError>;
 /// Resolves a project context string to its canonical UUID and fully qualified name.
 /// The resolution follows a strict, multi-layered priority order to ensure
 /// predictable behavior both inside and outside of project sessions.
-pub fn resolve_context(context: &str, index: &mut GlobalIndex) -> ContextResult<(Uuid, String)> {
+pub fn resolve_context(
+    context: &str,
+    state_guard: &mut AppStateGuard,
+) -> ContextResult<(Uuid, String)> {
     let context = context.trim();
 
     let parts: Vec<&str> = context.split('/').collect();
@@ -66,7 +72,11 @@ pub fn resolve_context(context: &str, index: &mut GlobalIndex) -> ContextResult<
     } else {
         parts[0]
     };
-    let global_project_entry = index.projects.get(&GLOBAL_PROJECT_UUID).unwrap();
+    let global_project_entry = state_guard
+        .index()
+        .projects
+        .get(&GLOBAL_PROJECT_UUID)
+        .unwrap();
 
     // --- 1. DETERMINE THE STARTING POINT AND TRAVERSAL PARTS ---
     // This logic implements the full precedence hierarchy.
@@ -74,86 +84,90 @@ pub fn resolve_context(context: &str, index: &mut GlobalIndex) -> ContextResult<
         .ok()
         .and_then(|s| Uuid::parse_str(&s).ok());
 
-    let (mut current_uuid, traversal_parts) =
-        {
-            match first_part {
-                // --- PRIORITY 1: ABSOLUTE OVERRIDES (SESSION-IGNORANT) ---
-                "." => {
-                    // Relative to CWD
-                    let uuid = find_project_from_path(&env::current_dir()?, true, index)?;
-                    (uuid, &parts[1..])
-                }
-                "_" => {
-                    // Strictly relative to CWD
-                    let uuid = find_project_from_path(&env::current_dir()?, false, index)?;
-                    (uuid, &parts[1..])
-                }
-                "**" => {
-                    // Global last used
-                    let uuid = index.last_used.ok_or(ContextError::NoLastUsedProject)?;
-                    (uuid, &parts[1..])
-                }
-                _ if first_part.ends_with('!') => {
-                    // Aliases
-                    let alias_name = first_part.strip_suffix('!').unwrap();
-                    let uuid = *index.aliases.get(alias_name).ok_or_else(|| {
-                        ContextError::AliasNotFound {
-                            name: alias_name.to_string(),
-                        }
-                    })?;
-                    (uuid, &parts[1..])
-                }
-                _ if first_part == global_project_entry.name => {
-                    // Global project name
-                    (GLOBAL_PROJECT_UUID, &parts[1..])
-                }
-
-                // --- PRIORITY 2: `axes` FOCUS-RELATIVE NAVIGATION (SESSION-AWARE `..`) ---
-                ".." => {
-                    let focus_uuid = if let Some(session_uuid) = session_uuid_opt {
-                        // In a session, `..` refers to the session project's parent.
-                        session_uuid
-                    } else {
-                        // Outside a session, `..` refers to the CWD project's parent.
-                        find_project_from_path(&env::current_dir()?, true, index)?
-                    };
-                    let focus_entry = index.projects.get(&focus_uuid).unwrap();
-                    let parent_uuid = focus_entry.parent.ok_or(ContextError::AlreadyAtRoot)?;
-                    (parent_uuid, &parts[1..])
-                }
-
-                // --- PRIORITY 3: `axes` FOCUS-RELATIVE CHILD LOOKUP (SESSION-AWARE) ---
-                _ => {
-                    // `first_part` is a simple name like "backend"
-                    let start_node = if let Some(session_uuid) = session_uuid_opt {
-                        // In a session, resolve relative to the session project.
-                        session_uuid
-                    } else {
-                        // Outside a session, resolve relative to the global project.
-                        GLOBAL_PROJECT_UUID
-                    };
-                    (start_node, &parts[..]) // Do not consume the part, it's the first child to find.
-                }
+    let (mut current_uuid, traversal_parts) = {
+        match first_part {
+            // --- PRIORITY 1: ABSOLUTE OVERRIDES (SESSION-IGNORANT) ---
+            "." => {
+                // Relative to CWD
+                let uuid = find_project_from_path(&env::current_dir()?, true, state_guard.index())?;
+                (uuid, &parts[1..])
             }
-        };
+            "_" => {
+                // Strictly relative to CWD
+                let uuid =
+                    find_project_from_path(&env::current_dir()?, false, state_guard.index())?;
+                (uuid, &parts[1..])
+            }
+            "**" => {
+                // Global last used
+                let uuid = state_guard
+                    .index()
+                    .last_used
+                    .ok_or(ContextError::NoLastUsedProject)?;
+                (uuid, &parts[1..])
+            }
+            _ if first_part.ends_with('!') => {
+                // Aliases
+                let alias_name = first_part.strip_suffix('!').unwrap();
+                let uuid = *state_guard.index().aliases.get(alias_name).ok_or_else(|| {
+                    ContextError::AliasNotFound {
+                        name: alias_name.to_string(),
+                    }
+                })?;
+                (uuid, &parts[1..])
+            }
+            _ if first_part == global_project_entry.name => {
+                // Global project name
+                (GLOBAL_PROJECT_UUID, &parts[1..])
+            }
+
+            // --- PRIORITY 2: `axes` FOCUS-RELATIVE NAVIGATION (SESSION-AWARE `..`) ---
+            ".." => {
+                let focus_uuid = if let Some(session_uuid) = session_uuid_opt {
+                    // In a session, `..` refers to the session project's parent.
+                    session_uuid
+                } else {
+                    // Outside a session, `..` refers to the CWD project's parent.
+                    find_project_from_path(&env::current_dir()?, true, state_guard.index())?
+                };
+                let focus_entry = state_guard.index().projects.get(&focus_uuid).unwrap();
+                let parent_uuid = focus_entry.parent.ok_or(ContextError::AlreadyAtRoot)?;
+                (parent_uuid, &parts[1..])
+            }
+
+            // --- PRIORITY 3: `axes` FOCUS-RELATIVE CHILD LOOKUP (SESSION-AWARE) ---
+            _ => {
+                // `first_part` is a simple name like "backend"
+                let start_node = if let Some(session_uuid) = session_uuid_opt {
+                    // In a session, resolve relative to the session project.
+                    session_uuid
+                } else {
+                    // Outside a session, resolve relative to the global project.
+                    GLOBAL_PROJECT_UUID
+                };
+                (start_node, &parts[..]) // Do not consume the part, it's the first child to find.
+            }
+        }
+    };
 
     // --- 2. TRAVERSE THE PATH ---
     for part in traversal_parts {
-        let current_entry = index.projects.get(&current_uuid).unwrap();
+        let current_entry = state_guard.index().projects.get(&current_uuid).unwrap();
 
         let next_uuid = match *part {
             "." | "_" | "**" => return Err(ContextError::GlobalRecentNotAtStart),
             ".." => current_entry.parent.ok_or(ContextError::AlreadyAtRoot)?,
-            "*" => resolve_last_used_child(current_uuid, current_entry, index)?,
-            name => find_child_by_name(current_uuid, current_entry, name, index)?,
+            "*" => resolve_last_used_child(current_uuid, current_entry, state_guard.index())?,
+            name => find_child_by_name(current_uuid, current_entry, name, state_guard.index())?,
         };
         current_uuid = next_uuid;
     }
 
     // --- 3. Finalize and Return ---
-    update_last_used_caches(current_uuid, index)?;
-    let final_qualified_name = index_manager::build_qualified_name(current_uuid, index)
-        .ok_or(ContextError::AliasResolutionError)?;
+    state_guard.update_last_used_caches(current_uuid);
+    let final_qualified_name =
+        index_manager::build_qualified_name(current_uuid, state_guard.index())
+            .ok_or(ContextError::AliasResolutionError)?;
 
     Ok((current_uuid, final_qualified_name))
 }
@@ -270,34 +284,4 @@ fn find_child_by_name(
             child_name: child_name.to_string(),
             parent_name: parent_entry.name.clone(),
         })
-}
-
-/// Updates `last_used` information directly in the mutable GlobalIndex.
-pub fn update_last_used_caches(final_uuid: Uuid, index: &mut GlobalIndex) -> ContextResult<()> {
-    // 1. Update global `last_used`.
-    index.last_used = Some(final_uuid);
-
-    // 2. Update parent's `last_used_child` by traversing up.
-    let mut child_uuid_to_save = final_uuid;
-    let mut current_uuid_opt = index
-        .projects
-        .get(&child_uuid_to_save)
-        .and_then(|e| e.parent);
-
-    while let Some(parent_uuid) = current_uuid_opt {
-        let parent_entry = index.projects.get_mut(&parent_uuid).unwrap();
-
-        log::debug!(
-            "Updating 'last_used_child' for parent '{}' to '{}'",
-            parent_entry.name,
-            child_uuid_to_save
-        );
-        parent_entry.last_used_child = Some(child_uuid_to_save);
-
-        // Prepare for the next iteration up the tree.
-        child_uuid_to_save = parent_uuid;
-        current_uuid_opt = parent_entry.parent;
-    }
-
-    Ok(())
 }

@@ -45,7 +45,7 @@ struct PathMismatch {
 pub fn handle(
     _context: Option<String>,
     args: Vec<String>,
-    index: &mut AppStateGuard,
+    state_guard: &mut AppStateGuard,
 ) -> Result<()> {
     if env::var("AXES_PROJECT_UUID").is_ok() {
         return Err(anyhow!(t!("repair.error.in_session")));
@@ -63,7 +63,7 @@ pub fn handle(
     );
 
     // --- Phase 1: Scan and Detect ---
-    let mismatches = scan_for_path_mismatches(&start_path, &repair_args, index)?;
+    let mismatches = scan_for_path_mismatches(&start_path, &repair_args, state_guard.index())?;
 
     // --- Phase 2: Report and (Optionally) Fix ---
     if mismatches.is_empty() {
@@ -107,7 +107,7 @@ pub fn handle(
         // --- Phase 3: Apply Fixes ---
         let mut fixed_count = 0;
         for mismatch in mismatches {
-            if let Some(entry) = index.projects.get_mut(&mismatch.uuid) {
+            if let Some(entry) = state_guard.index_mut().projects.get_mut(&mismatch.uuid) {
                 entry.path = mismatch.new_path;
                 fixed_count += 1;
             }

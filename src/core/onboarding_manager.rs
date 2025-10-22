@@ -2,6 +2,7 @@ use crate::{
     cli::handlers::commons,
     core::index_manager::{self, GLOBAL_PROJECT_UUID},
     models::{GlobalIndex, IndexEntry, ProjectRef},
+    state::AppStateGuard,
 };
 use anyhow;
 use colored::*;
@@ -103,7 +104,7 @@ pub struct OnboardingOptions {
 /// The main entry point of the onboarding state machine.
 pub fn register_project(
     path: &Path,
-    index: &mut GlobalIndex,
+    state_guard: &mut AppStateGuard,
     options: &OnboardingOptions,
 ) -> OnboardingResult<()> {
     println!(
@@ -112,7 +113,7 @@ pub fn register_project(
     );
 
     // 1. DISCOVERY: Find all potential projects recursively.
-    let mut candidates = discover_candidates(path, index)?;
+    let mut candidates = discover_candidates(path, state_guard.index())?;
     if candidates.is_empty() {
         return Err(OnboardingError::NotAnAxesProject(
             path.display().to_string(),
@@ -120,7 +121,7 @@ pub fn register_project(
     }
 
     // 2. Determine final names, parents, and UUIDs for each candidate.
-    resolve_candidates(&mut candidates, index, options)?;
+    resolve_candidates(&mut candidates, state_guard, options)?;
 
     // Filter out candidates that were invalidated during resolution.
     candidates.retain(|c| c.should_register);
@@ -135,7 +136,7 @@ pub fn register_project(
 
     // 3. CONFIRMATION (if interactive): Show the plan and get user approval.
     if !options.autosolve {
-        present_plan_and_confirm(&candidates, index)?;
+        present_plan_and_confirm(&candidates, state_guard.index())?;
     }
 
     // 4. ACTION: Perform the actual registration in the index.
@@ -153,7 +154,7 @@ pub fn register_project(
             parent: Some(parent_uuid),
             ..Default::default()
         };
-        index.projects.insert(uuid, new_entry);
+        state_guard.index_mut().projects.insert(uuid, new_entry);
 
         let new_ref = ProjectRef {
             self_uuid: uuid,
@@ -227,7 +228,7 @@ fn discover_candidates(
 /// Iterates through candidates to resolve names, parents, and handle conflicts.
 fn resolve_candidates(
     candidates: &mut [OnboardingCandidate],
-    index: &mut GlobalIndex,
+    state_guard: &mut AppStateGuard,
     options: &OnboardingOptions,
 ) -> OnboardingResult<()> {
     // This prevents two new projects in the same batch from colliding with each other.
@@ -243,7 +244,7 @@ fn resolve_candidates(
             let candidate = &mut candidates[i];
             match &candidate.identity_source {
                 IdentitySource::ProjectRef(pref) => {
-                    if let Some(existing) = index.projects.get(&pref.self_uuid) {
+                    if let Some(existing) = state_guard.index().projects.get(&pref.self_uuid) {
                         if existing.path != candidate.path {
                             return Err(OnboardingError::UuidCollision(
                                 pref.self_uuid,
@@ -317,7 +318,7 @@ fn resolve_candidates(
         };
 
         let is_pref_parent_valid = if let Some(p_uuid) = pref_parent_uuid {
-            index.projects.contains_key(&p_uuid)
+            state_guard.index().projects.contains_key(&p_uuid)
                 || candidates
                     .iter()
                     .any(|c| c.should_register && c.resolved_uuid == Some(p_uuid))
@@ -348,7 +349,7 @@ fn resolve_candidates(
                             .yellow()
                         );
                     }
-                    Some(commons::choose_parent_interactive(index)?)
+                    Some(commons::choose_parent_interactive(state_guard)?)
                 }
             }
         };
@@ -362,7 +363,8 @@ fn resolve_candidates(
             let parent = candidate.resolved_parent_uuid.unwrap();
 
             // Check for collision with projects already in the index.
-            if index
+            if state_guard
+                .index()
                 .projects
                 .values()
                 .any(|p| p.parent == Some(parent) && &p.name == name)

@@ -40,7 +40,11 @@ struct TreeArgs {
     check: bool,
 }
 
-pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGuard) -> Result<()> {
+pub fn handle(
+    context: Option<String>,
+    args: Vec<String>,
+    state_guard: &mut AppStateGuard,
+) -> Result<()> {
     // 1. Parse this handler's specific arguments.
     let tree_args = TreeArgs::try_parse_from(&args)?;
 
@@ -50,7 +54,8 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGu
     // 3. Resolve the start node and prepare the UI header based on the context.
     let (start_node_uuid, header) = match final_context {
         Some(context_str) => {
-            let (uuid, qualified_name) = context_resolver::resolve_context(&context_str, index)?;
+            let (uuid, qualified_name) =
+                context_resolver::resolve_context(&context_str, state_guard)?;
             let header_text = format!(t!("tree.header.from_project"), name = qualified_name.cyan());
             (Some(uuid), header_text)
         }
@@ -70,7 +75,7 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGu
 
     // 5. Delegate to the graph display module for rendering.
     println!("\n{}", header);
-    graph_display::display_project_tree(index, start_node_uuid, &display_options);
+    graph_display::display_project_tree(state_guard.index(), start_node_uuid, &display_options);
 
     Ok(())
 }

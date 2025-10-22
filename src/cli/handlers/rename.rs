@@ -17,7 +17,11 @@ struct RenameArgs {
 }
 
 // --- Main Handler ---
-pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGuard) -> Result<()> {
+pub fn handle(
+    context: Option<String>,
+    args: Vec<String>,
+    state_guard: &mut AppStateGuard,
+) -> Result<()> {
     // 1. Parse and validate arguments.
     let rename_args = RenameArgs::try_parse_from(&args)?;
     let new_name = crate::cli::handlers::commons::validate_project_name(&rename_args.new_name)?;
@@ -26,8 +30,13 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGu
 
     // 2. Resolve target and perform pre-flight checks.
     let (uuid_to_rename, old_qualified_name) =
-        context_resolver::resolve_context(&context_str, index)?;
-    let old_simple_name = &index.projects.get(&uuid_to_rename).unwrap().name;
+        context_resolver::resolve_context(&context_str, state_guard)?;
+    let old_simple_name = &state_guard
+        .index()
+        .projects
+        .get(&uuid_to_rename)
+        .unwrap()
+        .name;
 
     // This function now handles no-op and global project confirmation.
     if !pre_rename_validation(uuid_to_rename, old_simple_name, &new_name)? {
@@ -50,12 +59,13 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGu
         old_qualified_name,
         new_name
     );
-    index_manager::rename_project(index, uuid_to_rename, &new_name)
+    index_manager::rename_project(state_guard.index_mut(), uuid_to_rename, &new_name)
         .with_context(|| anyhow!(t!("rename.error.rename_failed"), name = old_qualified_name))?;
 
     // 4. Provide clear feedback.
     let new_qualified_name =
-        index_manager::build_qualified_name(uuid_to_rename, index).unwrap_or_default();
+        index_manager::build_qualified_name(uuid_to_rename, state_guard.index())
+            .unwrap_or_default();
 
     println!("\n{}", t!("common.success").green().bold());
     println!("  {:<18} {}", "Old Full Path:".blue(), old_qualified_name);

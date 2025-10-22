@@ -16,7 +16,6 @@ fn main() {
 
     #[cfg(debug_assertions)]
     {
-        // Keep env_logger initialization here.
         env_logger::init();
     }
 
@@ -55,8 +54,11 @@ fn main() {
     let state_arc = get_app_state();
     let state_guard = state_arc.lock().unwrap();
 
-    // The check is now a cheap, instantaneous boolean read. No cloning!
+    // The MutexGuard allows us to access the methods of the inner AppState directly.
+    // We call AppState::needs_saving() via the guard.
     if state_guard.needs_saving() {
+        // We call AppState::index() via the guard to get a reference to the GlobalIndex
+        // that index_manager::save_global_index expects.
         if let Err(e) = index_manager::save_global_index(state_guard.index()) {
             eprintln!(
                 "\n{}: Failed to save updated global index: {}",
@@ -69,7 +71,7 @@ fn main() {
     }
 }
 
-/// A new function to contain the application logic, separating it from state management.
+/// This function contain the application logic, separating it from state management.
 fn run_app(cli: Cli) -> Result<()> {
     // Get a mutable guard to the global index.
     // This guard will automatically set the dirty flag if any handler mutates the index.

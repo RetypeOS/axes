@@ -6,7 +6,8 @@ use std::env;
 
 use crate::{
     core::{context_resolver, index_manager},
-    models::GlobalIndex, state::AppStateGuard,
+    models::GlobalIndex,
+    state::AppStateGuard,
 };
 
 // --- Command Argument Parsing ---
@@ -44,7 +45,11 @@ enum AliasCommand {
 
 /// The main handler for the `alias` command.
 /// It dispatches to sub-handlers for set, list, remove, and check operations.
-pub fn handle(_context: Option<String>, args: Vec<String>, index: &mut AppStateGuard) -> Result<()> {
+pub fn handle(
+    _context: Option<String>,
+    args: Vec<String>,
+    state_guard: &mut AppStateGuard,
+) -> Result<()> {
     // Aliases are a global concept and cannot be managed from within a project session.
     if env::var("AXES_PROJECT_UUID").is_ok() {
         return Err(anyhow!(t!("alias.error.not_in_session")));
@@ -55,17 +60,17 @@ pub fn handle(_context: Option<String>, args: Vec<String>, index: &mut AppStateG
     let alias_args = AliasArgs::try_parse_from(&args)?;
 
     match alias_args.command.unwrap_or(AliasCommand::List) {
-        AliasCommand::Set { name, context } => set_alias(&name, &context, index),
-        AliasCommand::List => list_aliases(index),
-        AliasCommand::Remove { name } => remove_alias(&name, index),
-        AliasCommand::Check => check_aliases(index),
+        AliasCommand::Set { name, context } => set_alias(&name, &context, state_guard),
+        AliasCommand::List => list_aliases(state_guard.index()),
+        AliasCommand::Remove { name } => remove_alias(&name, state_guard.index_mut()),
+        AliasCommand::Check => check_aliases(state_guard.index()),
     }
 }
 
 // --- Subcommand Logic ---
 
 /// Handles the logic for creating or updating an alias.
-fn set_alias(name: &str, context: &str, index: &mut GlobalIndex) -> Result<()> {
+fn set_alias(name: &str, context: &str, state_guard: &mut AppStateGuard) -> Result<()> {
     let clean_name = validate_alias_name(name)?;
 
     // Proceed only if user confirms modifying the special 'g' alias.
@@ -74,10 +79,10 @@ fn set_alias(name: &str, context: &str, index: &mut GlobalIndex) -> Result<()> {
     }
 
     // Check if the alias already exists to provide better user feedback.
-    let is_update = index.aliases.contains_key(&clean_name);
+    let is_update = state_guard.index().aliases.contains_key(&clean_name);
     if is_update {
-        let old_uuid = index.aliases.get(&clean_name).unwrap(); // Safe to unwrap here.
-        let old_target = index_manager::build_qualified_name(*old_uuid, index)
+        let old_uuid = state_guard.index().aliases.get(&clean_name).unwrap(); // Safe to unwrap here.
+        let old_target = index_manager::build_qualified_name(*old_uuid, state_guard.index())
             .unwrap_or_else(|| t!("alias.info.broken_link").red().to_string());
         println!(
             "{}",
@@ -90,16 +95,14 @@ fn set_alias(name: &str, context: &str, index: &mut GlobalIndex) -> Result<()> {
         );
     }
 
-    let (target_uuid, target_name) = context_resolver::resolve_context(context, index)
+    let (target_uuid, target_name) = context_resolver::resolve_context(context, state_guard)
         .with_context(|| {
             format!(
                 "The provided context '{}' for the alias could not be resolved.",
                 context
             )
         })?;
-    index_manager::set_alias(index, clean_name.clone(), target_uuid);
-
-    // CRITICAL: Do NOT save the index here. The main function handles it.
+    index_manager::set_alias(state_guard.index_mut(), clean_name.clone(), target_uuid);
 
     println!(
         "{} {} '{}!' -> '{}'",
