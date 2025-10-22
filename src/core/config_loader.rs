@@ -1,13 +1,18 @@
+//! # Config Loader
+//!
+//! This module provides the `ConfigLoader` struct, which is responsible for orchestrating the loading
+//! of configuration layers for a project hierarchy. It handles both registered and ephemeral projects,
+//! leveraging parallel processing and caching to ensure high performance.
 use crate::{
     core::{compiler, index_manager, paths},
     models::{GlobalIndex, IndexEntry, LayerPromise, ResolvedConfig},
 };
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use log;
 use rayon::prelude::*;
-use std::{collections::HashMap, path::Path};
 use std::{
-    path::PathBuf,
+    collections::HashMap,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock},
 };
 use uuid::Uuid;
@@ -19,6 +24,10 @@ pub struct ConfigLoader<'a> {
 
 impl<'a> ConfigLoader<'a> {
     /// Creates a new ConfigLoader.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - A mutable reference to the `GlobalIndex`.
     pub fn new(index: &'a mut GlobalIndex) -> Self {
         Self { index }
     }
@@ -53,6 +62,14 @@ impl<'a> ConfigLoader<'a> {
     /// 5. **Facade Construction:** Finally, it returns a `ResolvedConfig` instance, a lazy
     ///    facade that provides on-demand access to the fully merged configuration without
     ///    further blocking or I/O.
+    ///
+    /// # Arguments
+    ///
+    /// * `uuid` - The UUID of the project to resolve.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the `ResolvedConfig` on success, or an error if resolution fails.
     pub fn resolve(&mut self, uuid: Uuid) -> Result<ResolvedConfig> {
         log::debug!("ConfigLoader resolving UUID: {}", uuid);
 
@@ -196,6 +213,14 @@ impl<'a> ConfigLoader<'a> {
     /// It reads the local `project_ref.bin` to find its identity and parent,
     /// then uses the global index ONLY to resolve the inheritance chain of its parents.
     /// It does not perform any cache checks or index updates for the ephemeral project itself.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path to the ephemeral project.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the `ResolvedConfig` on success, or an error if resolution fails.
     pub fn resolve_ephemeral(&mut self, path: &Path) -> Result<ResolvedConfig> {
         log::debug!(
             "ConfigLoader resolving ephemerally from path: {}",

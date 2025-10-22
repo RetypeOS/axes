@@ -1,3 +1,8 @@
+//! # Constants
+//!
+//! This module defines various constants used throughout the application, such as file names,
+//! directory names, and limits.
+
 /// The name of the directory containing axes configuration for a project.
 pub const AXES_DIR: &str = ".axes";
 
@@ -10,5 +15,5 @@ pub const GLOBAL_INDEX_FILENAME: &str = "index.bin";
 /// The name of the file containing a project's identity and references.
 pub const PROJECT_REF_FILENAME: &str = "project_ref.bin";
 
-/// -
+/// The maximum depth for recursion when resolving configurations or executing scripts.
 pub const MAX_RECURSION_DEPTH: u32 = 32;

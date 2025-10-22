@@ -1,8 +1,16 @@
+//! # Color
+//!
+//! This module provides utilities for parsing and converting ANSI color styles.
+
 use crate::models::AnsiStyle;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 
 /// Parses a style name string (e.g., "red", "bold", "bright-green") into an `AnsiStyle` enum.
 /// The parsing is case-insensitive.
+///
+/// # Returns
+///
+/// A `Result` containing the `AnsiStyle` on success, or an error if the style name is unknown.
 pub fn parse_style_name(name: &str) -> Result<AnsiStyle> {
     match name.to_lowercase().replace('_', "-").as_str() {
         // Attributes
@@ -38,6 +46,10 @@ pub fn parse_style_name(name: &str) -> Result<AnsiStyle> {
 }
 
 /// Converts an `AnsiStyle` enum into its raw ANSI escape code representation.
+///
+/// # Returns
+///
+/// A `&'static str` containing the ANSI escape code for the given style.
 pub fn style_to_ansi_code(style: AnsiStyle) -> &'static str {
     match style {
         // Attributes

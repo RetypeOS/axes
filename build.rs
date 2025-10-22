@@ -1,10 +1,9 @@
-// build.rs
-
 use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::Path;
 
+/// Placeholder
 fn main() {
     // --- 1. Determine the language using a prioritized approach ---
 

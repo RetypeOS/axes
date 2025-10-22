@@ -1,4 +1,28 @@
-use anyhow::{Result, anyhow};
+//! # Data Models
+//!
+//! This module defines the core data structures used throughout the application, organized into four main categories:
+//!
+//! 1.  **User-Facing TOML Syntax Models**: These structs (`ProjectConfig`, `TomlScript`, `TomlVar`, etc.)
+//!     are designed for flexibility and ergonomics, directly mapping to the syntax a user can write in an
+//!     `axes.toml` file. They use enums and `#[serde(untagged)]` to allow for multiple ways of defining
+//!     the same logical entity (e.g., a script can be a simple string, a sequence of commands, or a
+//!     table with a description).
+//!
+//! 2.  **Platform-Agnostic AST & Runtime Models**: After the initial parsing, the user-facing models are
+//!     compiled into a stricter, more efficient Abstract Syntax Tree (AST). Structs like `Task`, `CachedVar`,
+//!     and `CommandExecution` represent the compiled, platform-agnostic logic. This is the representation
+//!     that gets stored in the binary cache and is used for most of the program's internal logic.
+//!
+//! 3.  **Persistence & System Models**: These structs (`GlobalIndex`, `IndexEntry`, `ProjectRef`) are used for
+//!     serialization to disk. They represent the application's persistent state, such as the list of all
+//!     registered projects and their metadata. They are optimized for fast loading and saving via `bincode`.
+//!
+//! 4.  **High-Level Runtime Models**: At runtime, the application uses high-level facade models like
+//!     `ResolvedConfig` to provide an intelligent, lazy-loaded view of a project's entire configuration,
+//!     including inherited settings. These models handle the on-demand loading and caching of configuration
+//!     layers to ensure high performance.
+//!
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -353,6 +377,14 @@ pub struct ResolvedConfig {
 
 impl ResolvedConfig {
     /// Creates a new lazy facade, ready to resolve data from the provided layer promises.
+    /// # Arguments
+    ///
+    /// * `uuid` - The UUID of the project.
+    /// * `qualified_name` - The fully qualified name of the project.
+    /// * `project_root` - The root directory of the project.
+    /// * `hierarchy` - The hierarchy of the project, from the project itself to the root.
+    /// * `layers` - The layers of the project, which are promises that will be resolved to the actual
+    ///   configuration.
     pub fn new(
         uuid: Uuid,
         qualified_name: String,
@@ -984,8 +1016,12 @@ impl ProjectConfig {
 
     /// Creates a minimal yet structurally complete ProjectConfig for `axes init`.
     /// It acts as a scaffold for new projects.
-    /// Creates a minimal yet structurally complete ProjectConfig for `axes init`.
-    /// It acts as a scaffold for new projects.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the project.
+    /// * `version` - The version of the project.
+    /// * `description` - The description of the project.
     pub fn new_for_init(name: &str, version: &str, description: &str) -> Self {
         let mut scripts = HashMap::new();
         let mut vars = HashMap::new();

@@ -1,55 +1,80 @@
+//! # Context Resolver
+//!
+//! This module provides the `resolve_context` function, which is responsible for resolving a project
+//! context string to its canonical UUID and fully qualified name. The resolution follows a strict,
+//! multi-layered priority order to ensure predictable behavior both inside and outside of project
+//! sessions.
+
 use crate::{
+    core::index_manager::{self, GLOBAL_PROJECT_UUID},
     models::{GlobalIndex, IndexEntry},
     state::AppStateGuard,
 };
-use dialoguer::{Error as DialoguerError, Select, theme::ColorfulTheme};
+use dialoguer::{theme::ColorfulTheme, Error as DialoguerError, Select};
 use std::{env, path::Path};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::core::index_manager::{self, GLOBAL_PROJECT_UUID};
-
+// The `ContextError` enum represents the possible errors that can occur during context resolution.
 #[derive(Error, Debug)]
 pub enum ContextError {
+    /// A filesystem error occurred.
     #[error("Filesystem Error: {0}")]
     Io(#[from] std::io::Error),
+    /// An error occurred while accessing the index.
     #[error("Index Error: {0}")]
     Index(#[from] crate::core::index_manager::IndexError),
+    /// An error occurred while decoding the cache.
     #[error("Error decoding cache: {0}")]
     BincodeDecode(#[from] bincode::error::DecodeError),
+    /// An error occurred while encoding the cache.
     #[error("Error encoding cache: {0}")]
     BincodeEncode(#[from] bincode::error::EncodeError),
+    /// An error occurred in the user interface.
     #[error("User Interface Error: {0}")]
     Dialoguer(#[from] DialoguerError),
+    /// The context was not provided.
     #[error("Empty context not provided.")]
     EmptyContext,
+    /// The context `**` can only be used at the beginning of the path.
     #[error("Context '**' can only be used at the beginning of the path.")]
     GlobalRecentNotAtStart,
+    /// The context `_` can only be used at the beginning of a path when outside a session.
     #[error("Context '_' can only be used at the beginning of a path when outside a session.")]
     StrictLocalPathNotAtStart,
+    /// Cannot go further up the hierarchy, as the current project is a root project.
     #[error("Cannot go further up the hierarchy. Already at a root project.")]
     AlreadyAtRoot,
+    /// No projects have been used recently, so `**` cannot be resolved.
     #[error("No projects have been used recently. Cannot resolve '**'.")]
     NoLastUsedProject,
+    /// The parent project has not used any children recently, so `*` cannot be resolved.
     #[error(
         "Parent project '{parent_name}' has not used any children recently. Cannot resolve '*'."
     )]
     NoLastUsedChild { parent_name: String },
+    /// No axes project was found in the current directory or any parent directories.
     #[error("No axes project found in current directory or any parent directories.")]
     ProjectNotFoundFromPath,
+    /// No axes project was found in the current directory.
     #[error("No axes project found in current directory.")]
     ProjectNotFoundInCwd,
+    /// A root project with the given name was not found.
     #[error("Root project with name '{name}' not found.")]
     RootProjectNotFound { name: String },
+    /// A child project with the given name was not found for the parent project.
     #[error("Child project '{child_name}' not found for parent '{parent_name}'.")]
     ChildProjectNotFound {
         child_name: String,
         parent_name: String,
     },
+    /// An alias with the given name was not found.
     #[error("Alias '{name}!' not found.")]
     AliasNotFound { name: String },
+    /// The project name for the alias could not be resolved.
     #[error("Could not resolve project name for alias (possible broken parent link).")]
     AliasResolutionError,
+    /// The operation was cancelled by the user.
     #[error("Operation cancelled by user.")]
     Cancelled,
 }
@@ -59,6 +84,16 @@ type ContextResult<T> = Result<T, ContextError>;
 /// Resolves a project context string to its canonical UUID and fully qualified name.
 /// The resolution follows a strict, multi-layered priority order to ensure
 /// predictable behavior both inside and outside of project sessions.
+///
+/// # Arguments
+///
+/// * `context` - The context string to resolve.
+/// * `state_guard` - A mutable reference to the `AppStateGuard`.
+///
+/// # Returns
+///
+/// A `Result` containing a tuple of the resolved UUID and the fully qualified name on success,
+/// or a `ContextError` if resolution fails.
 pub fn resolve_context(
     context: &str,
     state_guard: &mut AppStateGuard,
@@ -173,6 +208,17 @@ pub fn resolve_context(
 }
 
 /// Resolves '*' for a child, with interactive fallback.
+///
+/// # Arguments
+///
+/// * `parent_uuid` - The UUID of the parent project.
+/// * `parent_entry` - A reference to the `IndexEntry` of the parent project.
+/// * `index` - A reference to the `GlobalIndex`.
+///
+/// # Returns
+///
+/// A `Result` containing the UUID of the resolved child on success, or a `ContextError` if
+/// resolution fails.
 fn resolve_last_used_child(
     parent_uuid: Uuid,
     parent_entry: &IndexEntry,
@@ -232,6 +278,17 @@ fn resolve_last_used_child(
 }
 
 /// Finds a project's UUID by searching from a file system path.
+///
+/// # Arguments
+///
+/// * `path` - The path to search from.
+/// * `search_up` - Whether to search up the directory tree.
+/// * `index` - A reference to the `GlobalIndex`.
+///
+/// # Returns
+///
+/// A `Result` containing the UUID of the found project on success, or a `ContextError` if
+/// no project is found.
 fn find_project_from_path(
     path: &Path,
     search_up: bool,
@@ -269,6 +326,18 @@ fn find_project_from_path(
 }
 
 /// Finds the UUID of a child by its name (logic moved from config_resolver).
+///
+/// # Arguments
+///
+/// * `parent_uuid` - The UUID of the parent project.
+/// * `parent_entry` - A reference to the `IndexEntry` of the parent project.
+/// * `child_name` - The name of the child to find.
+/// * `index` - A reference to the `GlobalIndex`.
+///
+/// # Returns
+///
+/// A `Result` containing the UUID of the found child on success, or a `ContextError` if
+/// the child is not found.
 fn find_child_by_name(
     parent_uuid: Uuid,
     parent_entry: &IndexEntry,
