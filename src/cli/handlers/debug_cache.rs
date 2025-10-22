@@ -1,4 +1,7 @@
-use crate::models::{CachedProjectConfig, GlobalIndex};
+use crate::{
+    models::{CachedProjectConfig, GlobalIndex},
+    state::AppStateGuard,
+};
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 use colored::*;
@@ -29,7 +32,7 @@ enum CacheSubcommand {
 
 /// The main handler for the `_cache` command.
 /// Provides tools to debug the single-layer configuration caching system.
-pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGuard) -> Result<()> {
     let cache_args = CacheArgs::try_parse_from(&args)?;
 
     let final_context = cache_args

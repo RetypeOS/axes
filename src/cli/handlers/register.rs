@@ -5,7 +5,7 @@ use std::{env, path::PathBuf};
 
 use crate::{
     core::onboarding_manager::{self, OnboardingOptions},
-    models::GlobalIndex,
+    state::AppStateGuard,
 };
 
 // --- Command Argument Parsing ---
@@ -27,7 +27,7 @@ pub struct RegisterArgs {
 
 // --- Main Handler ---
 
-pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGuard) -> Result<()> {
     if env::var("AXES_PROJECT_UUID").is_ok() {
         return Err(anyhow!(t!("register.error.in_session")));
     }

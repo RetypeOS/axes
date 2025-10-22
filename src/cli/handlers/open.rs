@@ -2,6 +2,7 @@ use crate::{
     cli::handlers::commons,
     core::task_executor,
     models::{GlobalIndex, ResolvedConfig, ResolvedOpenWithConfig},
+    state::AppStateGuard,
 };
 use anyhow::{Result, anyhow};
 use clap::Parser;
@@ -28,7 +29,7 @@ struct OpenArgs {
 
 // --- Main Handler ---
 
-pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGuard) -> Result<()> {
     let open_args = OpenArgs::try_parse_from(&args)?;
     let config = commons::resolve_config_for_context(context, index)?;
     let options = config.get_options()?;

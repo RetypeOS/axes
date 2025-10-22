@@ -1,5 +1,6 @@
 use clap::Parser;
 
+pub mod dispatcher;
 pub mod handlers;
 
 /// Builds the dynamic, color-aware full help string at runtime.

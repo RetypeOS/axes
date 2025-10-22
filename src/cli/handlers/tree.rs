@@ -6,7 +6,7 @@ use crate::{
         context_resolver,
         graph_display::{self, DisplayOptions},
     },
-    models::GlobalIndex,
+    state::AppStateGuard,
 };
 use colored::Colorize;
 
@@ -40,7 +40,7 @@ struct TreeArgs {
     check: bool,
 }
 
-pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGuard) -> Result<()> {
     // 1. Parse this handler's specific arguments.
     let tree_args = TreeArgs::try_parse_from(&args)?;
 

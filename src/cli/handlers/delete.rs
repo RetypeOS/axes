@@ -7,7 +7,7 @@ use std::fs;
 use crate::{
     cli::handlers::commons,
     core::{context_resolver, index_manager},
-    models::GlobalIndex,
+    state::AppStateGuard,
 };
 
 #[derive(Parser, Debug, Default)]
@@ -25,7 +25,7 @@ struct DeleteArgs {
     reparent_to: Option<String>,
 }
 
-pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGuard) -> Result<()> {
     // 1. Parse arguments and resolve target project.
     let delete_args = DeleteArgs::try_parse_from(&args)?;
     let context_str =

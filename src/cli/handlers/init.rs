@@ -10,6 +10,7 @@ use crate::{
     constants::{AXES_DIR, PROJECT_CONFIG_FILENAME, PROJECT_REF_FILENAME},
     core::{context_resolver, index_manager},
     models::{GlobalIndex, ProjectConfig, ProjectRef},
+    state::AppStateGuard,
 };
 
 // --- Command Argument Parsing ---
@@ -54,7 +55,11 @@ struct ProjectDetails {
 
 // --- Main Handler ---
 
-pub fn handle(_context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
+pub fn handle(
+    _context: Option<String>,
+    args: Vec<String>,
+    index: &mut AppStateGuard,
+) -> Result<()> {
     let init_args = InitArgs::try_parse_from(&args)?;
     let target_dir = env::current_dir()?;
 
