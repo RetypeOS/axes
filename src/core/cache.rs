@@ -12,13 +12,17 @@ const HASH_TRUNCATE_LENGTH: usize = 16;
 /// The buffer size for streaming I/O when hashing files, in bytes. 8KB.
 const HASH_BUFFER_SIZE: usize = 8192;
 
+// In src/core/cache.rs
+
 /// Represents the validation metadata for a cache entry.
 /// This layered approach allows for fast checks before resorting to hashing.
 #[derive(Debug, PartialEq, Eq)]
-
 pub struct CacheValidationData {
+    /// The last modification timestamp of the source file (`axes.toml`).
     pub timestamp: SystemTime,
+    /// The size of the source file in bytes.
     pub file_size: u64,
+    /// The BLAKE3 content hash of the source file, truncated for brevity.
     pub content_hash: String,
 }
 

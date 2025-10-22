@@ -42,8 +42,11 @@ pub type LayerPromise = Arc<OnceLock<LayerResult>>;
 /// back to the main thread for sequential application. This is created on a cache miss.
 #[derive(Debug, Clone)]
 pub struct IndexUpdate {
+    /// The UUID of the project whose cache information needs updating.
     pub uuid: Uuid,
+    /// The new BLAKE3 content hash of the project's `axes.toml` file.
     pub new_hash: String,
+    /// The newly resolved cache directory path for the project.
     pub new_cache_dir: PathBuf,
 }
 
@@ -58,12 +61,16 @@ pub struct IndexUpdate {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct PlatformCommand {
+    /// The default command, used if no platform-specific version is available.
     #[serde(default)]
     pub default: Option<String>,
+    /// The command to run specifically on Windows.
     #[serde(default)]
     pub windows: Option<String>,
+    /// The command to run specifically on Linux.
     #[serde(default)]
     pub linux: Option<String>,
+    /// The command to run specifically on macOS.
     #[serde(default)]
     pub macos: Option<String>,
 }
@@ -73,24 +80,30 @@ pub struct PlatformCommand {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum TomlCommand {
+    /// A single command string, e.g., `"echo 'hello'"`
     Simple(String),
+    /// A platform-specific block, e.g., `{ windows = "dir", default = "ls" }`
     Platform(PlatformCommand),
 }
 
+/// Represents an extended script definition with a description.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct TomlScriptExtended {
+    /// A user-facing description of what the script does.
     pub desc: Option<String>,
-    // The `run` key can be any of the TomlScript variants itself.
+    /// The command(s) to run, which can be any `TomlScript` variant.
     pub run: Box<TomlScript>,
 }
 
-// A struct for the new direct platform syntax, e.g., `[scripts.build] desc="..." windows="..."`.
-// It's mutually exclusive with `TomlScriptExtended` because it doesn't have a `run` field.
+/// Represents a direct platform-specific script definition with a description.
+/// This allows syntax like `[scripts.build] desc = "..." windows = "..."`.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct TomlScriptPlatformDirect {
+    /// A user-facing description of what the script does.
     pub desc: Option<String>,
+    /// The platform-specific commands.
     #[serde(flatten)]
     pub platform: PlatformCommand,
 }
@@ -100,10 +113,15 @@ pub struct TomlScriptPlatformDirect {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum TomlScript {
+    /// A single command string: `script = "..."`
     Simple(String),
+    /// A sequence of commands: `script = [ "...", { ... } ]`
     Sequence(Vec<TomlCommand>),
+    /// A platform-specific block: `script = { windows = "...", ... }`
     Platform(PlatformCommand),
+    /// A table with description and platform keys: `[scripts.my_script]`
     PlatformDirect(TomlScriptPlatformDirect),
+    /// A table with description and a nested `run` key: `[scripts.my_script]`
     Extended(TomlScriptExtended),
 }
 
@@ -112,14 +130,19 @@ pub enum TomlScript {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum TomlVarValue {
+    /// A single var string: var = "..."
     Simple(String),
+    /// A platform-specific block: `var = { windows = "...", ... }`
     Platform(PlatformCommand),
 }
 
+/// Represents an extended variable definition with a description and value.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct TomlVarExtended {
+    /// A user-facing description of the variable.
     pub desc: Option<String>,
+    /// The value of the variable.
     pub value: TomlVarValue,
 }
 
@@ -133,12 +156,13 @@ pub enum TomlVar {
     Extended(TomlVarExtended),
 }
 
-// any script name (e.g., `editor = "..."`) would be considered an "unknown field"
-// by default. Serde's `flatten` attribute is incompatible with this level of strictness.
+/// Represents the user-configurable `[options.open_with]` table in `axes.toml`.
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct TomlOpenWithConfig {
+    /// The key of the default command to use for `axes open`.
     #[serde(default)]
     pub default: Option<String>,
+    /// A map of custom commands, where keys are identifiers (e.g., "editor") and values are scripts.
     #[serde(flatten)]
     pub commands: HashMap<String, TomlScript>,
 }
@@ -147,16 +171,22 @@ pub struct TomlOpenWithConfig {
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct OptionsConfig {
+    /// A script to run automatically when entering a project session via `axes start`.
     #[serde(default)]
     pub at_start: Option<TomlScript>,
+    /// A script to run automatically when exiting a project session.
     #[serde(default)]
     pub at_exit: Option<TomlScript>,
+    /// The name of the shell (from `shells.toml`) to use for `axes start`.
     #[serde(default)]
     pub shell: Option<String>,
+    /// Configuration for the `axes open` command.
     #[serde(default)]
     pub open_with: TomlOpenWithConfig,
+    /// A template for the root directory where project caches are stored.
     #[serde(default)]
     pub cache_dir: Option<String>,
+    /// A template for the shell prompt used inside an `axes start` session.
     #[serde(default)]
     pub prompt: Option<String>,
 }
@@ -166,18 +196,25 @@ pub struct OptionsConfig {
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectConfig {
+    /// The simple name of the project. Primarily for informational purposes.
     #[serde(default)]
     pub name: Option<String>,
+    /// The version of the project. Can be interpolated via the `<version>` token.
     #[serde(default)]
     pub version: Option<String>,
+    /// A short description of the project.
     #[serde(default)]
     pub description: Option<String>,
+    /// A map of named scripts the user can run.
     #[serde(default)]
     pub scripts: HashMap<String, TomlScript>,
+    /// Global options for the project's behavior.
     #[serde(default)]
     pub options: OptionsConfig,
+    /// A map of user-defined variables for interpolation.
     #[serde(default)]
     pub vars: HashMap<String, TomlVar>,
+    /// A map of environment variables to set during script execution or sessions.
     #[serde(default)]
     pub env: HashMap<String, String>,
 }
@@ -194,25 +231,41 @@ pub struct ProjectConfig {
 /// Defines the contract for a parameter token (`<params::...>`) found in a script.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ParameterDef {
+    /// The kind of parameter (positional or named).
     pub kind: ParameterKind,
+    /// Modifiers that control the parameter's behavior (e.g., required, default value).
     pub modifiers: ParameterModifiers,
+    /// The original, full token string as it appeared in the config (e.g., `<params::0(required)>`).
     pub original_token: String,
 }
 
 /// Distinguishes between positional (`<params::0>`) and named (`<params::name>`) parameters.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ParameterKind {
-    Positional { index: usize },
-    Named { name: String },
+    /// A parameter identified by its zero-based position in the argument list.
+    Positional {
+        /// The index of the positional argument.
+        index: usize,
+    },
+    /// A parameter identified by a name, usually corresponding to a CLI flag (e.g., `--name`).
+    Named {
+        /// The long name of the flag (without the `--` prefix).
+        name: String,
+    },
 }
 
 /// Defines the modifiers for a parameter (e.g., `required`, `default`, `alias`).
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct ParameterModifiers {
+    /// If true, the parameter must be provided by the user.
     pub required: bool,
+    /// A default value to use if the parameter is not provided.
     pub default_value: Option<String>,
+    /// An alternative name for a named parameter (e.g., `-n` as an alias for `--name`).
     pub alias: Option<String>,
+    /// A string to prepend to the parameter's value, used for formatting flags.
     pub map: Option<String>,
+    /// If true, the parameter's value will be wrapped in quotes and escaped.
     pub literal: bool,
 }
 
@@ -224,19 +277,33 @@ pub enum RunSpec {
 }
 
 /// An enum representing all possible token types that can appear in a command string.
-/// This is a fundamental part of the AST.
+/// This is a fundamental part of the compiled AST.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum TemplateComponent {
+    /// A static, literal part of the command string.
     Literal(String),
+    /// A user-defined parameter from the CLI, e.g., `<params::0>`.
     Parameter(ParameterDef),
-    GenericParams { literal: bool },
+    /// A token that expands to all unconsumed CLI arguments, e.g., `<params>`.
+    GenericParams {
+        /// If true, each argument is individually quoted.
+        literal: bool,
+    },
+    /// A command to execute whose output is substituted in place, e.g., `<run('...')>`.
     Run(RunSpec),
+    /// A token that expands to the project's root filesystem path.
     Path,
+    /// A token that expands to the project's simple name.
     Name,
+    /// A token that expands to the project's UUID.
     Uuid,
+    /// A token that expands to the project's version string.
     Version,
+    /// An ANSI color/style code, e.g., `<#red>`.
     Color(AnsiStyle),
+    /// A reference to another script, e.g., `<scripts::build>`.
     Script(String),
+    /// A reference to a variable, e.g., `<vars::my_var>`.
     Var(String),
 }
 
@@ -253,47 +320,58 @@ pub enum CommandAction {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[non_exhaustive]
 pub struct CommandExecution {
+    /// The action to perform (execute a command or print text).
     pub action: CommandAction,
+    /// If true, the command's failure will not halt script execution.
     pub ignore_errors: bool,
+    /// If true, this command can be run in parallel with subsequent parallel commands.
     pub run_in_parallel: bool,
+    /// If true, the command itself will not be printed to the console before execution.
     pub silent_mode: bool,
 }
 
 // --- New Platform-Agnostic AST Models ---
 
-/// The core building block of the new AST. It holds a fully compiled `CommandExecution`
+/// The core building block of the AST. It holds a fully compiled `CommandExecution`
 /// for each potential platform, ready for fast runtime selection.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct PlatformExecution {
+    /// The default execution, used as a fallback.
     pub default: Option<CommandExecution>,
+    /// The Windows-specific execution.
     pub windows: Option<CommandExecution>,
+    /// The Linux-specific execution.
     pub linux: Option<CommandExecution>,
+    /// The macOS-specific execution.
     pub macos: Option<CommandExecution>,
 }
 
-/// The new, platform-agnostic AST representation of a script. It consists of a
-/// description and a sequence of `PlatformExecution` blocks.
+/// The platform-agnostic AST representation of a script.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Task {
+    /// The user-facing description of the script.
     pub desc: Option<String>,
+    /// A sequence of platform-aware commands that compose the script.
     pub commands: Vec<PlatformExecution>,
 }
 
 /// Represents a `Task` that has been "specialized" for the current platform.
 /// It contains a simple, flat list of commands to be executed, removing the need
 /// for runtime platform selection in the hot loop of the executor.
-/// This is a performance optimization structure.
 #[derive(Debug, Clone, Default)]
 pub struct PlatformSpecializedTask {
+    /// The user-facing description, inherited from the original `Task`.
     pub desc: Option<String>,
+    /// The flattened, platform-specific list of commands to execute.
     pub commands: Vec<CommandExecution>,
 }
 
-/// The new, platform-agnostic AST representation of a variable. It contains a single
-/// `PlatformExecution` block, enforcing the "single value" semantic.
+/// The platform-agnostic AST representation of a variable.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct CachedVar {
+    /// The user-facing description of the variable.
     pub desc: Option<String>,
+    /// The platform-aware value of the variable.
     pub value: PlatformExecution,
 }
 
@@ -302,20 +380,28 @@ pub struct CachedVar {
 /// Bincode-compatible representation of `[options.open_with]` in the binary cache.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct CachedOpenWithConfig {
+    /// The key of the default `open` command.
     pub default: Option<String>,
+    /// The compiled map of available `open` commands.
     pub commands: HashMap<String, Task>,
 }
 
 /// Bincode-compatible representation of `[options]` in the binary cache.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct CachedOptionsConfig {
+    /// The compiled `at_start` hook.
     pub at_start: Option<Task>,
+    /// The compiled `at_exit` hook.
     pub at_exit: Option<Task>,
+    /// The name of the shell to use.
     pub shell: Option<String>,
+    /// The compiled `open_with` configuration.
     #[serde(default)]
     pub open_with: CachedOpenWithConfig,
+    /// The configured cache directory path template.
     #[serde(default)]
     pub cache_dir: Option<String>,
+    /// The configured shell prompt template.
     #[serde(default)]
     pub prompt: Option<String>,
 }
@@ -324,11 +410,17 @@ pub struct CachedOptionsConfig {
 /// This is the unit that is stored in the binary cache file.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct CachedProjectConfig {
+    /// The project's version string.
     pub version: Option<String>,
+    /// The project's description.
     pub description: Option<String>,
+    /// The compiled map of scripts.
     pub scripts: HashMap<String, Task>,
+    /// The compiled map of variables.
     pub vars: HashMap<String, CachedVar>,
+    /// The map of environment variables.
     pub env: HashMap<String, String>,
+    /// The compiled options configuration.
     pub options: CachedOptionsConfig,
 }
 
@@ -337,18 +429,26 @@ pub struct CachedProjectConfig {
 /// A runtime representation of resolved `open_with` options, using `Arc` for efficient sharing.
 #[derive(Debug, Clone, Default)]
 pub struct ResolvedOpenWithConfig {
+    /// The final, inherited key for the default `open` command.
     pub default: Option<String>,
+    /// The final, merged map of available `open` commands.
     pub commands: HashMap<String, Arc<Task>>,
 }
 
 /// A runtime representation of all resolved `[options]`, using `Arc` for efficient sharing.
 #[derive(Debug, Clone, Default)]
 pub struct ResolvedOptionsConfig {
+    /// The final, inherited `at_start` hook.
     pub at_start: Option<Arc<Task>>,
+    /// The final, inherited `at_exit` hook.
     pub at_exit: Option<Arc<Task>>,
+    /// The final, inherited shell name.
     pub shell: Option<String>,
+    /// The final, merged `open_with` configuration.
     pub open_with: ResolvedOpenWithConfig,
+    /// The final, absolute path to this project's cache directory.
     pub cache_dir: Option<String>,
+    /// The final, inherited prompt template.
     pub prompt: Option<String>,
 }
 
@@ -362,16 +462,27 @@ type Memoized<T> = Arc<Mutex<Option<T>>>;
 /// It loads and merges configuration layers from the inheritance chain on-demand and caches the results in memory.
 #[derive(Debug, Clone)]
 pub struct ResolvedConfig {
+    /// The unique identifier for this project.
     pub uuid: Uuid,
+    /// The fully-qualified, slash-separated name of the project (e.g., `my-app/backend`).
     pub qualified_name: String,
+    /// The absolute path to the project's root directory on the filesystem.
     pub project_root: PathBuf,
+    /// An ordered list of UUIDs representing the inheritance chain, from self to the root.
     pub(crate) hierarchy: Arc<Vec<Uuid>>,
+    /// A map of promises for each layer's compiled configuration, used for parallel loading.
     pub(crate) layers: Arc<HashMap<Uuid, LayerPromise>>,
+    /// A memoization cache for resolved scripts.
     memoized_scripts: Memoized<HashMap<String, Option<Arc<Task>>>>,
+    /// A memoization cache for resolved variables.
     memoized_vars: Memoized<HashMap<String, Option<Arc<CachedVar>>>>,
+    /// A memoization cache for the merged environment.
     memoized_env: Memoized<MemoizedEnv>,
+    /// A memoization cache for the resolved version string.
     memoized_version: Memoized<Option<String>>,
+    /// A memoization cache for the resolved description.
     memoized_description: Memoized<Option<String>>,
+    /// A memoization cache for the merged options configuration.
     memoized_options: Memoized<ResolvedOptionsConfig>,
 }
 
@@ -410,6 +521,12 @@ impl ResolvedConfig {
     // --- LAZY ACCESSOR METHODS (FULLY IMPLEMENTED FOR V0.3) ---
 
     /// Lazily finds and returns a script's AST by name, searching up the inheritance chain.
+    ///
+    /// It traverses from the current project upwards through its parents. The first script found
+    /// with the matching name is returned. Results are memoized for subsequent calls.
+    ///
+    /// # Arguments
+    /// * `name` - The simple name of the script to find.
     pub fn get_script(&self, name: &str) -> Result<Option<Arc<Task>>> {
         let mut guard = self.memoized_scripts.lock().unwrap();
         if let Some(cache) = &*guard
@@ -432,7 +549,13 @@ impl ResolvedConfig {
         Ok(result)
     }
 
-    /// Lazily finds and returns a variable's AST by name.
+    /// Lazily finds and returns a variable's AST by name, searching up the inheritance chain.
+    ///
+    /// It traverses from the current project upwards. The first variable found with the matching
+    /// name is returned. Results are memoized.
+    ///
+    /// # Arguments
+    /// * `name` - The name of the variable to find.
     pub fn get_var(&self, name: &str) -> Result<Option<Arc<CachedVar>>> {
         let mut guard = self.memoized_vars.lock().unwrap();
         if let Some(cache) = &*guard
@@ -474,6 +597,7 @@ impl ResolvedConfig {
     }
 
     /// Lazily finds and returns the project's version by searching up the hierarchy.
+    /// The first non-empty `version` field found while traversing up the chain is returned.
     pub fn get_version(&self) -> Result<Option<String>> {
         let mut guard = self.memoized_version.lock().unwrap();
         if let Some(version) = &*guard {
@@ -492,6 +616,7 @@ impl ResolvedConfig {
     }
 
     /// Lazily finds and returns the project's description by searching up the hierarchy.
+    /// The first non-empty `description` field found is returned.
     pub fn get_description(&self) -> Result<Option<String>> {
         let mut guard = self.memoized_description.lock().unwrap();
         if let Some(desc) = &*guard {
@@ -600,6 +725,8 @@ impl ResolvedConfig {
     // --- Helpers for `info` and `run` commands ---
 
     /// Lazily merges and returns all scripts from the entire hierarchy.
+    /// This is used by commands like `axes run` (no script) to list all available scripts.
+    /// Child definitions override parent definitions.
     pub fn get_all_scripts(&self) -> Result<HashMap<String, Arc<Task>>> {
         let mut final_scripts = HashMap::new();
         for &uuid in self.hierarchy.iter().rev() {
@@ -612,7 +739,9 @@ impl ResolvedConfig {
         Ok(final_scripts)
     }
 
-    /// Lazily merges and returns all vars from the entire hierarchy.
+    /// Lazily merges and returns all variables from the entire hierarchy.
+    /// This is used by `axes info` to display all defined variables.
+    /// Child definitions override parent definitions.
     pub fn get_all_vars(&self) -> Result<HashMap<String, Arc<CachedVar>>> {
         let mut final_vars = HashMap::new();
         for &uuid in self.hierarchy.iter().rev() {
@@ -625,6 +754,10 @@ impl ResolvedConfig {
     }
 
     /// Selects the correct `CommandExecution` for the current OS from a `PlatformExecution` block.
+    /// The selection logic prefers the specific OS version and falls back to `default`.
+    ///
+    /// # Arguments
+    /// * `plat_exec` - The platform-agnostic execution block to select from.
     pub fn select_platform_exec<'a>(
         &self,
         plat_exec: &'a PlatformExecution,
@@ -685,6 +818,14 @@ impl ResolvedConfig {
         }
     }
 
+    /// Recursively flattens a `Task` by resolving all `scripts::` compositions.
+    ///
+    /// This process expands script references into a single, linear sequence of commands,
+    /// while also propagating execution modifiers (e.g., `@`, `-`) from the parent
+    /// script to the composed child commands. It also detects circular dependencies.
+    ///
+    /// # Arguments
+    /// * `top_level_task` - The initial task to flatten.
     pub fn flatten_task(&self, top_level_task: &Arc<Task>) -> Result<Arc<Task>> {
         let mut call_stack = HashSet::new();
         self.flatten_task_recursive(top_level_task, &mut call_stack)
@@ -752,6 +893,7 @@ impl ResolvedConfig {
             desc: task.desc.clone(),
         }))
     }
+
     fn flatten_command_exec_recursive(
         &self,
         cmd_exec: Option<&CommandExecution>,
@@ -773,6 +915,7 @@ impl ResolvedConfig {
             Ok(None)
         }
     }
+
     pub(crate) fn flatten_template_recursive(
         &self,
         template: &[TemplateComponent],
@@ -847,75 +990,112 @@ impl ResolvedConfig {
 /// Represents a project's entry in the global `index.bin` file.
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct IndexEntry {
+    /// The simple, non-unique name of the project (e.g., "backend").
     pub name: String,
+    /// The absolute path to the project's root directory on the filesystem.
     pub path: PathBuf,
+    /// The UUID of the parent project. `None` only for the virtual "global" project.
     pub parent: Option<Uuid>,
+    /// The last known content hash of the project's `axes.toml` file, used for caching.
     pub config_hash: Option<String>,
+    /// The last known absolute path to the project's cache directory.
     pub cache_dir: Option<PathBuf>,
+    /// The UUID of the direct child that was most recently used as a context.
     pub last_used_child: Option<Uuid>,
 }
 
 /// Represents the global index, the single source of truth for all registered projects.
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Default)]
 pub struct GlobalIndex {
+    /// A map from a project's unique `Uuid` to its metadata.
     #[serde(default)]
     pub projects: HashMap<Uuid, IndexEntry>,
+    /// A map from a user-defined alias (e.g., "backend") to a project's `Uuid`.
     #[serde(default)]
     pub aliases: HashMap<String, Uuid>,
+    /// The `Uuid` of the project that was most recently used as a context.
     pub last_used: Option<Uuid>,
 }
 
 /// Represents a project's local identity file (`.axes/project_ref.bin`).
-/// This file makes the system resilient and self-repairing.
+/// This file makes the system resilient and self-repairing by storing the project's
+/// core identity independently of the global index.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct ProjectRef {
+    /// The project's own unique identifier.
     pub self_uuid: Uuid,
+    /// The UUID of the project's parent at the time of writing.
     pub parent_uuid: Option<Uuid>,
+    /// The project's simple name at the time of writing.
     pub name: String,
 }
 
 /// Represents a configured shell in `shells.toml`.
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct ShellConfig {
+    /// The path to the shell executable.
     pub path: PathBuf,
+    /// A list of arguments required to start the shell in interactive mode and execute an init script.
     pub interactive_args: Option<Vec<String>>,
 }
 
 /// Represents the top-level structure of `shells.toml`.
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct ShellsConfig {
+    /// A map from a shell's name (e.g., "bash", "cmd") to its configuration.
     #[serde(default)]
     pub shells: HashMap<String, ShellConfig>,
 }
 
-/// Enum for supported ANSI colors, used by the `<#color>` token.
+/// Enum for supported ANSI colors and styles, used by the `<#color>` token.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnsiStyle {
     // --- Attributes ---
+    /// Resets all styles and colors.
     Reset,
+    /// Bold/intense text.
     Bold,
+    /// Dim/faint text.
     Dim,
+    /// Italic text.
     Italic,
+    /// Underlined text.
     Underline,
 
     // --- Standard Colors ---
+    /// Black Color
     Black,
+    /// Red Color
     Red,
+    /// Green Color
     Green,
+    /// Yellow Color
     Yellow,
+    /// Blue Color
     Blue,
+    /// Magenta Color
     Magenta,
+    /// Cyan Color
     Cyan,
+    /// White Color
     White,
 
     // --- Bright (Intense) Colors ---
-    BrightBlack, // Often rendered as Gray
+    /// Often rendered as Gray.
+    BrightBlack,
+    /// Bright version of Red, often used for errors or highlights.
     BrightRed,
+    /// Bright version of Green, often used for success messages.
     BrightGreen,
+    /// Bright version of Yellow, often used for warnings or emphasis.
     BrightYellow,
+    /// Bright version of Blue, often used for informational text.
     BrightBlue,
+    /// Bright version of Magenta, often used for accents or special highlights.
     BrightMagenta,
+    /// Bright version of Cyan, often used for secondary information.
     BrightCyan,
+    /// Bright version of White, often rendered as pure white.
     BrightWhite,
 }
 
