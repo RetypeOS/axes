@@ -7,6 +7,7 @@ use crate::{
     cli::handlers::commons,
     core::{context_resolver, index_manager},
     models::{GlobalIndex, ResolvedConfig},
+    state::AppStateGuard,
 };
 
 // --- Command Argument Parsing ---
@@ -31,7 +32,7 @@ struct UnregisterArgs {
 
 // --- Main Handler ---
 
-pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGuard) -> Result<()> {
     // 1. Parse & Resolve
     let unregister_args = UnregisterArgs::try_parse_from(&args)?;
     let final_context = unregister_args

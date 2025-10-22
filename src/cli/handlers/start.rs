@@ -2,6 +2,7 @@ use crate::{
     cli::handlers::commons,
     core::{parameters::ArgResolver, task_executor},
     models::{CommandAction, GlobalIndex, ResolvedConfig, Task, TemplateComponent},
+    state::AppStateGuard,
     system::shell,
 };
 use anyhow::{Result, anyhow};
@@ -29,7 +30,7 @@ struct StartArgs {
 
 // --- Main Handler ---
 
-pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGuard) -> Result<()> {
     // 1. Parse args and perform pre-flight checks.
     let start_args = StartArgs::try_parse_from(&args)?;
 

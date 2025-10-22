@@ -1,119 +1,14 @@
-use std::sync::{Arc, Mutex, OnceLock};
+// src/bin/axes.rs
 
 use anyhow::Result;
 use axes::{
-    cli::{
-        Cli,
-        handlers::{self, run::parse_script_path},
-    },
+    cli::{Cli, dispatcher},
     core::index_manager,
-    models::GlobalIndex,
+    state::get_app_state,
     system::executor,
 };
 use clap::Parser;
 use colored::*;
-
-static GLOBAL_INDEX: OnceLock<Arc<Mutex<GlobalIndex>>> = OnceLock::new();
-
-fn get_global_index() -> &'static Arc<Mutex<GlobalIndex>> {
-    GLOBAL_INDEX.get_or_init(|| {
-        let index =
-            index_manager::load_and_ensure_global_project().expect("Failed to load global index.");
-        Arc::new(Mutex::new(index))
-    })
-}
-
-// --- Command Definition and Registry ---
-
-/// Defines a system command, its aliases, and its new universal handler signature.
-/// The handler now accepts an optional context and a vector of its specific arguments.
-struct CommandDefinition {
-    name: &'static str,
-    aliases: &'static [&'static str],
-    handler: fn(Option<String>, Vec<String>, &mut GlobalIndex) -> Result<()>,
-}
-
-/// The single source of truth for all system commands.
-/// The registry is updated to match the new handler signature.
-static COMMAND_REGISTRY: &[CommandDefinition] = &[
-    CommandDefinition {
-        name: "alias",
-        aliases: &[],
-        handler: handlers::alias::handle,
-    },
-    CommandDefinition {
-        name: "cache",
-        aliases: &[],
-        handler: handlers::debug_cache::handle,
-    },
-    CommandDefinition {
-        name: "delete",
-        aliases: &["del"],
-        handler: handlers::delete::handle,
-    },
-    CommandDefinition {
-        name: "info",
-        aliases: &[],
-        handler: handlers::info::handle,
-    },
-    CommandDefinition {
-        name: "init",
-        aliases: &["new"],
-        handler: handlers::init::handle,
-    },
-    CommandDefinition {
-        name: "link",
-        aliases: &[],
-        handler: handlers::link::handle,
-    },
-    CommandDefinition {
-        name: "open",
-        aliases: &[],
-        handler: handlers::open::handle,
-    },
-    CommandDefinition {
-        name: "register",
-        aliases: &["reg"],
-        handler: handlers::register::handle,
-    },
-    CommandDefinition {
-        name: "rename",
-        aliases: &[],
-        handler: handlers::rename::handle,
-    },
-    CommandDefinition {
-        name: "run",
-        aliases: &[],
-        handler: handlers::run::handle,
-    },
-    CommandDefinition {
-        name: "start",
-        aliases: &[],
-        handler: handlers::start::handle,
-    },
-    CommandDefinition {
-        name: "tree",
-        aliases: &["ls"],
-        handler: handlers::tree::handle,
-    },
-    CommandDefinition {
-        name: "unregister",
-        aliases: &["unreg"],
-        handler: handlers::unregister::handle,
-    },
-    CommandDefinition {
-        name: "repair",
-        aliases: &["rep"],
-        handler: handlers::repair::handle,
-    },
-];
-
-/// Finds a command definition in the registry by its name or alias.
-fn find_command(name: &str) -> Option<&'static CommandDefinition> {
-    COMMAND_REGISTRY
-        .iter()
-        .find(|cmd| cmd.name == name || cmd.aliases.contains(&name))
-}
 
 /// The main entry point of the `axes` application.
 fn main() {
@@ -121,21 +16,14 @@ fn main() {
 
     #[cfg(debug_assertions)]
     {
-        //env_logger::init();
+        // Keep env_logger initialization here.
+        env_logger::init();
     }
 
-    // 1. Load the index and clone its initial state.
-    let global_index_arc = get_global_index();
-
-    let index_initial_state = {
-        let index_guard = global_index_arc.lock().unwrap();
-        (*index_guard).clone()
-    };
-
-    if let Err(e) = run_cli(cli, global_index_arc) {
-        // --- Graceful handling for clap's informational exits (`--help`, `--version`) ---
-        // Before treating the error as a generic failure, check if it's a special
-        // error from clap that should result in a clean exit.
+    // --- Application Logic Execution ---
+    // The core logic is now encapsulated and called here.
+    if let Err(e) = run_app(cli) {
+        // --- Graceful Error Handling (Unchanged) ---
         if let Some(clap_err) = e.downcast_ref::<clap::Error>()
             && !clap_err.use_stderr()
         {
@@ -143,12 +31,11 @@ fn main() {
             std::process::exit(0);
         }
 
-        // --- Existing error handling for all other application errors ---
         if let Some(exec_err) = e.downcast_ref::<executor::ExecutionError>()
             && matches!(exec_err, executor::ExecutionError::Interrupted { .. })
         {
             eprintln!();
-            std::process::exit(130);
+            std::process::exit(130); // Standard exit code for Ctrl+C
         }
 
         eprintln!("\n{}: {}", "Error".red().bold(), e);
@@ -163,10 +50,14 @@ fn main() {
         std::process::exit(1);
     }
 
-    // 3. Check if the index has changed and save if needed.
-    let index_final_state = global_index_arc.lock().unwrap();
-    if *index_final_state != index_initial_state {
-        if let Err(e) = index_manager::save_global_index(&index_final_state) {
+    // --- State Saving Logic (Now highly efficient) ---
+    // We only acquire the lock once at the very end.
+    let state_arc = get_app_state();
+    let state_guard = state_arc.lock().unwrap();
+
+    // The check is now a cheap, instantaneous boolean read. No cloning!
+    if state_guard.needs_saving() {
+        if let Err(e) = index_manager::save_global_index(state_guard.index()) {
             eprintln!(
                 "\n{}: Failed to save updated global index: {}",
                 "Critical Error".red().bold(),
@@ -178,68 +69,12 @@ fn main() {
     }
 }
 
-/// The main application dispatcher implementing the new universal grammar.
-fn run_cli(cli: Cli, global_index_arc: &'static Arc<Mutex<GlobalIndex>>) -> Result<()> {
-    log::debug!("CLI args parsed: {:?}", cli);
+/// A new function to contain the application logic, separating it from state management.
+fn run_app(cli: Cli) -> Result<()> {
+    // Get a mutable guard to the global index.
+    // This guard will automatically set the dirty flag if any handler mutates the index.
+    let mut index_guard = axes::state::lock_app_state();
 
-    // Get a mutable guard to the global index early.
-    // It will be passed down to handlers that need to mutate the state.
-    let mut index_guard = global_index_arc.lock().unwrap();
-
-    let all_args = cli.args;
-
-    if all_args.is_empty() {
-        println!("Welcome to axes! (TUI placeholder)");
-        return Ok(());
-    }
-
-    let arg1 = &all_args[0];
-    let arg2 = all_args.get(1);
-
-    // --- New Dispatch Logic Cascade ---
-    let (command_def, context, handler_args) = if let Some(arg2_val) = arg2 {
-        if arg2_val == "--" {
-            // Rule 1 (Escape Hatch): `axes <script_path> -- [params...]`
-            let (ctx_part, script_part) = parse_script_path(arg1);
-            let mut params = vec![script_part.to_string()];
-            params.extend(all_args.iter().skip(2).cloned());
-            (
-                find_command("run").unwrap(),
-                ctx_part.map(|s| s.to_string()),
-                params,
-            )
-        } else if let Some(command) = find_command(arg2_val) {
-            // Rule 2 (Explicit Action): `axes <context> <action> [args...]`
-            let params = all_args.iter().skip(2).cloned().collect();
-            (command, Some(arg1.to_string()), params)
-        } else if let Some(command) = find_command(arg1) {
-            // Rule 3 (Global Action): `axes <action> [args...]`
-            let params = all_args.iter().skip(1).cloned().collect();
-            (command, None, params)
-        } else {
-            // Rule 4 (Default, Implicit Script): `axes <script_path> [params...]`
-            let (ctx_part, script_part) = parse_script_path(arg1);
-            let mut params = vec![script_part.to_string()];
-            params.extend(all_args.iter().skip(1).cloned());
-            (
-                find_command("run").unwrap(),
-                ctx_part.map(|s| s.to_string()),
-                params,
-            )
-        }
-    } else if let Some(command) = find_command(arg1) {
-        // Rule 3 with a single argument
-        (command, None, vec![])
-    } else {
-        // Rule 4 with a single argument
-        let (ctx_part, script_part) = parse_script_path(arg1);
-        (
-            find_command("run").unwrap(),
-            ctx_part.map(|s| s.to_string()),
-            vec![script_part.to_string()],
-        )
-    };
-
-    // --- Dispatch to Handler ---
-    (command_def.handler)(context, handler_args, &mut index_guard)
+    // Delegate entirely to the new dispatcher.
+    dispatcher::dispatch(cli.args, &mut index_guard)
 }

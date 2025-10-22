@@ -7,6 +7,7 @@ use crate::{
     cli::handlers::commons,
     core::{context_resolver, index_manager},
     models::GlobalIndex,
+    state::AppStateGuard,
 };
 
 // --- Command Argument Parsing ---
@@ -23,7 +24,7 @@ struct LinkArgs {
 
 // --- Main Handler ---
 
-pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGuard) -> Result<()> {
     // 1. Parse arguments and resolve the project to be moved.
     let link_args = LinkArgs::try_parse_from(&args)?;
     let context_str =
@@ -32,6 +33,10 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalInde
     let config = commons::resolve_config_for_context(Some(context_str), index)?;
     let project_to_move_uuid = config.uuid;
     let old_qualified_name = config.qualified_name.clone();
+
+    // This call will only set the dirty flag if a change occurs.
+    context_resolver::update_last_used_caches(config.uuid, index)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
     // 2. Resolve the new parent project.
     let (new_parent_uuid, new_parent_qualified_name) =

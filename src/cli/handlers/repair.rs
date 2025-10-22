@@ -5,7 +5,7 @@ use dialoguer::{Confirm, theme::ColorfulTheme};
 use std::{env, path::PathBuf};
 use walkdir::WalkDir;
 
-use crate::{core::index_manager, models::GlobalIndex};
+use crate::{core::index_manager, models::GlobalIndex, state::AppStateGuard};
 
 // --- Command Argument Parsing ---
 
@@ -42,7 +42,11 @@ struct PathMismatch {
 
 // --- Main Handler ---
 
-pub fn handle(_context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
+pub fn handle(
+    _context: Option<String>,
+    args: Vec<String>,
+    index: &mut AppStateGuard,
+) -> Result<()> {
     if env::var("AXES_PROJECT_UUID").is_ok() {
         return Err(anyhow!(t!("repair.error.in_session")));
     }

@@ -2,6 +2,7 @@ use crate::{
     cli::handlers::commons,
     core::{parameters::ArgResolver, task_executor},
     models::{CommandAction, GlobalIndex, PlatformSpecializedTask, ResolvedConfig},
+    state::AppStateGuard,
 };
 use anyhow::{Result, anyhow};
 use clap::Parser;
@@ -46,7 +47,7 @@ struct RunArgs {
 pub fn handle(
     context: Option<String>,
     mut args: Vec<String>,
-    index: &mut GlobalIndex,
+    index: &mut AppStateGuard,
 ) -> Result<()> {
     let script_name_opt = if args.is_empty() {
         None

@@ -5,7 +5,7 @@ use dialoguer::{Confirm, theme::ColorfulTheme};
 
 use crate::{
     core::{context_resolver, index_manager},
-    models::GlobalIndex,
+    state::AppStateGuard,
 };
 
 // --- Command Argument Parsing ---
@@ -17,7 +17,7 @@ struct RenameArgs {
 }
 
 // --- Main Handler ---
-pub fn handle(context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
+pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGuard) -> Result<()> {
     // 1. Parse and validate arguments.
     let rename_args = RenameArgs::try_parse_from(&args)?;
     let new_name = crate::cli::handlers::commons::validate_project_name(&rename_args.new_name)?;

@@ -6,6 +6,7 @@ use crate::{
         CachedVar, CommandAction, GlobalIndex, PlatformExecution, ResolvedConfig, RunSpec,
         TemplateComponent,
     },
+    state::AppStateGuard,
 };
 use anyhow::Result;
 use clap::Parser;
@@ -31,7 +32,7 @@ struct InfoArgs {
 pub fn handle(
     dispatcher_context: Option<String>,
     args: Vec<String>,
-    index: &mut GlobalIndex,
+    index: &mut AppStateGuard,
 ) -> Result<()> {
     // 1. Parse all handler-specific arguments.
     let info_args = InfoArgs::try_parse_from(&args)?;

@@ -6,7 +6,7 @@ use std::env;
 
 use crate::{
     core::{context_resolver, index_manager},
-    models::GlobalIndex,
+    models::GlobalIndex, state::AppStateGuard,
 };
 
 // --- Command Argument Parsing ---
@@ -44,7 +44,7 @@ enum AliasCommand {
 
 /// The main handler for the `alias` command.
 /// It dispatches to sub-handlers for set, list, remove, and check operations.
-pub fn handle(_context: Option<String>, args: Vec<String>, index: &mut GlobalIndex) -> Result<()> {
+pub fn handle(_context: Option<String>, args: Vec<String>, index: &mut AppStateGuard) -> Result<()> {
     // Aliases are a global concept and cannot be managed from within a project session.
     if env::var("AXES_PROJECT_UUID").is_ok() {
         return Err(anyhow!(t!("alias.error.not_in_session")));
