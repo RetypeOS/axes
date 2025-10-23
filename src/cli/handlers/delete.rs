@@ -1,3 +1,25 @@
+//! # Handler for the `delete` command
+//!
+//! This module provides the logic for the `axes delete` command, which is a destructive
+//! operation that removes a project from the global index and also deletes its associated
+//! `.axes` directory from the filesystem.
+//!
+//! ## Core Logic
+//!
+//! 1.  **Argument Parsing**: It parses command-specific arguments like `--recursive` and
+//!     `--reparent-to` using a `clap` struct.
+//! 2.  **Planning**: It uses the shared `commons::prepare_operation_plan` utility to perform
+//!     a "dry run" of the deletion. This plan calculates which projects to unregister, which
+//!     directories to purge, and what the consequences of reparenting will be.
+//! 3.  **Confirmation**: The detailed, destructive plan is presented to the user. A stringent
+//!     confirmation step (requiring the user to type the project's name for recursive deletes)
+//!     ensures that the operation is intentional.
+//! 4.  **Execution**: If confirmed, the plan is executed in two phases:
+//!     a. **Filesystem Purge**: The `.axes` directories of all targeted projects are deleted.
+//!        This is done first to ensure that if this part fails, the index remains consistent.
+//!     b. **Index Mutation**: The projects are removed from the `GlobalIndex`, and any
+//!        necessary reparenting is performed.
+
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use colored::*;
@@ -25,10 +47,19 @@ struct DeleteArgs {
     reparent_to: Option<String>,
 }
 
+/// The main handler for the `delete` command.
+///
+/// Orchestrates the planning, confirmation, and execution of a project deletion,
+/// handling both single-project and recursive deletions.
+///
+/// # Arguments
+/// * `context` - The context string for the project to be deleted, provided by the dispatcher.
+/// * `args` - The command-specific arguments (e.g., `--recursive`).
+/// * `state_guard` - A mutable guard to the application state.
 pub fn handle(
     context: Option<String>,
     args: Vec<String>,
-    state_guard: &mut AppStateGuard,
+    state_guard: &mut AppStateGuard<'_>,
 ) -> Result<()> {
     // 1. Parse arguments and resolve target project.
     let delete_args = DeleteArgs::try_parse_from(&args)?;
@@ -137,7 +168,18 @@ pub fn handle(
     Ok(())
 }
 
-/// Encapsulates the logic for user confirmation.
+/// Encapsulates the user confirmation logic for the delete operation.
+///
+/// For a standard deletion, it presents a simple "Are you sure?" prompt.
+/// For a highly destructive `--recursive` deletion, it requires the user to manually
+/// type the name of the project being deleted as an extra safety measure.
+///
+/// # Arguments
+/// * `config` - The resolved configuration of the project being deleted.
+/// * `is_recursive` - A boolean indicating if the operation is recursive.
+///
+/// # Returns
+/// `Ok(true)` if the user confirms the operation, `Ok(false)` if they cancel.
 fn confirm_delete_operation(
     config: &crate::models::ResolvedConfig,
     is_recursive: bool,

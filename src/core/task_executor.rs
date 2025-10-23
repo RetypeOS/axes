@@ -1,3 +1,24 @@
+//! # Task Execution Engine
+//!
+//! This module is the heart of `axes`'s script execution capabilities. It is responsible for
+//! taking a pre-compiled, platform-specialized task and running its commands.
+//!
+//! ## Design and Performance
+//!
+//! The executor is designed for high performance and operates on the "hot path" of script execution.
+//! Key design principles include:
+//!
+//! - **Pre-Specialization**: It expects a `PlatformSpecializedTask`, meaning all platform-specific
+//!   logic and script compositions have already been resolved. This keeps the execution loop
+//!   simple and fast, with no conditional branching for OS types.
+//! - **Batching for Parallelism**: It groups consecutive commands marked for parallel execution (`>`)
+//!   into batches and runs them concurrently using `rayon`.
+//! - **Recursive Command Assembly**: The `assemble_final_command` function acts as a powerful
+//!   "renderer" that recursively resolves all tokens (`<..._>`) in a command string into their
+//!   final values just before execution.
+//! - **Graceful Handling**: It interacts with the `system::executor` to handle shell commands,
+//!   including graceful termination on signals like Ctrl+C.
+
 use crate::{
     core::{color, commons::wrap_value, parameters::ArgResolver},
     models::{CommandAction, PlatformSpecializedTask, ResolvedConfig, RunSpec, TemplateComponent},
@@ -14,30 +35,28 @@ use std::fmt::Write;
 pub fn execute_task(
     specialized_task: &PlatformSpecializedTask,
     config: &ResolvedConfig,
-    resolver: &ArgResolver,
+    resolver: &ArgResolver<'_>,
 ) -> Result<()> {
     execute_task_inner(specialized_task, config, resolver, 0)
 }
 
 // --- Internal Recursive Executor ---
 
-/// The internal, recursive executor for a platform-specialized task.
+/// The internal executor for a platform-specialized task, with recursion depth tracking.
 ///
-/// This function is on the "hot path" for script execution. It is highly optimized to simply
-/// iterate over a flat list of `CommandExecution`s, render their templates, and dispatch them
-/// sequentially or in parallel batches. All complex logic like platform selection and composition
-/// has already been handled before this function is called.
+/// This function iterates over a flat list of `CommandExecution`s, renders their templates,
+/// and dispatches them sequentially or in parallel batches. The `depth` parameter is used to
+/// prevent infinite recursion caused by self-referential `<run(...)>` tokens.
 ///
 /// # Arguments
 /// * `specialized_task` - A task that has been pre-processed for the current platform.
 /// * `config` - The fully resolved project configuration facade.
 /// * `resolver` - The argument resolver containing values for parameter tokens.
-/// * `index` - The global index, passed down for `<run(...)>` substitutions.
-/// * `depth` - The current recursion depth, to prevent infinite loops from `<run(...)>` tokens.
+/// * `depth` - The current recursion depth.
 fn execute_task_inner(
     specialized_task: &PlatformSpecializedTask,
     config: &ResolvedConfig,
-    resolver: &ArgResolver,
+    resolver: &ArgResolver<'_>,
     depth: u32,
 ) -> Result<()> {
     // A batch of commands to be executed in parallel.
@@ -96,11 +115,25 @@ fn execute_task_inner(
 
 // --- Command Assembly (Recursive String Renderer) ---
 
-///// "Renders" a template of components into a final, executable string.
+/// "Renders" a template of `TemplateComponent`s into a final, executable string.
+///
+/// This function is the core of the dynamic token expansion system. It iterates through the
+/// components of a command's AST and substitutes each token with its runtime value. It handles
+/// everything from simple variable substitution to executing sub-commands for output (`<run(...)>`).
+///
+/// # Arguments
+/// * `template` - A slice of `TemplateComponent`s representing the command's AST.
+/// * `config` - The fully resolved project configuration for context.
+/// * `resolver` - The argument resolver for `<params::...>` tokens.
+/// * `depth` - The current recursion depth, used to prevent infinite loops with `<run(...)>`.
+///
+/// # Errors
+/// Returns an error if recursion depth is exceeded or if an un-flattened `<scripts::...>` or
+/// `<vars::...>` token is found, which indicates an internal compiler error.
 pub fn assemble_final_command(
     template: &[TemplateComponent],
     config: &ResolvedConfig,
-    resolver: &ArgResolver,
+    resolver: &ArgResolver<'_>,
     _depth: u32,
 ) -> Result<String> {
     let mut final_command = String::with_capacity(template.len() * 50);
@@ -138,7 +171,8 @@ pub fn assemble_final_command(
             TemplateComponent::Run(spec) => {
                 let command_to_run = match spec {
                     RunSpec::Literal(cmd) => {
-                        let temp_template = vec![TemplateComponent::Literal(cmd.clone())];
+                        // Create a temporary template to recursively resolve tokens within the run command itself.
+                        let temp_template = crate::core::compiler::tokenize_string(cmd)?;
                         assemble_final_command(&temp_template, config, resolver, _depth + 1)?
                     }
                 };
@@ -172,7 +206,16 @@ pub fn assemble_final_command(
 
 // --- Execution Helpers ---
 
-/// Executes a single sequential command.
+/// Executes a single command sequentially in the foreground.
+///
+/// It prints the command to the console (unless in silent mode) and then blocks
+/// until the command completes.
+///
+/// # Arguments
+/// * `command_str` - The fully rendered command string to execute.
+/// * `ignore_errors` - If true, a non-zero exit code will not cause an error.
+/// * `silent` - If true, the command string will not be printed before execution.
+/// * `config` - The resolved config, used to get the working directory and environment variables.
 fn execute_single_command(
     command_str: &str,
     ignore_errors: bool,
@@ -187,7 +230,19 @@ fn execute_single_command(
     Ok(())
 }
 
-/// Prints and executes a batch of commands in parallel.
+/// Executes a batch of commands concurrently using a thread pool.
+///
+/// It prints a header for the batch (unless all commands are silent) and then spawns
+/// each command on the `rayon` thread pool. It waits for all commands to complete and -
+/// aggregates any errors.
+///
+/// # Arguments
+/// * `batch` - A slice of tuples, where each tuple contains the command string,
+///   an `ignore_errors` flag, and a `silent` flag.
+/// * `config` - The resolved config, passed to each command execution.
+///
+/// # Errors
+/// Returns a single error that aggregates the results of all failed commands in the batch.
 fn execute_parallel_batch(batch: &[(String, bool, bool)], config: &ResolvedConfig) -> Result<()> {
     let is_globally_silent = batch.iter().all(|(_, _, silent)| *silent);
     if !is_globally_silent {

@@ -1,4 +1,23 @@
-// This module contains shared functions used by multiple handlers.
+//! # Common Handler Utilities
+//!
+//! This module provides a collection of shared functions and data structures that are used
+//! across multiple command handlers. Centralizing this logic promotes code reuse (DRY) and
+//! ensures consistent behavior for common operations like configuration resolution,
+//! operational planning, and interactive user prompts.
+//!
+//! ## Key Components
+//!
+//! - **`resolve_config_for_context`**: The main entry point for handlers to obtain a fully
+//!   resolved, lazy-loaded `ResolvedConfig` for a given project context.
+//! - **`OperationPlan`**: A unified struct for "dry-running" destructive or state-changing
+//!   operations like `delete` and `unregister`, allowing the plan to be presented to the
+//!   user for confirmation before execution.
+//! - **Interactive Helpers**: Functions like `choose_parent_interactive` provide consistent,
+//!   multi-modal UI for common tasks like selecting a project from the index.
+//! - **Validation**: Utilities such as `validate_project_name` enforce consistent naming
+//!   rules throughout the application.
+//! - **Parameter Parsing**: Helpers like `build_resolver_for_task` abstract the logic
+//!   of preparing command-line arguments for script execution.
 
 use anyhow::{Context, Result, anyhow};
 use std::{
@@ -25,9 +44,20 @@ use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
 
 use colored::Colorize;
 
+/// Lazily loads and resolves the full, inherited configuration for a given context string.
+///
+/// This is the primary entry point for most handlers to get project configuration. It handles
+/// special contexts like `.` (current directory) and `_` (ephemeral project), and delegates
+/// to the `ConfigLoader` for the heavy lifting of parallel loading, caching, and merging.
+///
+/// # Arguments
+/// * `context_str` - An optional string representing the project context (e.g., "my-app/api", ".").
+///   Defaults to "." if `None`.
+/// * `state_guard` - A mutable guard to the application state, required by the `ConfigLoader`
+///   to update cache metadata if necessary.
 pub fn resolve_config_for_context(
     context_str: Option<String>,
-    state_guard: &mut AppStateGuard,
+    state_guard: &mut AppStateGuard<'_>,
 ) -> Result<ResolvedConfig> {
     let final_context_str = context_str.unwrap_or_else(|| ".".to_string());
 
@@ -47,19 +77,38 @@ pub fn resolve_config_for_context(
     loader.resolve(uuid)
 }
 
-/// [NEW UNIFIED STRUCT] Represents a calculated plan for an operation like delete or unregister.
+/// Represents a calculated plan for a state-changing operation like `delete` or `unregister`.
+///
+/// This struct is the result of a "dry run" and contains all the information needed to
+/// both inform the user of the impending changes and to execute them after confirmation.
 #[derive(Debug, Default)]
 pub struct OperationPlan {
+    /// The list of project UUIDs that will be removed from the index.
     pub uuids_to_remove: Vec<Uuid>,
-    pub paths_to_purge: Vec<PathBuf>, // Empty for unregister, populated for delete.
+    /// For destructive operations (`delete`), the list of project root paths whose `.axes`
+    /// directory will be purged. This is empty for non-destructive operations.
+    pub paths_to_purge: Vec<PathBuf>,
+    /// A list of informational warnings about actions that will be taken automatically,
+    /// such as renaming a child project to avoid a name collision during reparenting.
     pub reparent_warnings: Vec<String>,
+    /// A list of human-readable strings summarizing the operation, to be presented to the user.
     pub summary_lines: Vec<String>,
 }
 
-/// [NEW UNIFIED FUNCTION] Prepares a comprehensive plan for an operation.
-/// This is a "dry run" that calculates effects without modifying the index.
+/// Prepares a comprehensive plan for a `delete` or `unregister` operation.
+///
+/// This function performs a "dry run," calculating all the effects of the operation
+/// without modifying the application state. It handles recursive logic, reparenting,
+/// and collision detection, producing a detailed `OperationPlan`.
+///
+/// # Arguments
+/// * `state_guard` - A mutable guard to the application state, used for context resolution.
+/// * `config` - The `ResolvedConfig` of the target project for the operation.
+/// * `recursive` - If `true`, the plan will include all descendants of the target project.
+/// * `reparent_to` - An optional context string for a new parent for the target's children.
+/// * `is_destructive` - If `true`, the plan will include filesystem paths to purge (for `delete`).
 pub fn prepare_operation_plan(
-    state_guard: &mut AppStateGuard,
+    state_guard: &mut AppStateGuard<'_>,
     config: &ResolvedConfig,
     recursive: bool,
     reparent_to: Option<String>,
@@ -195,8 +244,19 @@ fn check_reparent_collisions(
     Ok((warnings, conflicts))
 }
 
-/// Interactive, multi-modal parent selector.
-pub fn choose_parent_interactive(state_guard: &mut AppStateGuard) -> Result<Uuid> {
+/// Presents an interactive, multi-modal UI for selecting a parent project.
+///
+/// This function offers the user multiple ways to choose a project:
+/// 1.  Entering a context path directly.
+/// 2.  Visually browsing the project tree.
+/// 3.  Choosing the "global" project as the parent.
+/// It ensures a consistent and user-friendly experience for any command that needs to
+/// ask the user for a project context (e.g., `init`, `register`).
+///
+/// # Arguments
+/// * `state_guard` - A mutable guard to the application state, needed for context resolution
+///   and browsing.
+pub fn choose_parent_interactive(state_guard: &mut AppStateGuard<'_>) -> Result<Uuid> {
     loop {
         let items = &[
             "Enter a context path (e.g., 'my-app/api', 'g!', '*')",
@@ -233,7 +293,7 @@ pub fn choose_parent_interactive(state_guard: &mut AppStateGuard) -> Result<Uuid
 
 /// Handles the "Enter context" workflow. Returns `Ok(Some(Uuid))` on success,
 /// `Ok(None)` if the user cancels, and `Err` on I/O failure.
-fn select_parent_by_context(state_guard: &mut AppStateGuard) -> Result<Option<Uuid>> {
+fn select_parent_by_context(state_guard: &mut AppStateGuard<'_>) -> Result<Option<Uuid>> {
     loop {
         let input: String = Input::with_theme(&ColorfulTheme::default())
             .with_prompt("Enter context path (leave empty to go back)")
@@ -386,8 +446,13 @@ pub fn validate_project_name(raw_name: &str) -> Result<String> {
     Ok(name.to_string())
 }
 
-/// This is a shared utility for handlers like `open`, `run`, and `start`.
-/// It now traverses the platform-agnostic AST to find all possible parameter definitions.
+/// Collects all unique `ParameterDef`s from every platform-specific command in a `Task`.
+///
+/// This utility traverses the entire AST of a task to build a complete contract of all
+/// possible parameters it accepts, which is essential for the `ArgResolver`.
+///
+/// # Arguments
+/// * `task` - An `Arc<Task>` from which to collect parameter definitions.
 pub fn collect_parameter_defs_from_task(task: &Arc<Task>) -> Vec<ParameterDef> {
     task.commands
         .iter()

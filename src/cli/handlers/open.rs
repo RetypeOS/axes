@@ -1,3 +1,24 @@
+//! # Handler for the `open` command
+//!
+//! This module provides the logic for the `axes open` command, which allows users to
+//! launch a project in a configured application, such as a code editor, file explorer,
+//! or a new terminal session.
+//!
+//! ## Core Logic
+//!
+//! 1.  **Argument Parsing**: It parses an optional `app_key` to specify which application to use,
+//!     a `--list` flag to show available options, and trailing arguments to be passed to the
+//!     underlying script.
+//! 2.  **Configuration Resolution**: It resolves the project's configuration to access the
+//!     `[options.open_with]` table, which contains the scripts for each `app_key`.
+//! 3.  **Command Dispatching**:
+//!     - If `--list` is used, it prints a formatted list of all available `open` commands.
+//!     - Otherwise, it determines which `app_key` to use (the one provided, or the configured
+//!       default) and proceeds to execution.
+//! 4.  **Task Execution**: It retrieves the corresponding `Task` (AST) for the chosen `app_key`,
+//!     flattens it to resolve any compositions, specializes it for the current platform, builds
+//!     an argument resolver, and finally passes it to the `task_executor` to be run.
+
 use crate::{
     cli::handlers::commons,
     core::task_executor,
@@ -29,10 +50,19 @@ struct OpenArgs {
 
 // --- Main Handler ---
 
+/// The main handler for the `open` command.
+///
+/// It determines whether to list available `open` commands or to execute one based
+/// on the parsed arguments.
+///
+/// # Arguments
+/// * `context` - The project context in which to operate, provided by the dispatcher.
+/// * `args` - Command-specific arguments (e.g., `editor -- -p 1234`).
+/// * `state_guard` - A mutable guard to the application state, needed for config resolution.
 pub fn handle(
     context: Option<String>,
     args: Vec<String>,
-    state_guard: &mut AppStateGuard,
+    state_guard: &mut AppStateGuard<'_>,
 ) -> Result<()> {
     let open_args = OpenArgs::try_parse_from(&args)?;
     let config = commons::resolve_config_for_context(context, state_guard)?;
@@ -47,6 +77,11 @@ pub fn handle(
 
 // --- Subcommand Logic ---
 
+/// Prints a formatted list of all available `open_with` commands for a project.
+///
+/// # Arguments
+/// * `project_name` - The qualified name of the project.
+/// * `open_with` - The resolved `[options.open_with]` configuration.
 fn list_open_commands(project_name: &str, open_with: &ResolvedOpenWithConfig) -> Result<()> {
     println!("\nAvailable `open` commands for '{}':", project_name.cyan());
     if open_with.commands.is_empty() {
@@ -81,6 +116,15 @@ fn list_open_commands(project_name: &str, open_with: &ResolvedOpenWithConfig) ->
 }
 
 /// Handles the logic for executing a specific `open_with` command.
+///
+/// This function performs the multi-step process of preparing and running a task:
+/// it finds the correct task, flattens it, builds an argument resolver, specializes it
+/// for the current OS, and finally executes it.
+///
+/// # Arguments
+/// * `open_args` - The parsed arguments for the `open` command.
+/// * `config` - The fully resolved configuration for the project.
+/// * `open_with` - The resolved `[options.open_with]` section of the configuration.
 fn execute_open_command(
     open_args: OpenArgs,
     config: ResolvedConfig,

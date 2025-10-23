@@ -22,7 +22,7 @@
 //!     including inherited settings. These models handle the on-demand loading and caching of configuration
 //!     layers to ensure high performance.
 //!
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;

@@ -1,3 +1,27 @@
+//! # Handler for the `init` command
+//!
+//! This module provides the logic for the `axes init` (or `axes new`) command, which creates
+//! a new `axes` project in the current directory. It handles both interactive setup and
+//! non-interactive (automated) project creation via command-line flags.
+//!
+//! ## Core Logic
+//!
+//! 1.  **Argument Parsing**: Parses a rich set of arguments (`--parent`, `--version`, `--env`, etc.)
+//!     to allow for detailed project configuration directly from the command line.
+//! 2.  **Pre-flight Checks**: Before creating any files, it verifies that the target directory
+//!     is not already an `axes` project.
+//! 3.  **Detail Gathering**: The `gather_project_details` orchestrator collects all necessary
+//!     information, either from the parsed arguments (in `--autosolve` mode) or by prompting
+//!     the user interactively for things like the project name and parent.
+//! 4.  **Collision Detection**: It performs a crucial check to ensure the chosen project name
+//!     does not conflict with an existing sibling under the chosen parent.
+//! 5.  **File & Index Creation**: If all checks pass, it performs the necessary mutations:
+//!     a. Adds the new project to the `GlobalIndex`.
+//!     b. Creates the `.axes` directory.
+//!     c. Generates and writes a default `axes.toml` file.
+//!     d. Generates and writes the local `project_ref.bin` identity file.
+//! 6.  **User Feedback**: It concludes by printing a clear summary of the newly created project.
+
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use colored::*;
@@ -20,7 +44,7 @@ use crate::{
     no_binary_name = true,
     about = "Initializes a new axes project in the current directory."
 )]
-pub struct InitArgs {
+struct InitArgs {
     /// The name for the new project. If not provided, will be asked interactively.
     pub name: Option<String>,
     /// The context of the parent project. Defaults to 'global'.
@@ -43,22 +67,38 @@ pub struct InitArgs {
     pub var: Vec<String>,
 }
 
-/// A container for all details needed to create a new project.
+/// A container for all details needed to create a new project, gathered from arguments
+/// or interactive prompts.
 struct ProjectDetails {
+    /// The validated name of the new project.
     name: String,
+    /// The UUID of the chosen parent project.
     parent_uuid: Uuid,
+    /// The project's version string.
     version: String,
+    /// A short description of the project.
     description: String,
+    /// A map of environment variables to include in `axes.toml`.
     env: HashMap<String, String>,
+    /// A map of interpolation variables to include in `axes.toml`.
     vars: HashMap<String, String>,
 }
 
 // --- Main Handler ---
 
+/// The main handler for the `init` command.
+///
+/// It orchestrates the entire project creation workflow, from gathering details to
+/// modifying the filesystem and updating the global index.
+///
+/// # Arguments
+/// * `_context` - The context from the dispatcher, which is ignored by this command.
+/// * `args` - The command-specific arguments provided by the user.
+/// * `state_guard` - A mutable guard to the application state.
 pub fn handle(
     _context: Option<String>,
     args: Vec<String>,
-    state_guard: &mut AppStateGuard,
+    state_guard: &mut AppStateGuard<'_>,
 ) -> Result<()> {
     let init_args = InitArgs::try_parse_from(&args)?;
     let target_dir = env::current_dir()?;
@@ -134,7 +174,7 @@ pub fn handle(
 fn gather_project_details(
     args: InitArgs,
     target_dir: &Path,
-    state_guard: &mut AppStateGuard,
+    state_guard: &mut AppStateGuard<'_>,
 ) -> Result<ProjectDetails> {
     let is_interactive = !args.autosolve;
 
@@ -222,7 +262,7 @@ fn resolve_project_name(
 fn resolve_parent_project(
     parent_arg: &Option<String>,
     is_interactive: bool,
-    state_guard: &mut AppStateGuard,
+    state_guard: &mut AppStateGuard<'_>,
 ) -> Result<Uuid> {
     if let Some(parent_context) = parent_arg {
         let (uuid, qualified_name) =
@@ -243,6 +283,8 @@ fn resolve_parent_project(
     Ok(index_manager::GLOBAL_PROJECT_UUID)
 }
 
+/// A helper function to parse key-value pairs from the command line (e.g., "KEY=VALUE").
+/// Used for parsing `--env` and `--var` arguments.
 fn parse_key_value_pairs(pairs: &[String]) -> Result<HashMap<String, String>> {
     let mut map = HashMap::with_capacity(pairs.len());
     for pair in pairs {
@@ -257,7 +299,14 @@ fn parse_key_value_pairs(pairs: &[String]) -> Result<HashMap<String, String>> {
     Ok(map)
 }
 
-/// Generic helper to resolve a string value, either from an argument or interactively.
+/// A generic helper to resolve a string value, either from a command-line argument
+/// or by interactively prompting the user.
+///
+/// # Arguments
+/// * `arg_val` - The value from the parsed `clap` arguments.
+/// * `prompt` - The text to display to the user if interactive input is needed.
+/// * `default_val` - The default value to use in both interactive and non-interactive modes.
+/// * `is_interactive` - A boolean indicating whether to prompt the user.
 fn resolve_string_value(
     arg_val: &Option<String>,
     prompt: &str,

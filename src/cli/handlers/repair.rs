@@ -1,3 +1,28 @@
+//! # Handler for the `repair` command
+//!
+//! This module provides the logic for the `axes repair` command, a diagnostic and fixing tool
+//! designed to resolve inconsistencies between the central `GlobalIndex` and the state of
+//! projects on the filesystem.
+//!
+//! ## Core Logic
+//!
+//! The command operates in distinct phases:
+//!
+//! 1.  **Scan & Detect**: The `scan_for_path_mismatches` function traverses a specified
+//!     directory structure (recursively or not) looking for `.axes/project_ref.bin` files.
+//!     For each one found, it compares the project's UUID and path with the information
+//!     stored in the `GlobalIndex`. Currently, it detects:
+//!     -   **Path Mismatches**: A project registered in the index with `path A`, but its
+//!         `project_ref.bin` is found at `path B` (indicating the project directory was moved).
+//!
+//! 2.  **Report**: If any inconsistencies are found, they are presented to the user in a
+//!     clear, color-coded format, showing the "registered" state vs. the "found" state.
+//!
+//! 3.  **Fix (Optional)**: If the user runs the command with the `--fix` flag and confirms
+//!     the interactive prompt, the handler mutates the `GlobalIndex` to correct the detected
+//!     discrepancies. For example, it will update the `path` field of an `IndexEntry` to
+//!     point to the project's new location.
+
 use anyhow::{Result, anyhow};
 use clap::Parser;
 use colored::*;
@@ -14,7 +39,7 @@ use crate::{core::index_manager, models::GlobalIndex, state::AppStateGuard};
     no_binary_name = true,
     about = "Scans the filesystem to find and fix inconsistencies in the axes index."
 )]
-pub struct RepairArgs {
+struct RepairArgs {
     /// The starting path for the scan. Defaults to the current directory.
     path: Option<String>,
 
@@ -33,19 +58,32 @@ pub struct RepairArgs {
 
 // --- Data Structures for Reporting ---
 
+/// A local struct used to report a discrepancy between the index and the filesystem.
 struct PathMismatch {
+    /// The UUID of the project.
     uuid: uuid::Uuid,
+    /// The name of the project.
     name: String,
+    /// The path currently registered in the `GlobalIndex`.
     old_path: PathBuf,
+    /// The new path where the project was found on the filesystem.
     new_path: PathBuf,
 }
 
 // --- Main Handler ---
 
+/// The main handler for the `repair` command.
+///
+/// It orchestrates the scan, report, and optional fix phases of the repair process.
+///
+/// # Arguments
+/// * `_context` - The context from the dispatcher, which is ignored by this global command.
+/// * `args` - Command-specific arguments (e.g., `--recursive`, `--fix`).
+/// * `state_guard` - A mutable guard to the application state.
 pub fn handle(
     _context: Option<String>,
     args: Vec<String>,
-    state_guard: &mut AppStateGuard,
+    state_guard: &mut AppStateGuard<'_>,
 ) -> Result<()> {
     if env::var("AXES_PROJECT_UUID").is_ok() {
         return Err(anyhow!(t!("repair.error.in_session")));
@@ -125,6 +163,16 @@ pub fn handle(
 
 // --- Helper Functions ---
 
+/// Scans the filesystem starting from a given path to find projects and identify
+/// path mismatches against the global index.
+///
+/// It uses `walkdir` to efficiently traverse the directory tree, reading `project_ref.bin`
+/// files to identify projects.
+///
+/// # Arguments
+/// * `start_path` - The root directory for the scan.
+/// * `args` - The parsed command arguments, used to control recursion and depth.
+/// * `index` - An immutable reference to the `GlobalIndex` to compare against.
 fn scan_for_path_mismatches(
     start_path: &PathBuf,
     args: &RepairArgs,

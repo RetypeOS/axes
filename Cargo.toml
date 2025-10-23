@@ -65,13 +65,11 @@ serde = { version = "1.0.219", features = ["derive"] }
 # Lint Rules
 [lints]
 rust.unsafe_code = "forbid"
-
 rust.keyword_idents_2024 = "forbid"
 rust.non_ascii_idents = "forbid"
 rust.unsafe_op_in_unsafe_fn = "forbid"
-clippy.undocumented_unsafe_blocks = "forbid"
-clippy.panic = "forbid"
 
+clippy.panic = "deny"
 clippy.unwrap_used = "deny"
 clippy.indexing_slicing = "deny"
 clippy.cast_possible_truncation = "deny"
@@ -91,8 +89,9 @@ clippy.todo = "warn"
 clippy.use_self = "warn"
 clippy.unnecessary_wraps = "warn"
 
-clippy.pedantic = "allow"
-clippy.nursery = "allow"
+clippy.pedantic = { level = "allow", priority = -1 }
+clippy.nursery = { level = "allow", priority = -1 }
+clippy.restriction = { level = "allow", priority = -1 }
 clippy.too_many_arguments = "allow"
 clippy.module_name_repetitions = "allow"
 

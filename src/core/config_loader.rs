@@ -7,7 +7,7 @@ use crate::{
     core::{compiler, index_manager, paths},
     models::{GlobalIndex, IndexEntry, LayerPromise, ResolvedConfig},
 };
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use log;
 use rayon::prelude::*;
 use std::{

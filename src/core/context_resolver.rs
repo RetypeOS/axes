@@ -10,7 +10,7 @@ use crate::{
     models::{GlobalIndex, IndexEntry},
     state::AppStateGuard,
 };
-use dialoguer::{theme::ColorfulTheme, Error as DialoguerError, Select};
+use dialoguer::{Error as DialoguerError, Select, theme::ColorfulTheme};
 use std::{env, path::Path};
 use thiserror::Error;
 use uuid::Uuid;
@@ -52,7 +52,9 @@ pub enum ContextError {
     #[error("No projects have been used recently. Cannot resolve '**'.")]
     NoLastUsedProject,
     /// The `*` token was used on a parent that has no last-used child.
-    #[error("Parent project '{parent_name}' has not used any children recently. Cannot resolve '*'.")]
+    #[error(
+        "Parent project '{parent_name}' has not used any children recently. Cannot resolve '*'."
+    )]
     NoLastUsedChild {
         /// The name of the parent project.
         parent_name: String,

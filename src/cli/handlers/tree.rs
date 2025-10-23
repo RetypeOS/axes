@@ -1,3 +1,22 @@
+//! # Handler for the `tree` command
+//!
+//! This module provides the logic for the `axes tree` command (aliased as `ls`), which
+//! renders a visual representation of the project hierarchy.
+//!
+//! ## Core Logic
+//!
+//! 1.  **Argument Parsing**: It parses a variety of display-modifying flags, such as `--paths`,
+//!     `--uuids`, `--depth`, and `--check`, which control the level of detail in the output.
+//!     It also accepts an optional `context` to root the tree display at a specific project.
+//! 2.  **Context Resolution**: If a `context` is provided, it uses the `context_resolver` to
+//!     find the starting project's UUID. This is a potentially mutable operation as it
+//!     updates `last_used` metadata in the index. If no context is given, it defaults to
+//!     displaying the entire project tree from the "global" project root.
+//! 3.  **Options Assembly**: It constructs a `DisplayOptions` struct from the parsed arguments
+//!     to configure the tree renderer.
+//! 4.  **Delegation**: It delegates the entire rendering process to the `graph_display` module,
+//!     passing the index, the starting node, and the display options.
+
 use anyhow::Result;
 use clap::Parser;
 
@@ -40,10 +59,19 @@ struct TreeArgs {
     check: bool,
 }
 
+/// The main handler for the `tree` command.
+///
+/// It parses display options, resolves the starting context (if any), and then
+/// delegates the actual rendering logic to the `graph_display` module.
+///
+/// # Arguments
+/// * `context` - An optional context from the dispatcher to root the tree.
+/// * `args` - Command-specific arguments for display options.
+/// * `state_guard` - A mutable guard to the application state, needed for context resolution.
 pub fn handle(
     context: Option<String>,
     args: Vec<String>,
-    state_guard: &mut AppStateGuard,
+    state_guard: &mut AppStateGuard<'_>,
 ) -> Result<()> {
     // 1. Parse this handler's specific arguments.
     let tree_args = TreeArgs::try_parse_from(&args)?;

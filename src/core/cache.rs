@@ -32,16 +32,16 @@ pub struct CacheValidationData {
 /// 1. Timestamp (modified time)
 /// 2. File size
 /// 3. Content Hash (blake3)
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing the `CacheValidationData` on success, or an error if the file
-    /// cannot be read or its metadata cannot be accessed.
-    ///
-    /// # Errors
-    ///
-    /// Returns an I/O error if the file cannot be read or its metadata cannot be accessed.
-    pub fn calculate_validation_data(path: &Path) -> Result<CacheValidationData> {
+///
+/// # Returns
+///
+/// A `Result` containing the `CacheValidationData` on success, or an error if the file
+/// cannot be read or its metadata cannot be accessed.
+///
+/// # Errors
+///
+/// Returns an I/O error if the file cannot be read or its metadata cannot be accessed.
+pub fn calculate_validation_data(path: &Path) -> Result<CacheValidationData> {
     // ROBUSTNESS: Add a log at the function entry with a clear name.
     log::trace!("Calculating validation data for '{}'", path.display());
 

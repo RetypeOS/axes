@@ -1,3 +1,28 @@
+//! # Handler for the `link` command
+//!
+//! This module provides the logic for the `axes link` command, which changes the parent
+//! of a registered project, effectively moving it to a new location within the project
+//! hierarchy.
+//!
+//! ## Core Logic
+//!
+//! 1.  **Context Resolution**: It resolves two contexts: the project to be moved and the
+//!     new parent project. This requires mutable access to the application state as it
+//!     updates `last_used` metadata.
+//! 2.  **Pre-flight Validation**: Before performing any mutation, the `validate_link_operation`
+//!     function runs a series of critical safety checks:
+//!     - Prevents linking the "global" project.
+//!     - Prevents a project from being linked to itself.
+//!     - Checks if the link is a no-op (i.e., the project is already a child of the
+//!       target parent).
+//!     The underlying `index_manager::link_project` performs further checks for circular
+//!     dependencies and name collisions.
+//! 3.  **Index Mutation**: If validation passes, it calls `index_manager::link_project`, which
+//!     atomically updates both the in-memory `GlobalIndex` and the on-disk `project_ref.bin`
+//!     file of the moved project.
+//! 4.  **User Feedback**: It provides a clear summary of the operation, showing the project's
+//!     old and new fully qualified names.
+
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use colored::*;
@@ -24,10 +49,19 @@ struct LinkArgs {
 
 // --- Main Handler ---
 
+/// The main handler for the `link` command.
+///
+/// It orchestrates the process of resolving the target project and the new parent,
+/// validating the operation, performing the link, and providing feedback to the user.
+///
+/// # Arguments
+/// * `context` - The context of the project to be moved, provided by the dispatcher.
+/// * `args` - Command-specific arguments, containing the context of the new parent.
+/// * `state_guard` - A mutable guard to the application state.
 pub fn handle(
     context: Option<String>,
     args: Vec<String>,
-    state_guard: &mut AppStateGuard,
+    state_guard: &mut AppStateGuard<'_>,
 ) -> Result<()> {
     // 1. Parse arguments and resolve the project to be moved.
     let link_args = LinkArgs::try_parse_from(&args)?;
@@ -103,7 +137,21 @@ pub fn handle(
 }
 
 /// Centralizes all pre-flight safety checks for the link operation.
-/// Returns `Ok(Some(()))` on success, `Ok(None)` for a no-op, and `Err` for a validation failure.
+///
+/// This function performs initial, high-level validation before the more intensive
+/// checks (like cycle detection) in `index_manager::link_project`.
+///
+/// # Arguments
+/// * `index` - An immutable reference to the `GlobalIndex`.
+/// * `project_to_move_uuid` - The UUID of the project being moved.
+/// * `new_parent_uuid` - The UUID of the target parent.
+/// * `old_qualified_name` - The current qualified name of the project being moved.
+/// * `new_parent_qualified_name` - The qualified name of the target parent.
+///
+/// # Returns
+/// - `Ok(Some(()))` if the operation is valid and should proceed.
+/// - `Ok(None)` if the operation is a no-op (already a child) and should be silently aborted.
+/// - `Err` for critical validation failures (e.g., linking to self).
 fn validate_link_operation(
     index: &GlobalIndex,
     project_to_move_uuid: Uuid,

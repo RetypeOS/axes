@@ -3,7 +3,7 @@
 //! This module provides utilities for parsing and converting ANSI color styles.
 
 use crate::models::AnsiStyle;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 /// Parses a style name string (e.g., "red", "bold", "bright-green") into an `AnsiStyle` enum.
 /// The parsing is case-insensitive.

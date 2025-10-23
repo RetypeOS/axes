@@ -1,3 +1,29 @@
+//! # Command Dispatcher
+//!
+//! This module contains the core logic for parsing the application's "universal grammar"
+//! and routing execution to the appropriate command handler. It acts as a central switchboard,
+//! decoupling the `main` function from the specific implementation of each command.
+//!
+//! ## Universal Grammar
+//!
+//! The dispatcher interprets arguments based on a set of prioritized rules, rather than a
+//! strict subcommand structure. This allows for more ergonomic and context-aware command
+//! invocation. The rules are, in order of precedence:
+//!
+//! 1.  **Escape Hatch**: `axes <script_path> -- [params...]` -> `run` command.
+//! 2.  **Explicit Action**: `axes <context> <action> [args...]` -> specific command in context.
+//! 3.  **Global Action**: `axes <action> [args...]` -> specific command in global context.
+//! 4.  **Implicit Script**: `axes <script_path> [params...]` -> `run` command by default.
+//!
+//! ## Components
+//!
+//! - **`CommandDefinition`**: A struct that associates a command name and its aliases with a
+//!   handler function.
+//! - **`COMMAND_REGISTRY`**: A static array that serves as the single source of truth for all
+//!   registered commands in the system.
+//! - **`dispatch()`**: The main public function that takes the raw command-line arguments and
+//!   the application state, performs the grammatical analysis, and calls the corresponding handler.
+
 use anyhow::Result;
 
 use crate::{
@@ -5,13 +31,16 @@ use crate::{
     state::AppStateGuard,
 };
 
-// --- Command Definition and Registry (Moved from main.rs) ---
+// --- Command Definition and Registry ---
 
-/// Defines a system command, its aliases, and its new universal handler signature.
+/// Defines a system command, its aliases, and its handler function signature.
 struct CommandDefinition {
+    /// The primary, non-aliased name of the command.
     name: &'static str,
+    /// A list of alternative names for the command.
     aliases: &'static [&'static str],
-    handler: fn(Option<String>, Vec<String>, &mut AppStateGuard) -> Result<()>,
+    /// A function pointer to the command's handler logic.
+    handler: fn(Option<String>, Vec<String>, &mut AppStateGuard<'_>) -> Result<()>,
 }
 
 /// The single source of truth for all system commands.
@@ -96,7 +125,7 @@ fn find_command(name: &str) -> Option<&'static CommandDefinition> {
 }
 
 /// The main application dispatcher implementing the new universal grammar.
-pub fn dispatch(all_args: Vec<String>, index: &mut AppStateGuard) -> Result<()> {
+pub fn dispatch(all_args: Vec<String>, index: &mut AppStateGuard<'_>) -> Result<()> {
     log::debug!("Dispatching args: {:?}", all_args);
 
     if all_args.is_empty() {

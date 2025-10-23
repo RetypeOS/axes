@@ -17,53 +17,76 @@ use uuid::Uuid;
 
 // --- Error Handling ---
 
+/// Represents errors that can occur during the project registration (`onboarding`) process.
 #[derive(Error, Debug)]
 pub enum OnboardingError {
+    /// A filesystem I/O error occurred.
     #[error("Filesystem Error: {0}")]
     Io(#[from] std::io::Error),
+    /// An error occurred while interacting with the global index.
     #[error("Index Error: {0}")]
     Index(#[from] crate::core::index_manager::IndexError),
+    /// An error occurred during an interactive prompt.
     #[error("User Interface Error: {0}")]
     Dialoguer(#[from] dialoguer::Error),
+    /// A generic, non-specific error.
     #[error("{0}")]
     Anyhow(#[from] anyhow::Error),
+    /// The target directory for registration does not contain an `.axes/axes.toml` file.
     #[error(
         "The directory '{0}' does not appear to be an axes project (missing '.axes/axes.toml')."
     )]
     NotAnAxesProject(String),
+    /// The user cancelled the registration process.
     #[error("Operation cancelled by user.")]
     Cancelled,
+    /// In non-interactive mode (`--autosolve`), a project without a local `project_ref.bin` was found and skipped.
     #[error(
         "Cannot register a project without identity in --autosolve mode. Project at '{0}' was skipped."
     )]
     IdentitylessInAutosolve(String),
+    /// A project with the resolved name already exists under the chosen parent.
     #[error("A project with the same name '{0}' already exists under the chosen parent.")]
     NameCollision(String),
+    /// A project with the same UUID is already registered, but at a different filesystem path.
     #[error("A project with UUID '{0}' is already registered at a different path: '{1}'.")]
     UuidCollision(Uuid, String),
 }
+
 type OnboardingResult<T> = Result<T, OnboardingError>;
 
 // --- Core Data Structures ---
 
+/// Describes the source of a project's identity during the discovery phase.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IdentitySource {
+    /// The project has a valid `.axes/project_ref.bin` file.
     ProjectRef(ProjectRef),
+    /// The project has an `axes.toml` file but no `project_ref.bin`.
     TomlOnly,
+    /// The directory is not a valid axes project (missing `axes.toml`).
     NotFound,
 }
 
+/// Represents a potential project found on the filesystem that could be registered.
 #[derive(Debug, Clone)]
 pub struct OnboardingCandidate {
+    /// The absolute, canonical path to the project's root directory.
     pub path: PathBuf,
+    /// How the project's identity was determined.
     pub identity_source: IdentitySource,
+    /// The final, resolved simple name for the project after handling conflicts or user input.
     pub resolved_name: Option<String>,
+    /// The final, resolved UUID of the project's parent.
     pub resolved_parent_uuid: Option<Uuid>,
+    /// The final, resolved UUID for the project itself.
     pub resolved_uuid: Option<Uuid>,
+    /// A flag indicating if this candidate should be registered. Can be set to `false` to skip it.
     pub should_register: bool,
 }
 
 impl OnboardingCandidate {
+    /// Creates a new candidate by inspecting a given path for `axes.toml` and `project_ref.bin`.
     pub fn new(path: &Path) -> OnboardingResult<Self> {
         let canonical_path = dunce::canonicalize(path)?;
         if !canonical_path.join(".axes/axes.toml").exists() {
@@ -94,17 +117,36 @@ impl OnboardingCandidate {
     }
 }
 
+/// Configuration options for the `register_project` process.
+#[derive(Debug)]
 pub struct OnboardingOptions {
+    /// If true, the process will be non-interactive and fail on any ambiguity or conflict.
     pub autosolve: bool,
+    /// An optional parent UUID suggested via CLI arguments (e.g., `--parent`).
     pub suggested_parent_uuid: Option<Uuid>,
 }
 
 // --- Main Entry Point ---
 
-/// The main entry point of the onboarding state machine.
+/// The main entry point of the project registration process.
+///
+/// This function orchestrates a multi-phase process:
+/// 1.  **Discovery**: Recursively scans the filesystem from a starting path to find all
+///     unregistered axes projects.
+/// 2.  **Resolution**: For each found project (`OnboardingCandidate`), it resolves its final name,
+///     UUID, and parent, handling conflicts, missing identities, and user interaction.
+/// 3.  **Confirmation**: If in interactive mode, it presents a plan of all projects to be
+///     registered and asks for user confirmation.
+/// 4.  **Action**: If confirmed, it modifies the `GlobalIndex` to register the new projects
+///     and creates/updates their local `project_ref.bin` files.
+///
+/// # Arguments
+/// * `path` - The starting path for the discovery scan.
+/// * `state_guard` - A mutable guard to the application's global state.
+/// * `options` - Configuration for the registration process (e.g., interactive or not).
 pub fn register_project(
     path: &Path,
-    state_guard: &mut AppStateGuard,
+    state_guard: &mut AppStateGuard<'_>,
     options: &OnboardingOptions,
 ) -> OnboardingResult<()> {
     println!(
@@ -228,7 +270,7 @@ fn discover_candidates(
 /// Iterates through candidates to resolve names, parents, and handle conflicts.
 fn resolve_candidates(
     candidates: &mut [OnboardingCandidate],
-    state_guard: &mut AppStateGuard,
+    state_guard: &mut AppStateGuard<'_>,
     options: &OnboardingOptions,
 ) -> OnboardingResult<()> {
     // This prevents two new projects in the same batch from colliding with each other.
