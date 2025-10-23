@@ -24,7 +24,7 @@ pub struct ConfigLoader<'a> {
 }
 
 impl<'a> ConfigLoader<'a> {
-    /// Creates a new ConfigLoader.
+    /// Creates a new `ConfigLoader`.
     ///
     /// # Arguments
     ///

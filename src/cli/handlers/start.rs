@@ -176,7 +176,7 @@ fn dry_run_session(
 /// A helper for `dry_run_session` that displays the execution plan for a single hook.
 ///
 /// # Arguments
-/// * `hook_name` - The name of the hook being displayed (e.g., "at_start").
+/// * `hook_name` - The name of the hook being displayed (e.g., "`at_start`").
 /// * `task` - The flattened `Task` for the hook.
 /// * `config` - The resolved configuration of the project.
 /// * `resolver` - The unified argument resolver.

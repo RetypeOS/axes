@@ -1104,7 +1104,7 @@ pub enum AnsiStyle {
 // =========================================================================
 
 impl ProjectConfig {
-    /// Creates a new, default ProjectConfig.
+    /// Creates a new, default `ProjectConfig`.
     ///
     /// This function is used to generate the initial `axes.toml` for the `global` project
     /// when it's first created. It provides a set of sensible, platform-aware defaults
@@ -1194,7 +1194,7 @@ impl ProjectConfig {
         }
     }
 
-    /// Creates a minimal yet structurally complete ProjectConfig for `axes init`.
+    /// Creates a minimal yet structurally complete `ProjectConfig` for `axes init`.
     /// It acts as a scaffold for new projects.
     ///
     /// # Arguments

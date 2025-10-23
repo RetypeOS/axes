@@ -161,12 +161,12 @@ pub fn assemble_final_command(
             }
             TemplateComponent::Color(c) => final_command.push_str(color::style_to_ansi_code(*c)),
             TemplateComponent::Path => {
-                final_command.push_str(&config.project_root.to_string_lossy())
+                final_command.push_str(&config.project_root.to_string_lossy());
             }
             TemplateComponent::Name => final_command.push_str(&config.qualified_name),
             TemplateComponent::Uuid => final_command.push_str(&config.uuid.to_string()),
             TemplateComponent::Version => {
-                final_command.push_str(config.get_version()?.as_deref().unwrap_or(""))
+                final_command.push_str(config.get_version()?.as_deref().unwrap_or(""));
             }
             TemplateComponent::Run(spec) => {
                 let command_to_run = match spec {
