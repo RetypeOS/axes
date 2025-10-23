@@ -103,8 +103,7 @@ pub fn execute_command(
             return Ok(());
         }
 
-        let program = &parts[0];
-        let args = &parts[1..];
+        let (program, args) = parts.split_first().expect("Parts should not be empty here");
         let clean_cwd = dunce::simplified(cwd);
 
         // We need to create the command inside the async block.
@@ -163,7 +162,7 @@ pub fn execute_command(
                     Ok(status) if !status.success() && !ignore_errors => {
                         Err(ExecutionError::NonZeroExitStatus(trimmed_command.to_string()))
                     }
-                    Ok(_) => Ok(()), // Success
+                    Ok(_) => Ok(()),
                     Err(e) => Err(ExecutionError::CommandFailed(trimmed_command.to_string(), e)),
                 }
             }
@@ -202,8 +201,7 @@ pub fn execute_and_capture_output(
             return Ok(String::new());
         }
 
-        let program = &parts[0];
-        let args = &parts[1..];
+        let (program, args) = parts.split_first().expect("Parts should not be empty here");
         let clean_cwd = dunce::simplified(cwd);
 
         let mut command = TokioCommand::new(program);

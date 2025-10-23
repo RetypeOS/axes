@@ -15,8 +15,8 @@
 //!     - Prevents a project from being linked to itself.
 //!     - Checks if the link is a no-op (i.e., the project is already a child of the
 //!       target parent).
-//!     The underlying `index_manager::link_project` performs further checks for circular
-//!     dependencies and name collisions.
+//!       The underlying `index_manager::link_project` performs further checks for circular
+//!       dependencies and name collisions.
 //! 3.  **Index Mutation**: If validation passes, it calls `index_manager::link_project`, which
 //!     atomically updates both the in-memory `GlobalIndex` and the on-disk `project_ref.bin`
 //!     file of the moved project.
@@ -166,7 +166,10 @@ fn validate_link_operation(
         return Err(anyhow!(t!("link.error.link_to_self")));
     }
 
-    let project_to_move_entry = index.projects.get(&project_to_move_uuid).unwrap(); // Safe
+    let project_to_move_entry = index
+        .projects
+        .get(&project_to_move_uuid)
+        .expect("UUID to move should exist as it was just resolved");
     if project_to_move_entry.parent == Some(new_parent_uuid) {
         println!(
             "{}",

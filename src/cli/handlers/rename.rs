@@ -65,7 +65,7 @@ pub fn handle(
         .index()
         .projects
         .get(&uuid_to_rename)
-        .unwrap()
+        .expect("UUID to rename should exist as it was just resolved")
         .name;
 
     // This function now handles no-op and global project confirmation.

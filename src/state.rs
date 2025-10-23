@@ -178,7 +178,7 @@ impl<'a> AppStateGuard<'a> {
                 .ensure_dirty_and_get_mut()
                 .projects
                 .get_mut(&uuid)
-                .unwrap();
+                .expect("Project UUID must exist in the index at this point");
             if hash_changed {
                 mutable_project.config_hash = new_hash;
             }
@@ -270,6 +270,8 @@ pub fn get_app_state() -> &'static Arc<Mutex<AppState>> {
 /// This is the primary entry point for all state interactions within the application logic.
 pub fn lock_app_state() -> AppStateGuard<'static> {
     let state_arc = get_app_state();
-    let guard = state_arc.lock().unwrap();
+    let guard = state_arc
+        .lock()
+        .expect("App state mutex should not be poisoned");
     AppStateGuard { guard }
 }

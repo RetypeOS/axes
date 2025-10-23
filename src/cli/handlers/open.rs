@@ -69,7 +69,8 @@ pub fn handle(
     let options = config.get_options()?;
 
     if open_args.list {
-        return list_open_commands(&config.qualified_name, &options.open_with);
+        list_open_commands(&config.qualified_name, &options.open_with);
+        return Ok(());
     }
 
     execute_open_command(open_args, config, options.open_with)
@@ -82,11 +83,11 @@ pub fn handle(
 /// # Arguments
 /// * `project_name` - The qualified name of the project.
 /// * `open_with` - The resolved `[options.open_with]` configuration.
-fn list_open_commands(project_name: &str, open_with: &ResolvedOpenWithConfig) -> Result<()> {
+fn list_open_commands(project_name: &str, open_with: &ResolvedOpenWithConfig) {
     println!("\nAvailable `open` commands for '{}':", project_name.cyan());
     if open_with.commands.is_empty() {
         println!("  {}", "No commands defined.".dimmed());
-        return Ok(());
+        return;
     }
 
     let mut sorted_keys: Vec<_> = open_with.commands.keys().collect();
@@ -98,7 +99,10 @@ fn list_open_commands(project_name: &str, open_with: &ResolvedOpenWithConfig) ->
         .unwrap_or(0);
 
     for key in sorted_keys {
-        let task = open_with.commands.get(key).unwrap();
+        let task = open_with
+            .commands
+            .get(key)
+            .expect("Key should exist as we are iterating over map keys");
         let padding = " ".repeat(max_len - measure_text_width(key));
         print!("  - {}{} ", key.green(), padding);
         if Some(key.as_str()) == open_with.default.as_deref() {
@@ -112,7 +116,6 @@ fn list_open_commands(project_name: &str, open_with: &ResolvedOpenWithConfig) ->
 
         println!();
     }
-    Ok(())
 }
 
 /// Handles the logic for executing a specific `open_with` command.

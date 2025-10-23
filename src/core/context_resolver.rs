@@ -116,16 +116,14 @@ pub fn resolve_context(
 
     let parts: Vec<&str> = context.split('/').collect();
 
-    let first_part = if parts[0].trim().is_empty() {
-        "."
-    } else {
-        parts[0]
-    };
+    let first_part = parts
+        .first()
+        .map_or(".", |p| if p.trim().is_empty() { "." } else { p });
     let global_project_entry = state_guard
         .index()
         .projects
         .get(&GLOBAL_PROJECT_UUID)
-        .unwrap();
+        .expect("Global project UUID must exist in the index");
 
     // --- 1. DETERMINE THE STARTING POINT AND TRAVERSAL PARTS ---
     // This logic implements the full precedence hierarchy.
@@ -139,13 +137,23 @@ pub fn resolve_context(
             "." => {
                 // Relative to CWD
                 let uuid = find_project_from_path(&env::current_dir()?, true, state_guard.index())?;
-                (uuid, &parts[1..])
+                (
+                    uuid,
+                    parts
+                        .get(1..)
+                        .expect("Split always produces at least one part"),
+                )
             }
             "_" => {
                 // Strictly relative to CWD
                 let uuid =
                     find_project_from_path(&env::current_dir()?, false, state_guard.index())?;
-                (uuid, &parts[1..])
+                (
+                    uuid,
+                    parts
+                        .get(1..)
+                        .expect("Split always produces at least one part"),
+                )
             }
             "**" => {
                 // Global last used
@@ -153,21 +161,38 @@ pub fn resolve_context(
                     .index()
                     .last_used
                     .ok_or(ContextError::NoLastUsedProject)?;
-                (uuid, &parts[1..])
+                (
+                    uuid,
+                    parts
+                        .get(1..)
+                        .expect("Split always produces at least one part"),
+                )
             }
             _ if first_part.ends_with('!') => {
                 // Aliases
-                let alias_name = first_part.strip_suffix('!').unwrap();
+                let alias_name = first_part
+                    .strip_suffix('!')
+                    .expect("Alias must end with '!' at this point");
                 let uuid = *state_guard.index().aliases.get(alias_name).ok_or_else(|| {
                     ContextError::AliasNotFound {
                         name: alias_name.to_string(),
                     }
                 })?;
-                (uuid, &parts[1..])
+                (
+                    uuid,
+                    parts
+                        .get(1..)
+                        .expect("Split always produces at least one part"),
+                )
             }
             _ if first_part == global_project_entry.name => {
                 // Global project name
-                (GLOBAL_PROJECT_UUID, &parts[1..])
+                (
+                    GLOBAL_PROJECT_UUID,
+                    parts
+                        .get(1..)
+                        .expect("Split always produces at least one part"),
+                )
             }
 
             // --- PRIORITY 2: `axes` FOCUS-RELATIVE NAVIGATION (SESSION-AWARE `..`) ---
@@ -179,9 +204,18 @@ pub fn resolve_context(
                     // Outside a session, `..` refers to the CWD project's parent.
                     find_project_from_path(&env::current_dir()?, true, state_guard.index())?
                 };
-                let focus_entry = state_guard.index().projects.get(&focus_uuid).unwrap();
+                let focus_entry = state_guard
+                    .index()
+                    .projects
+                    .get(&focus_uuid)
+                    .expect("Focus UUID must exist in the index");
                 let parent_uuid = focus_entry.parent.ok_or(ContextError::AlreadyAtRoot)?;
-                (parent_uuid, &parts[1..])
+                (
+                    parent_uuid,
+                    parts
+                        .get(1..)
+                        .expect("Split always produces at least one part"),
+                )
             }
 
             // --- PRIORITY 3: `axes` FOCUS-RELATIVE CHILD LOOKUP (SESSION-AWARE) ---
@@ -201,7 +235,11 @@ pub fn resolve_context(
 
     // --- 2. TRAVERSE THE PATH ---
     for part in traversal_parts {
-        let current_entry = state_guard.index().projects.get(&current_uuid).unwrap();
+        let current_entry = state_guard
+            .index()
+            .projects
+            .get(&current_uuid)
+            .expect("Current UUID in traversal must exist in the index");
 
         let next_uuid = match *part {
             "." | "_" | "**" => return Err(ContextError::GlobalRecentNotAtStart),
@@ -288,7 +326,10 @@ fn resolve_last_used_child(
         .interact_opt()?
         .ok_or(ContextError::Cancelled)?;
 
-    Ok(children[selection].0) // Return the UUID directly from the collected tuple.
+    Ok(children
+        .get(selection)
+        .expect("Dialoguer selection should be a valid index")
+        .0) // Return the UUID directly from the collected tuple.
 }
 
 /// Finds a project's UUID by searching from a file system path.
@@ -327,7 +368,10 @@ fn find_project_from_path(
         candidates.sort_by_key(|(_, entry)| std::cmp::Reverse(entry.path.as_os_str().len()));
 
         // The first candidate is the most specific (the closest "ancestor").
-        Ok(candidates[0].0)
+        Ok(candidates
+            .first()
+            .expect("Candidates list should not be empty here")
+            .0)
     } else {
         // Mode '_' (strict search in current directory)
         index

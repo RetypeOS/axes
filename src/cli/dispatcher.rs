@@ -133,7 +133,9 @@ pub fn dispatch(all_args: Vec<String>, index: &mut AppStateGuard<'_>) -> Result<
         return Ok(());
     }
 
-    let arg1 = &all_args[0];
+    let arg1 = all_args
+        .first()
+        .expect("Argument list should not be empty here");
     let arg2 = all_args.get(1);
 
     // --- Dispatch Logic Cascade (Moved from main.rs) ---
@@ -144,7 +146,7 @@ pub fn dispatch(all_args: Vec<String>, index: &mut AppStateGuard<'_>) -> Result<
             let mut params = vec![script_part.to_string()];
             params.extend(all_args.iter().skip(2).cloned());
             (
-                find_command("run").unwrap(),
+                find_command("run").expect("The 'run' command should always be registered"),
                 ctx_part.map(|s| s.to_string()),
                 params,
             )
@@ -162,7 +164,7 @@ pub fn dispatch(all_args: Vec<String>, index: &mut AppStateGuard<'_>) -> Result<
             let mut params = vec![script_part.to_string()];
             params.extend(all_args.iter().skip(1).cloned());
             (
-                find_command("run").unwrap(),
+                find_command("run").expect("The 'run' command should always be registered"),
                 ctx_part.map(|s| s.to_string()),
                 params,
             )
@@ -174,7 +176,7 @@ pub fn dispatch(all_args: Vec<String>, index: &mut AppStateGuard<'_>) -> Result<
         // Rule 4 with a single argument
         let (ctx_part, script_part) = parse_script_path(arg1);
         (
-            find_command("run").unwrap(),
+            find_command("run").expect("The 'run' command should always be registered"),
             ctx_part.map(|s| s.to_string()),
             vec![script_part.to_string()],
         )

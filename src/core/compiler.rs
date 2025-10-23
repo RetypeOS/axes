@@ -23,7 +23,8 @@ use uuid::Uuid;
 
 lazy_static! {
     // Regex to capture potential tokens, with an optional escape character `\`.
-    static ref TOKEN_RE: Regex = Regex::new(r"\\?<([^>]+)>").unwrap();
+    static ref TOKEN_RE: Regex = Regex::new(r"\\?<([^>]+)>")
+    .expect("Compiler Regex should be valid");
 }
 
 /// Represents errors that can occur during the compilation of `axes.toml` files.
@@ -283,10 +284,10 @@ pub fn load_layer_task(
 
     // --- CACHE HIT ATTEMPT ---
 
-    let cache_dir_to_check = entry
-        .cache_dir
-        .clone()
-        .unwrap_or_else(|| paths::get_default_cache_dir_for_project(uuid).unwrap());
+    let cache_dir_to_check = entry.cache_dir.clone().unwrap_or_else(|| {
+        paths::get_default_cache_dir_for_project(uuid)
+            .expect("Default cache dir should always be resolvable")
+    });
 
     if let Some(saved_hash) = &entry.config_hash
         && saved_hash == &current_toml_hash
@@ -412,7 +413,9 @@ pub fn tokenize_string(text: &str) -> Result<Vec<TemplateComponent>> {
 
     let mut last_index = 0;
     for caps in TOKEN_RE.captures_iter(text) {
-        let full_match = caps.get(0).unwrap();
+        let full_match = caps
+            .get(0)
+            .expect("Regex capture group 0 should always exist on a match");
 
         // Push the literal part before the match.
         push_literal(&mut components, &text[last_index..full_match.start()]);
@@ -422,7 +425,10 @@ pub fn tokenize_string(text: &str) -> Result<Vec<TemplateComponent>> {
             push_literal(&mut components, &full_match.as_str()[1..]);
         } else {
             // It's a real token.
-            let content = caps.get(1).unwrap().as_str();
+            let content = caps
+                .get(1)
+                .expect("Regex capture group 1 should always exist on a match")
+                .as_str();
             let component = parse_token_content(content, full_match.as_str())
                 .with_context(|| format!("Failed to parse token: '{}'", full_match.as_str()))?;
             components.push(component);
@@ -484,10 +490,14 @@ fn parse_token_content(content: &str, full_match: &str) -> Result<TemplateCompon
             "uuid" => Ok(TemplateComponent::Uuid),
             "version" => Ok(TemplateComponent::Version),
             s if s.starts_with("scripts::") => Ok(TemplateComponent::Script(
-                s.strip_prefix("scripts::").unwrap().to_string(),
+                s.strip_prefix("scripts::")
+                    .expect("Token should have 'scripts::' prefix")
+                    .to_string(),
             )),
             s if s.starts_with("vars::") => Ok(TemplateComponent::Var(
-                s.strip_prefix("vars::").unwrap().to_string(),
+                s.strip_prefix("vars::")
+                    .expect("Token should have 'vars::' prefix")
+                    .to_string(),
             )),
             _ => Err(anyhow!("Unknown token namespace")),
         }

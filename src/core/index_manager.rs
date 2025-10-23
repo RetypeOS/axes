@@ -339,7 +339,10 @@ pub fn link_project(
 
     // Step 2a: Modify the in-memory index. This is the primary state change.
     // We can safely unwrap here because we've already fetched the entry above.
-    let entry_to_modify = index.projects.get_mut(&project_to_move_uuid).unwrap();
+    let entry_to_modify = index
+        .projects
+        .get_mut(&project_to_move_uuid)
+        .expect("Project to move should exist in index as it was checked before");
     entry_to_modify.parent = Some(new_parent_uuid);
     log::debug!(
         "Updated parent of project {} to {} in memory.",
@@ -523,9 +526,14 @@ pub fn reparent_children(
             // Collision detected, try automatic rename
             let suggested_name = format!("{}_{}", old_parent_name, final_child_name);
             // Also check against other children being moved in the same batch
-            if new_sibling_names.contains(&suggested_name)
-                || index.projects.get(&child_uuid).unwrap().name != final_child_name
-            {
+            if new_sibling_names.contains(&suggested_name) || {
+                index
+                    .projects
+                    .get(&child_uuid)
+                    .expect("Child UUID must exist in the index")
+                    .name
+                    != final_child_name
+            } {
                 return Err(IndexError::NameAlreadyExists {
                     name: suggested_name,
                 });
@@ -539,7 +547,10 @@ pub fn reparent_children(
         }
 
         // Apply changes
-        let child_entry = index.projects.get_mut(&child_uuid).unwrap();
+        let child_entry = index
+            .projects
+            .get_mut(&child_uuid)
+            .expect("Child UUID must exist in the index");
         child_entry.name = final_child_name;
         child_entry.parent = Some(new_parent_uuid);
     }
@@ -668,7 +679,10 @@ pub fn rename_project(
 
     // 2. Modify the in-memory index.
     // We can unwrap here because we've already confirmed the entry exists.
-    let entry_to_modify = index.projects.get_mut(&target_uuid).unwrap();
+    let entry_to_modify = index
+        .projects
+        .get_mut(&target_uuid)
+        .expect("Target UUID must exist in index as it was just checked");
     entry_to_modify.name = new_name.to_string();
     log::debug!(
         "Renamed project {} to '{}' in memory.",

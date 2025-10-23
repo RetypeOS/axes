@@ -93,7 +93,10 @@ fn inspect_cache(uuid: uuid::Uuid, name: &str, index: &GlobalIndex) -> Result<()
         uuid
     );
 
-    let project = index.projects.get(&uuid).unwrap();
+    let project = index
+        .projects
+        .get(&uuid)
+        .expect("UUID should exist as it was just resolved by the context resolver");
 
     // Use a single `if let` to check for both required fields.
     if let (Some(cache_dir), Some(cache_hash)) = (&project.cache_dir, &project.config_hash) {
@@ -168,7 +171,10 @@ fn inspect_cache(uuid: uuid::Uuid, name: &str, index: &GlobalIndex) -> Result<()
 fn clear_cache(uuid: uuid::Uuid, name: &str, index: &mut GlobalIndex) -> Result<()> {
     println!("\nClearing cache for project '{}' ({})", name.cyan(), uuid);
 
-    let project = index.projects.get_mut(&uuid).unwrap();
+    let project = index
+        .projects
+        .get_mut(&uuid)
+        .expect("UUID should exist as it was just resolved by the context resolver");
 
     let mut actions_performed = false;
 

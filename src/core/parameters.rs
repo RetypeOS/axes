@@ -28,12 +28,13 @@ use std::{borrow::Cow, collections::HashMap};
 
 lazy_static! {
     static ref PARAMETER_TOKEN_CONTENT_RE: Regex =
-        Regex::new(r"^\s*([^(\s]+)\s*(?:\((.*)\))?\s*$").unwrap();
+        Regex::new(r"^\s*([^(\s]+)\s*(?:\((.*)\))?\s*$").expect("Parameter regex should be valid");
 }
 
 lazy_static! {
     static ref MODIFIERS_RE: Regex =
-        Regex::new(r#"\s*([^=,\s]+)(?:\s*=\s*(?:'([^']*)'|"([^"]*)"|([^,]*)))?\s*"#).unwrap();
+        Regex::new(r#"\s*([^=,\s]+)(?:\s*=\s*(?:'([^']*)'|"([^"]*)"|([^,]*)))?\s*"#)
+            .expect("Modifiers regex should be valid");
 }
 
 // --- DATA STRUCTS ---
@@ -130,7 +131,10 @@ pub fn parse_parameter_token(original_token: &str, content: &str) -> Result<Para
         .captures(content)
         .ok_or_else(|| anyhow!("Invalid parameter format in token: {}", original_token))?;
 
-    let specifier = caps.get(1).unwrap().as_str();
+    let specifier = caps
+        .get(1)
+        .expect("Regex specifier group must exist")
+        .as_str();
     let modifiers_str = caps.get(2).map(|m| m.as_str());
 
     let kind = if let Ok(index) = specifier.parse::<usize>() {
@@ -219,7 +223,7 @@ impl<'a> CliInputState<'a> {
             if param.starts_with('-') {
                 let value = if let Some(next) = params_iter.peek() {
                     if !next.starts_with('-') {
-                        Some(params_iter.next().unwrap())
+                        params_iter.next()
                     } else {
                         None
                     }
@@ -252,17 +256,14 @@ impl<'a> CliInputState<'a> {
     /// `Some(&str)` containing the argument's value if found, or `None` otherwise.
     pub fn consume_positional(&mut self, index: usize) -> Option<&'a str> {
         // Find the n-th positional (unconsumed) argument.
-        let mut positional_count = 0;
-        for i in 0..self.positional.len() {
-            if !self.positional[i].consumed {
-                if positional_count == index {
-                    self.positional[i].consumed = true;
-                    return self.positional[i].value;
-                }
-                positional_count += 1;
-            }
-        }
-        None
+        self.positional
+            .iter_mut()
+            .filter(|arg| !arg.consumed)
+            .nth(index)
+            .and_then(|arg| {
+                arg.consumed = true;
+                arg.value
+            })
     }
 
     /// Consumes a named argument (flag), checking both its long name and its alias.
@@ -292,7 +293,9 @@ impl<'a> CliInputState<'a> {
             return Err(anyhow!(
                 "Conflict: Both flag '{}' and its alias '{}' were provided.",
                 long_flag.cyan(),
-                alias.unwrap().cyan()
+                alias
+                    .expect("Alias should exist here due to is_alias_present check")
+                    .cyan()
             ));
         }
 
@@ -331,7 +334,7 @@ impl<'a> CliInputState<'a> {
         let mut had_unconsumed = false;
 
         for arg in self.positional.iter().filter(|a| !a.consumed) {
-            parts.push(arg.value.unwrap());
+            parts.push(arg.value.expect("Positional argument must have a value"));
             had_unconsumed = true;
         }
 

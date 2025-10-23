@@ -16,9 +16,9 @@
 //!     ensures that the operation is intentional.
 //! 4.  **Execution**: If confirmed, the plan is executed in two phases:
 //!     a. **Filesystem Purge**: The `.axes` directories of all targeted projects are deleted.
-//!        This is done first to ensure that if this part fails, the index remains consistent.
+//!     This is done first to ensure that if this part fails, the index remains consistent.
 //!     b. **Index Mutation**: The projects are removed from the `GlobalIndex`, and any
-//!        necessary reparenting is performed.
+//!     necessary reparenting is performed.
 
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
