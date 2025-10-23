@@ -1,6 +1,6 @@
 [package]
 name = "axes"
-version = "0.3.0-beta"
+version = "0.3.1-beta"
 authors = ["Reynier Ramos <reynierramos280@gmail.com>"]
 description = "A high-performance, scalable workflow orchestrator for modern development."
 edition = "2024"
