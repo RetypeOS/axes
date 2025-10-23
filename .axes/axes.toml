@@ -21,7 +21,7 @@ test = { desc = "Runs all unit and integration tests.", run = "cargo test" }
 
 # --- Code Quality ---
 check = { desc = "Checks the project for errors without compiling.", run = "cargo check" }
-lint = { desc = "Lints the code for style and correctness issues.", run = "cargo clippy -- -D warnings <params>" }
+lint = { desc = "Lints the code for style and correctness issues.", run = "cargo clippy --all-targets -- -D warnings <params>" }
 fmt = { desc = "Checks if the code is formatted according to project style.", run = "cargo fmt --all -- --check <params>" }
 fmt_fix = { desc = "Formats the code automatically.", run = "cargo fmt --all <params>" }
 

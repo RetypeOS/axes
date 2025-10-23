@@ -96,6 +96,7 @@ pub fn calculate_validation_data(path: &Path) -> Result<CacheValidationData> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::panic)]
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
@@ -104,18 +105,23 @@ mod tests {
     fn test_calculate_validation_data_success() {
         // --- Setup ---
         let content = b"hello world"; // Use a byte string literal
-        let mut temp_file = NamedTempFile::new().unwrap();
+        let mut temp_file =
+            NamedTempFile::new().expect("Should be able to create a temp file in tests");
 
         // Use `write_all` to write the exact bytes without any translation.
-        temp_file.write_all(content).unwrap();
-        temp_file.flush().unwrap(); // Ensure data is written to disk before reading metadata
+        temp_file
+            .write_all(content)
+            .expect("Should be able to write to temp file");
+        temp_file
+            .flush()
+            .expect("Should be able to flush temp file"); // Ensure data is written to disk before reading metadata
 
         // --- Execute ---
         let result = calculate_validation_data(temp_file.path());
 
         // --- Assert ---
         assert!(result.is_ok());
-        let data = result.unwrap();
+        let data = result.expect("Validation data should be calculated successfully");
 
         assert_eq!(data.file_size, 11);
 
@@ -127,7 +133,9 @@ mod tests {
 
         // Timestamp check (can be brittle, just check it's recent)
         let now = SystemTime::now();
-        let difference = now.duration_since(data.timestamp).unwrap();
+        let difference = now
+            .duration_since(data.timestamp)
+            .expect("System time should be after file timestamp");
         assert!(difference.as_secs() < 5);
     }
 

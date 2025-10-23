@@ -528,8 +528,8 @@ mod tests {
     // --- `parse_parameter_modifiers_from_str` Tests ---
     #[test]
     fn test_parse_modifiers() {
-        let modifiers =
-            parse_parameter_modifiers_from_str("required, default='latest', literal").unwrap();
+        let modifiers = parse_parameter_modifiers_from_str("required, default='latest', literal")
+            .expect("Parsing static modifier string should succeed");
         assert!(modifiers.required);
         assert!(modifiers.literal);
         assert_eq!(modifiers.default_value.as_deref(), Some("latest"));
@@ -538,7 +538,8 @@ mod tests {
 
     #[test]
     fn test_parse_modifiers_with_alias_and_map() {
-        let modifiers = parse_parameter_modifiers_from_str("alias = '-t', map='--tag='").unwrap();
+        let modifiers = parse_parameter_modifiers_from_str("alias = '-t', map='--tag='")
+            .expect("Parsing static string should succeed");
         assert!(!modifiers.required);
         assert_eq!(modifiers.alias.as_deref(), Some("-t"));
         assert_eq!(modifiers.map.as_deref(), Some("--tag="));
@@ -556,27 +557,32 @@ mod tests {
             "val2",
             "pos1",
         ]);
-        let state = CliInputState::new(&params).unwrap();
+        let state = CliInputState::new(&params).expect("Parsing params should succeed in test");
 
         assert_eq!(state.positional.len(), 2);
-        assert_eq!(
-            state.positional[0].value,
-            Some("pos0".to_string()).as_deref()
-        );
+        assert_eq!(state.positional.first().and_then(|a| a.value), Some("pos0"));
 
-        assert_eq!(
-            state.positional[1].value,
-            Some("pos1".to_string()).as_deref()
-        );
+        assert_eq!(state.positional.get(1).and_then(|a| a.value), Some("pos1"));
 
         assert_eq!(state.named.len(), 3);
         assert_eq!(
-            state.named.get("--named1").unwrap().value,
-            Some("val1".to_string()).as_deref()
+            state.named.get("--named1").and_then(|a| a.value),
+            Some("val1")
         );
-        assert_eq!(state.named.get("-s").unwrap().value, None);
         assert_eq!(
-            state.named.get("--bool-flag").unwrap().value,
+            state
+                .named
+                .get("-s")
+                .expect("Flag should exist in test state")
+                .value,
+            None
+        );
+        assert_eq!(
+            state
+                .named
+                .get("--bool-flag")
+                .expect("Flag should exist in test state")
+                .value,
             Some("val2".to_string()).as_deref()
         );
     }
@@ -586,27 +592,38 @@ mod tests {
     // Test Positional Parameters
     #[test]
     fn test_resolver_positional_basic() {
-        let defs = [parse_parameter_token("<p::0>", "0").unwrap()];
+        let defs =
+            [parse_parameter_token("<p::0>", "0").expect("Parsing static token should succeed")];
         let params = to_cli_params(&["hello"]);
-        let resolver = ArgResolver::new(&defs, &params, false).unwrap();
+        let resolver = ArgResolver::new(&defs, &params, false)
+            .expect("Resolver creation should succeed with valid inputs");
         assert_eq!(resolver.get_specific_value("<p::0>"), Some("hello"));
     }
 
     #[test]
     fn test_resolver_positional_required_fail() {
-        let defs = [parse_parameter_token("<p::0(required)>", "0(required)").unwrap()];
+        let defs = [parse_parameter_token("<p::0(required)>", "0(required)")
+            .expect("Parsing static token should succeed")];
         let params = to_cli_params(&[]);
         let result = ArgResolver::new(&defs, &params, false);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("is required"));
+        assert!(
+            result
+                .expect_err("Resolution should fail for missing required param")
+                .to_string()
+                .contains("is required")
+        );
     }
 
     #[test]
     fn test_resolver_positional_default() {
-        let defs =
-            [parse_parameter_token("<p::0(default='world')>", "0(default='world')").unwrap()];
+        let defs = [
+            parse_parameter_token("<p::0(default='world')>", "0(default='world')")
+                .expect("Parsing static token should succeed"),
+        ];
         let params = to_cli_params(&[]);
-        let resolver = ArgResolver::new(&defs, &params, false).unwrap();
+        let resolver = ArgResolver::new(&defs, &params, false)
+            .expect("Resolver creation should succeed with valid inputs");
         assert_eq!(
             resolver.get_specific_value("<p::0(default='world')>"),
             Some("world")
@@ -616,9 +633,11 @@ mod tests {
     // Test Named Parameters (Flags)
     #[test]
     fn test_resolver_named_simple_pass_through() {
-        let defs = [parse_parameter_token("<p::verbose>", "verbose").unwrap()];
+        let defs = [parse_parameter_token("<p::verbose>", "verbose")
+            .expect("Parsing static token should succeed")];
         let params = to_cli_params(&["--verbose"]);
-        let resolver = ArgResolver::new(&defs, &params, false).unwrap();
+        let resolver = ArgResolver::new(&defs, &params, false)
+            .expect("Resolver creation should succeed with valid inputs");
         assert_eq!(
             resolver.get_specific_value("<p::verbose>"),
             Some("--verbose")
@@ -627,9 +646,12 @@ mod tests {
 
     #[test]
     fn test_resolver_named_with_value_pass_through() {
-        let defs = [parse_parameter_token("<p::env>", "env").unwrap()];
+        let defs =
+            [parse_parameter_token("<p::env>", "env")
+                .expect("Parsing static token should succeed")];
         let params = to_cli_params(&["--env", "staging"]);
-        let resolver = ArgResolver::new(&defs, &params, false).unwrap();
+        let resolver = ArgResolver::new(&defs, &params, false)
+            .expect("Resolver creation should succeed with valid inputs");
         assert_eq!(
             resolver.get_specific_value("<p::env>"),
             Some("--env staging")
@@ -638,9 +660,11 @@ mod tests {
 
     #[test]
     fn test_resolver_named_required_success() {
-        let defs = [parse_parameter_token("<p::env(required)>", "env(required)").unwrap()];
+        let defs = [parse_parameter_token("<p::env(required)>", "env(required)")
+            .expect("Parsing static token should succeed")];
         let params = to_cli_params(&["--env", "staging"]);
-        let resolver = ArgResolver::new(&defs, &params, false).unwrap();
+        let resolver = ArgResolver::new(&defs, &params, false)
+            .expect("Resolver creation should succeed with valid inputs");
         assert_eq!(
             resolver.get_specific_value("<p::env(required)>"),
             Some("--env staging")
@@ -649,13 +673,14 @@ mod tests {
 
     #[test]
     fn test_resolver_named_required_fail() {
-        let defs = [parse_parameter_token("<p::env(required)>", "env(required)").unwrap()];
+        let defs = [parse_parameter_token("<p::env(required)>", "env(required)")
+            .expect("Parsing static token should succeed")];
         let params = to_cli_params(&[]);
         let result = ArgResolver::new(&defs, &params, false);
         assert!(result.is_err());
         assert!(
             result
-                .unwrap_err()
+                .expect_err("Resolution should fail but it succeeded")
                 .to_string()
                 .contains("Flag '--env' is required")
         );
@@ -664,10 +689,12 @@ mod tests {
     #[test]
     fn test_resolver_named_flag_absent_uses_default() {
         let defs = [
-            parse_parameter_token("<p::tag(default='latest')>", "tag(default='latest')").unwrap(),
+            parse_parameter_token("<p::tag(default='latest')>", "tag(default='latest')")
+                .expect("Parsing static token should succeed"),
         ];
         let params = to_cli_params(&[]);
-        let resolver = ArgResolver::new(&defs, &params, false).unwrap();
+        let resolver = ArgResolver::new(&defs, &params, false)
+            .expect("Resolver creation should succeed with valid inputs");
         // With `map` undefined, and flag absent, the token resolves to nothing. This is correct.
         assert_eq!(
             resolver.get_specific_value("<p::tag(default='latest')>"),
@@ -678,10 +705,12 @@ mod tests {
     #[test]
     fn test_resolver_named_flag_present_no_value_uses_default() {
         let defs = [
-            parse_parameter_token("<p::tag(default='latest')>", "tag(default='latest')").unwrap(),
+            parse_parameter_token("<p::tag(default='latest')>", "tag(default='latest')")
+                .expect("Parsing static token should succeed"),
         ];
         let params = to_cli_params(&["--tag"]);
-        let resolver = ArgResolver::new(&defs, &params, false).unwrap();
+        let resolver = ArgResolver::new(&defs, &params, false)
+            .expect("Resolver creation should succeed with valid inputs");
         assert_eq!(
             resolver.get_specific_value("<p::tag(default='latest')>"),
             Some("--tag latest")
@@ -696,7 +725,7 @@ mod tests {
             "<p::region(required, default='us-east-1')>",
             "region(required, default='us-east-1')",
         )
-        .unwrap()];
+        .expect("Parsing static token should succeed")];
 
         // Case 1: Fails because flag is not present.
         let params_fail = to_cli_params(&[]);
@@ -705,7 +734,8 @@ mod tests {
 
         // Case 2: Succeeds and uses the default value.
         let params_succeed = to_cli_params(&["--region"]);
-        let resolver = ArgResolver::new(&defs, &params_succeed, false).unwrap();
+        let resolver = ArgResolver::new(&defs, &params_succeed, false)
+            .expect("Resolver creation should succeed with valid inputs");
         assert_eq!(
             resolver.get_specific_value("<p::region(required, default='us-east-1')>"),
             Some("--region us-east-1")
@@ -718,11 +748,12 @@ mod tests {
             "<p::tag(map='', default='latest')>",
             "tag(map='', default='latest')",
         )
-        .unwrap()];
+        .expect("Parsing static token should succeed")];
 
         // Case 1: Flag absent, uses default.
         let params1 = to_cli_params(&[]);
-        let resolver1 = ArgResolver::new(&defs, &params1, false).unwrap();
+        let resolver1 = ArgResolver::new(&defs, &params1, false)
+            .expect("Resolver creation should succeed in test");
         assert_eq!(
             resolver1.get_specific_value("<p::tag(map='', default='latest')>"),
             Some("")
@@ -730,7 +761,8 @@ mod tests {
 
         // Case 2: Flag present with value.
         let params2 = to_cli_params(&["--tag", "v1.2.0"]);
-        let resolver2 = ArgResolver::new(&defs, &params2, false).unwrap();
+        let resolver2 = ArgResolver::new(&defs, &params2, false)
+            .expect("Resolver creation should succeed in test");
         assert_eq!(
             resolver2.get_specific_value("<p::tag(map='', default='latest')>"),
             Some("v1.2.0")
@@ -740,9 +772,11 @@ mod tests {
     // Test Generic <params> Collector
     #[test]
     fn test_resolver_unclaimed_args() {
-        let defs = [parse_parameter_token("<p::0>", "0").unwrap()];
+        let defs =
+            [parse_parameter_token("<p::0>", "0").expect("Parsing static token should succeed")];
         let params = to_cli_params(&["pos0", "pos1", "--flag", "val"]);
-        let resolver = ArgResolver::new(&defs, &params, true).unwrap();
+        let resolver = ArgResolver::new(&defs, &params, true)
+            .expect("Resolver creation should succeed with valid inputs");
 
         assert_eq!(resolver.get_specific_value("<p::0>"), Some("pos0"));
         assert_eq!(resolver.unclaimed_args, vec!["pos1", "--flag", "val"]);
@@ -750,13 +784,14 @@ mod tests {
 
     #[test]
     fn test_resolver_unclaimed_args_error_when_no_generic_token() {
-        let defs = [parse_parameter_token("<p::0>", "0").unwrap()];
+        let defs =
+            [parse_parameter_token("<p::0>", "0").expect("Parsing static token should succeed")];
         let params = to_cli_params(&["pos0", "pos1"]);
         let result = ArgResolver::new(&defs, &params, false);
         assert!(result.is_err());
         assert!(
             result
-                .unwrap_err()
+                .expect_err("Resolution should fail but it succeeded")
                 .to_string()
                 .contains("Unexpected arguments")
         );
