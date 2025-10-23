@@ -11,35 +11,59 @@ use uuid::Uuid;
 
 use crate::constants::GLOBAL_INDEX_FILENAME;
 
+/// The special, well-known UUID for the virtual "global" project.
 pub const GLOBAL_PROJECT_UUID: Uuid = Uuid::nil();
 
+/// Represents errors that can occur during operations on the `GlobalIndex`.
 #[derive(Error, Debug)]
 pub enum IndexError {
+    /// A filesystem I/O error occurred.
     #[error("Filesystem Error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Error de rutas: {0}")]
+    /// An error occurred related to filesystem paths (e.g., config directory not found).
+    #[error("Path error: {0}")]
     Path(#[from] crate::core::paths::PathError),
-    #[error("Error al serializar a formato TOML: {0}")]
+    /// An error occurred while serializing data to TOML format.
+    #[error("Failed to serialize to TOML: {0}")]
     TomlSerialize(#[from] toml::ser::Error),
+    /// An attempt was made to create or rename a project with a name that is already
+    /// used by a sibling under the same parent.
     #[error("Project name '{name}' is already in use by another child of the same parent.")]
-    NameAlreadyExists { name: String },
-    #[error("Error al decodificar desde formato binario: {0}")]
+    NameAlreadyExists {
+        /// The conflicting name.
+        name: String,
+    },
+    /// An error occurred while deserializing data from `bincode` binary format.
+    #[error("Failed to decode from binary format: {0}")]
     BincodeDecode(#[from] bincode::error::DecodeError),
-    #[error("Error al codificar a formato binario: {0}")]
+    /// An error occurred while serializing data to `bincode` binary format.
+    #[error("Failed to encode to binary format: {0}")]
     BincodeEncode(#[from] bincode::error::EncodeError),
+    /// A project in the index references a parent UUID that does not exist.
     #[error(
-        "Enlace de padre roto: el proyecto '{child_uuid}' apunta a un padre inexistente '{missing_parent_uuid}'."
+        "Broken parent link: project '{child_uuid}' points to a non-existent parent '{missing_parent_uuid}'."
     )]
     BrokenParentLink {
+        /// The UUID of the child project with the broken link.
         child_uuid: Uuid,
+        /// The UUID of the parent that could not be found.
         missing_parent_uuid: Uuid,
     },
+    /// A specified UUID could not be found in the index.
     #[error("Project with UUID '{uuid}' not found in global index.")]
-    ProjectNotFoundInIndex { uuid: Uuid },
+    ProjectNotFoundInIndex {
+        /// The UUID that was not found.
+        uuid: Uuid,
+    },
+    /// A `link` operation was attempted that would create a circular dependency
+    /// (e.g., making a project a child of one of its own descendants).
     #[error(
-        "Dependencia circular detectada: el proyecto '{cycle_node_uuid}' ya es un ancestro de la ruta del nuevo padre. No se puede establecer este enlace."
+        "Circular dependency detected: cannot link project '{cycle_node_uuid}' as it would create a cycle."
     )]
-    CircularDependency { cycle_node_uuid: Uuid },
+    CircularDependency {
+        /// The UUID of the project that would cause the cycle.
+        cycle_node_uuid: Uuid,
+    },
 }
 
 type IndexResult<T> = Result<T, IndexError>;
@@ -96,6 +120,15 @@ pub fn load_and_ensure_global_project() -> IndexResult<GlobalIndex> {
 }
 
 /// Adds a new project entry to the index.
+///
+/// # Arguments
+/// * `index` - A mutable reference to the `GlobalIndex`.
+/// * `name` - The simple name for the new project.
+/// * `path` - The absolute path to the new project's root directory.
+/// * `parent_uuid` - An optional UUID of the parent project. Defaults to the global project.
+///
+/// # Errors
+/// Returns `IndexError::NameAlreadyExists` if a sibling with the same name already exists.
 pub fn add_project_to_index(
     index: &mut GlobalIndex,
     name: String,
@@ -148,6 +181,10 @@ pub fn save_global_index(index: &GlobalIndex) -> IndexResult<()> {
     Ok(())
 }
 
+/// Reads and deserializes a project's local identity from its `.axes/project_ref.bin` file.
+///
+/// # Arguments
+/// * `project_root` - The absolute path to the project's root directory.
 pub fn read_project_ref(project_root: &Path) -> IndexResult<ProjectRef> {
     let ref_path = project_root
         .join(crate::constants::AXES_DIR)
@@ -158,6 +195,11 @@ pub fn read_project_ref(project_root: &Path) -> IndexResult<ProjectRef> {
     Ok(project_ref)
 }
 
+/// Serializes and writes a project's local identity to its `.axes/project_ref.bin` file.
+///
+/// # Arguments
+/// * `project_root` - The absolute path to the project's root directory.
+/// * `project_ref` - The `ProjectRef` struct to write.
 pub fn write_project_ref(project_root: &Path, project_ref: &ProjectRef) -> IndexResult<()> {
     let axes_dir = project_root.join(crate::constants::AXES_DIR);
     if !axes_dir.exists() {
@@ -170,6 +212,15 @@ pub fn write_project_ref(project_root: &Path, project_ref: &ProjectRef) -> Index
     Ok(())
 }
 
+/// Traverses up the parent chain from a starting node to detect a circular dependency.
+///
+/// # Arguments
+/// * `start_node_uuid` - The UUID of the project from which to start traversing upwards.
+/// * `index` - An immutable reference to the `GlobalIndex`.
+///
+/// # Returns
+/// `Ok(Some(Uuid))` containing the UUID of the repeated node if a cycle is found.
+/// `Ok(None)` if no cycle is detected.
 pub fn find_cycle_from_node(
     start_node_uuid: Uuid,
     index: &GlobalIndex,
@@ -328,9 +379,14 @@ pub fn link_project(
     Ok(())
 }
 
-//Utils
-
-/// Reads the `project_ref.bin` of a project. If it doesn't exist, it creates it from the global index.
+/// Reads a project's local `.axes/project_ref.bin` file.
+/// If the file does not exist, it regenerates it using data from the `GlobalIndex`
+/// and writes it to disk, ensuring the local state is synchronized.
+///
+/// # Arguments
+/// * `project_root` - The path to the project's root directory.
+/// * `uuid` - The UUID of the project.
+/// * `index` - An immutable reference to the `GlobalIndex`.
 pub fn get_or_create_project_ref(
     project_root: &Path,
     uuid: Uuid,
@@ -371,37 +427,11 @@ pub fn get_or_create_project_ref(
     }
 }
 
-/// Removes a project entry from the index, reparenting its direct children to the global project.
-pub fn unregister_project_entry(index: &mut GlobalIndex, target_uuid: Uuid) -> Option<IndexEntry> {
-    if target_uuid == GLOBAL_PROJECT_UUID {
-        log::error!("Attempted to unregister the 'global' project, which is not allowed.");
-        return None;
-    }
-
-    // The current approach is clear and works on stable Rust.
-    let children_to_reparent: Vec<Uuid> = index
-        .projects
-        .iter()
-        .filter(|(_, entry)| entry.parent == Some(target_uuid))
-        .map(|(uuid, _)| *uuid)
-        .collect();
-
-    for child_uuid in children_to_reparent {
-        if let Some(child_entry) = index.projects.get_mut(&child_uuid) {
-            log::debug!(
-                "Reparenting child '{}' ({}) to global project.",
-                child_entry.name,
-                child_uuid
-            );
-            child_entry.parent = Some(GLOBAL_PROJECT_UUID);
-        }
-    }
-
-    // Finally, remove the project entry
-    index.projects.remove(&target_uuid)
-}
-
-/// Collects all descendant UUIDs of an initial node.
+/// Traverses the project graph downwards to find all descendants of a given project.
+///
+/// # Arguments
+/// * `index` - An immutable reference to the `GlobalIndex`.
+/// * `start_uuid` - The UUID of the project from which to start the search.
 pub fn get_all_descendants(index: &GlobalIndex, start_uuid: Uuid) -> Vec<Uuid> {
     let mut descendants = Vec::new();
     let mut to_visit = vec![start_uuid];
@@ -420,6 +450,14 @@ pub fn get_all_descendants(index: &GlobalIndex, start_uuid: Uuid) -> Vec<Uuid> {
     descendants
 }
 
+/// Removes a list of projects from the index by their UUIDs.
+///
+/// # Arguments
+/// * `index` - A mutable reference to the `GlobalIndex`.
+/// * `uuids_to_remove` - A slice of UUIDs to remove from the index.
+///
+/// # Returns
+/// The number of projects that were successfully removed.
 pub fn remove_from_index(index: &mut GlobalIndex, uuids_to_remove: &[Uuid]) -> usize {
     let mut removed_count = 0;
     let remove_set: std::collections::HashSet<Uuid> = uuids_to_remove.iter().cloned().collect();
@@ -509,7 +547,15 @@ pub fn reparent_children(
     Ok(warnings)
 }
 
-/// Reconstructs a project's qualified name by traversing up the parent tree.
+/// Reconstructs a project's human-readable, slash-separated qualified name (e.g., `app/api/db`)
+/// by traversing up the parent tree from a starting UUID.
+///
+/// # Arguments
+/// * `start_uuid` - The UUID of the project whose name to build.
+/// * `index` - An immutable reference to the `GlobalIndex`.
+///
+/// # Returns
+/// `Some(String)` containing the qualified name, or `None` if a broken parent link is found.
 pub fn build_qualified_name(start_uuid: Uuid, index: &GlobalIndex) -> Option<String> {
     // --- SPECIAL CASE: Handle the global project itself ---
     if start_uuid == GLOBAL_PROJECT_UUID {
@@ -548,12 +594,24 @@ pub fn build_qualified_name(start_uuid: Uuid, index: &GlobalIndex) -> Option<Str
 
 // Alias Handlers
 
-/// Sets or updates an alias in the index.
+/// Sets or updates an alias in the index to point to a target UUID.
+///
+/// # Arguments
+/// * `index` - A mutable reference to the `GlobalIndex`.
+/// * `name` - The name of the alias.
+/// * `target_uuid` - The UUID of the project the alias should point to.
 pub fn set_alias(index: &mut GlobalIndex, name: String, target_uuid: Uuid) {
     index.aliases.insert(name, target_uuid);
 }
 
-/// Deletes an alias from the index. Returns `true` if the alias existed.
+/// Deletes an alias from the index.
+///
+/// # Arguments
+/// * `index` - A mutable reference to the `GlobalIndex`.
+/// * `name` - The name of the alias to remove.
+///
+/// # Returns
+/// `true` if the alias existed and was removed, `false` otherwise.
 pub fn remove_alias(index: &mut GlobalIndex, name: &str) -> bool {
     index.aliases.remove(name).is_some()
 }

@@ -1,3 +1,32 @@
+//! # Handler for the `run` command
+//!
+//! This module provides the logic for the `axes run` command, which is the primary mechanism
+//! for executing user-defined scripts within a project's context. It also handles the default
+//! behavior of listing available scripts when no specific script name is provided.
+//!
+//! ## Core Logic
+//!
+//! 1.  **Argument Parsing**: The handler's arguments are parsed in a non-standard way due to the
+//!     universal grammar. It manually separates the `script_name` from the rest of the parameters
+//!     (`script_params`) that will be passed to the script itself. It also includes manual parsing
+//!     for a `--dry-run` flag.
+//! 2.  **Configuration Resolution**: It resolves the project's configuration to gain access to the
+//!     scripts map and other inherited settings.
+//! 3.  **Command Dispatching**:
+//!     - If a `script_name` is provided, it proceeds to the execution phase.
+//!     - If no `script_name` is provided, it calls `list_available_scripts` to display a
+//!       helpful list of runnable scripts in the current context.
+//! 4.  **Task Preparation**: For execution, it follows a multi-step process:
+//!     a. Retrieves the script's `Task` (AST) from the resolved configuration.
+//!     b. Flattens the task to resolve any compositions (`<scripts::...>`).
+//!     c. Builds an `ArgResolver` to handle parameter substitution.
+//!     d. Specializes the flattened task for the current OS for optimal performance.
+//! 5.  **Execution or Dry Run**:
+//!     - If `--dry-run` is present, it calls `dry_run_script` to print a fully resolved
+//!       execution plan without running any commands.
+//!     - Otherwise, it calls `execute_script` which delegates to the `task_executor` to
+//!       run the prepared task.
+
 use crate::{
     cli::handlers::commons,
     core::{parameters::ArgResolver, task_executor},
@@ -42,12 +71,19 @@ struct RunArgs {
 
 // --- Main Handler ---
 
-/// Main entry point for the 'run' command.
-/// Dispatches to list, dry-run, or execute a script based on arguments.
+/// The main entry point for the `run` command.
+///
+/// It determines whether to list scripts, perform a dry run, or execute a script based
+/// on the provided arguments.
+///
+/// # Arguments
+/// * `context` - The project context in which to run the script.
+/// * `args` - The command-specific arguments, typically `[script_name, param1, param2, ...]`.
+/// * `state_guard` - A mutable guard to the application state, needed for config resolution.
 pub fn handle(
     context: Option<String>,
     mut args: Vec<String>,
-    state_guard: &mut AppStateGuard,
+    state_guard: &mut AppStateGuard<'_>,
 ) -> Result<()> {
     let script_name_opt = if args.is_empty() {
         None
@@ -94,7 +130,8 @@ pub fn handle(
 
 // --- Subcommand Logic ---
 
-/// Lists all available scripts for the current project context.
+/// A helper function that prints a formatted, sorted list of all scripts available
+/// in the current project context, including inherited ones.
 fn list_available_scripts(config: &ResolvedConfig, index: &GlobalIndex) -> Result<()> {
     let scripts = config.get_all_scripts()?;
     println!(
@@ -139,12 +176,15 @@ fn list_available_scripts(config: &ResolvedConfig, index: &GlobalIndex) -> Resul
     Ok(())
 }
 
-/// Prepares and executes a script, conditionally printing the context header.
+/// Prepares and executes a script.
+///
+/// It prints a contextual header (unless the script is globally silent) and then
+/// passes the prepared, platform-specialized task to the `task_executor`.
 fn execute_script(
     script_name: &str,
     task: &PlatformSpecializedTask,
     config: &ResolvedConfig,
-    resolver: &ArgResolver,
+    resolver: &ArgResolver<'_>,
 ) -> Result<()> {
     if task.commands.is_empty() {
         println!("{}", t!("run.info.empty_script").yellow());
@@ -190,7 +230,7 @@ fn dry_run_script(
     script_name: &str,
     task: &PlatformSpecializedTask,
     config: &ResolvedConfig,
-    resolver: &ArgResolver,
+    resolver: &ArgResolver<'_>,
 ) -> Result<()> {
     let prefix_path = format_prefix_path(&config.qualified_name);
     println!(
@@ -241,6 +281,8 @@ fn dry_run_script(
     Ok(())
 }
 
+/// A helper function to format the project's qualified name for display in the execution header.
+/// It truncates long paths for better readability (e.g., `.../parent/child`).
 fn format_prefix_path(qualified_name: &str) -> String {
     let mut parts = qualified_name.split('/');
     // Use `nth` to efficiently get the part at a specific index from the end.
@@ -248,7 +290,7 @@ fn format_prefix_path(qualified_name: &str) -> String {
     if let Some(second_to_last) = parts.clone().rev().nth(1) {
         // More than 2 parts exist.
         // `parts.last()` is now efficient as `split` is a DoubleEndedIterator.
-        let last = parts.next_back().unwrap_or(""); // Safe to unwrap
+        let last = parts.next_back().unwrap_or("");
         format!(".../{}/{}", second_to_last, last)
     } else {
         // 1 or 2 parts, return the whole name.

@@ -1,3 +1,21 @@
+//! # Handler for the `alias` command
+//!
+//! This module provides the logic for managing project shortcuts (aliases), allowing users
+//! to create, list, remove, and check aliases that point to specific project contexts.
+//!
+//! ## Core Logic
+//!
+//! - **Subcommand Dispatch**: The main `handle` function parses the arguments into subcommands
+//!   (`set`, `list`, `remove`, `check`) and calls the appropriate function.
+//! - **State Management**: It correctly distinguishes between read operations (`list`, `check`)
+//!   which use `.index()`, and write operations (`set`, `remove`) which use `.index_mut()`
+//!   to ensure the application state is marked as dirty only when necessary.
+//! - **Context Resolution**: The `set` command utilizes the `context_resolver` to find the
+//!   target project's UUID, ensuring that aliases always point to valid, registered projects.
+//! - **User Experience**: Includes user-friendly features like confirmation prompts for potentially
+//!   sensitive operations (overwriting an alias, modifying the special 'g' alias) and formatted,
+//!   sorted output for lists.
+
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 use colored::*;
@@ -44,11 +62,18 @@ enum AliasCommand {
 // --- Main Handler ---
 
 /// The main handler for the `alias` command.
-/// It dispatches to sub-handlers for set, list, remove, and check operations.
+///
+/// It dispatches to sub-handlers for set, list, remove, and check operations. It also
+/// ensures that alias commands cannot be run from within an active project session.
+///
+/// # Arguments
+/// * `_context` - The context from the dispatcher, which is ignored by this global command.
+/// * `args` - The command-specific arguments (e.g., `set my-alias .`).
+/// * `state_guard` - A mutable guard to the application state.
 pub fn handle(
     _context: Option<String>,
     args: Vec<String>,
-    state_guard: &mut AppStateGuard,
+    state_guard: &mut AppStateGuard<'_>,
 ) -> Result<()> {
     // Aliases are a global concept and cannot be managed from within a project session.
     if env::var("AXES_PROJECT_UUID").is_ok() {
@@ -70,7 +95,16 @@ pub fn handle(
 // --- Subcommand Logic ---
 
 /// Handles the logic for creating or updating an alias.
-fn set_alias(name: &str, context: &str, state_guard: &mut AppStateGuard) -> Result<()> {
+///
+/// This is a write operation. It resolves the target context to a UUID and then
+/// inserts or updates the alias in the `GlobalIndex`. It needs the full `AppStateGuard`
+/// because it calls `context_resolver`, which may need to update `last_used` metadata.
+///
+/// # Arguments
+/// * `name` - The name for the new alias.
+/// * `context` - The context string the alias should point to.
+/// * `state_guard` - A mutable guard to the application state.
+fn set_alias(name: &str, context: &str, state_guard: &mut AppStateGuard<'_>) -> Result<()> {
     let clean_name = validate_alias_name(name)?;
 
     // Proceed only if user confirms modifying the special 'g' alias.
@@ -119,6 +153,12 @@ fn set_alias(name: &str, context: &str, state_guard: &mut AppStateGuard) -> Resu
 }
 
 /// Handles the logic for listing all aliases in a formatted table.
+///
+/// This is a read-only operation. It iterates over the aliases in the `GlobalIndex`
+/// and prints them in a sorted, aligned format.
+///
+/// # Arguments
+/// * `index` - An immutable reference to the `GlobalIndex`.
 fn list_aliases(index: &GlobalIndex) -> Result<()> {
     if index.aliases.is_empty() {
         println!("\n{}", t!("alias.info.no_aliases"));
@@ -153,6 +193,12 @@ fn list_aliases(index: &GlobalIndex) -> Result<()> {
 }
 
 /// Handles the logic for removing an alias.
+///
+/// This is a write operation that removes an entry from the aliases map in the `GlobalIndex`.
+///
+/// # Arguments
+/// * `name` - The name of the alias to remove.
+/// * `index` - A mutable reference to the `GlobalIndex`.
 fn remove_alias(name: &str, index: &mut GlobalIndex) -> Result<()> {
     let clean_name = validate_alias_name(name)?;
 
@@ -174,6 +220,13 @@ fn remove_alias(name: &str, index: &mut GlobalIndex) -> Result<()> {
 }
 
 /// Handles the logic for checking the health of all aliases.
+///
+/// This is a read-only operation. It iterates through all defined aliases and verifies
+/// that their target UUIDs still correspond to existing projects in the index, reporting
+/// any broken links.
+///
+/// # Arguments
+/// * `index` - An immutable reference to the `GlobalIndex`.
 fn check_aliases(index: &GlobalIndex) -> Result<()> {
     if index.aliases.is_empty() {
         println!("\n{}", t!("alias.info.no_aliases"));
@@ -218,7 +271,8 @@ fn check_aliases(index: &GlobalIndex) -> Result<()> {
 
 // --- Helper Functions ---
 
-/// Validates an alias name against reserved keywords and syntax rules.
+/// A helper function to validate an alias name against reserved keywords and syntax rules.
+/// It also conveniently strips the optional `!` suffix from user input.
 fn validate_alias_name(raw_name: &str) -> Result<String> {
     // Allow user to conveniently type the alias with or without the '!' suffix.
     let name = raw_name.trim().strip_suffix('!').unwrap_or(raw_name.trim());
@@ -239,8 +293,8 @@ fn validate_alias_name(raw_name: &str) -> Result<String> {
     Ok(name.to_string())
 }
 
-/// [DRY] Asks for confirmation if the user is trying to modify the special 'g' alias.
-/// Returns `Ok(false)` if the operation should be cancelled.
+/// A shared helper to ask for user confirmation if they are attempting to modify the
+/// special 'g' alias, which is conventionally used for the global project.
 fn confirm_g_alias_modification(name: &str) -> Result<bool> {
     if name.to_lowercase() == "g" {
         println!("{}", t!("alias.warning.modifying_g").yellow().bold());
@@ -253,5 +307,5 @@ fn confirm_g_alias_modification(name: &str) -> Result<bool> {
             return Ok(false); // User cancelled the operation.
         }
     }
-    Ok(true) // Proceed with the operation.
+    Ok(true)
 }

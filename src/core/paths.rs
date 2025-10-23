@@ -1,3 +1,18 @@
+//! # Filesystem Path Management
+//!
+//! This module provides centralized, robust, and platform-aware functions for handling
+//! filesystem paths used by `axes`. It ensures that configuration files, caches, and
+//! other assets are stored in predictable and conventional locations across different
+//! operating systems.
+//!
+//! ## Key Functions
+//!
+//! - `get_axes_config_dir`: The single source of truth for the main `axes` config directory
+//!   (e.g., `~/.config/axes`). It's memoized for performance.
+//! - `get_default_cache_root`: Determines the default base directory for all caches, respecting
+//!   OS conventions (e.g., `~/.cache/axes` on Linux, `%LOCALAPPDATA%\axes\cache` on Windows).
+//! - `expand_path_template`: Safely expands shell-like path strings (e.g., `~/some/path`).
+
 use crate::constants::GLOBAL_INDEX_FILENAME;
 use anyhow::{Result, anyhow};
 use lazy_static::lazy_static;
@@ -11,20 +26,25 @@ lazy_static! {
     static ref AXES_CONFIG_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 }
 
+/// Represents errors that can occur during path resolution.
 #[derive(Error, Debug)]
 pub enum PathError {
+    /// The system's standard configuration directory (e.g., `~/.config`) could not be determined.
     #[error("Could not find system config directory.")]
     ConfigDirNotFound,
+    /// An I/O error occurred while attempting to create the `axes` configuration directory.
     #[error("Could not create config directory at '{path}': {source}")]
     ConfigDirCreation {
+        /// The path that could not be created.
         path: String,
+        /// The underlying I/O error.
         #[source]
         source: std::io::Error,
     },
 }
 
-/// Returns the path to the Axes configuration directory (`~/.config/axes`).
-/// This function is memoized for high performance.
+/// Returns the path to the global index file (e.g., `~/.config/axes/index.bin`).
+/// This is the main persistence file for the application's state.
 pub fn get_axes_config_dir() -> Result<PathBuf, PathError> {
     let mut cached_path_guard = AXES_CONFIG_DIR.lock().unwrap();
     if let Some(path) = &*cached_path_guard {
@@ -56,17 +76,17 @@ pub fn get_global_index_path() -> Result<PathBuf, PathError> {
     get_axes_config_dir().map(|dir| dir.join(GLOBAL_INDEX_FILENAME))
 }
 
-/// Expands a path template string, resolving home directory, environment variables,
-/// and a limited set of safe `axes` tokens.
+/// Expands a path template string, resolving home directory (`~`) and environment variables.
+///
+/// This function is used to resolve user-configured paths, such as the `cache_dir` option.
+/// It explicitly forbids `axes`-specific dynamic tokens (like `<uuid>`) to ensure that
+/// the configured path is a stable root directory.
 ///
 /// # Arguments
-/// * `template` - The template string (e.g., "~/.cache/axes/<uuid>").
-/// * `project_uuid` - The UUID of the project to use for token expansion.
+/// * `template` - The path string to expand (e.g., `~/.my-caches/axes`).
 ///
 /// # Errors
-/// Returns an error if the template contains unsupported dynamic tokens like
-/// `<params...>` or `<run...>`, or if path expansion fails.
-/// Expands a path template string, resolving home directory and environment variables.
+/// Returns an error if the expansion fails or if the template contains forbidden tokens.
 pub fn expand_path_template(template: &str) -> Result<PathBuf> {
     // We remove the project-specific tokens here as the root path should be generic.
     if template.contains("<") {
@@ -97,7 +117,11 @@ pub fn get_default_cache_root() -> Result<PathBuf> {
     }
 }
 
-/// Returns the platform-specific default absolute path for a project's cache directory.
+/// Returns the platform-specific default absolute path for a single project's cache directory.
+/// The path is constructed as `<default_cache_root>/projects/<uuid>`.
+///
+/// # Arguments
+/// * `uuid` - The UUID of the project.
 pub fn get_default_cache_dir_for_project(uuid: Uuid) -> Result<PathBuf> {
     // All projects, including 'global', will now have their cache in a subdirectory
     // named after their UUID inside `.../cache/projects`. This is consistent.

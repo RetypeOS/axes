@@ -1,3 +1,19 @@
+//! # Handler for the `cache` command
+//!
+//! This module provides the logic for the internal `axes cache` command. It is primarily
+//! a debugging tool intended for developers of `axes` to inspect and manage the binary
+//! configuration cache for projects.
+//!
+//! ## Features
+//!
+//! - **Inspect**: Deserializes a project's cached configuration (`.bin` file) and prints
+//!   it to the console as human-readable JSON. This is useful for verifying the output
+//!   of the configuration compiler.
+//! - **Clear**: Deletes a project's cached configuration file from the filesystem and also
+//!   removes the `config_hash` and `cache_dir` metadata from the project's entry in the
+//!   global index. This forces a full recompilation of the project's configuration on the
+//!   next run.
+
 use crate::{
     models::{CachedProjectConfig, GlobalIndex},
     state::AppStateGuard,
@@ -30,12 +46,19 @@ enum CacheSubcommand {
 
 // --- Main Handler ---
 
-/// The main handler for the `_cache` command.
-/// Provides tools to debug the single-layer configuration caching system.
+/// The main handler for the `cache` command.
+///
+/// It parses the subcommand (`inspect` or `clear`) and the target project context,
+/// then dispatches to the appropriate logic function.
+///
+/// # Arguments
+/// * `context` - The project context, if provided by the dispatcher's universal grammar.
+/// * `args` - The command-specific arguments (e.g., `<context> inspect`).
+/// * `state_guard` - A mutable guard to the application state.
 pub fn handle(
     context: Option<String>,
     args: Vec<String>,
-    state_guard: &mut AppStateGuard,
+    state_guard: &mut AppStateGuard<'_>,
 ) -> Result<()> {
     let cache_args = CacheArgs::try_parse_from(&args)?;
 
@@ -54,6 +77,15 @@ pub fn handle(
 // --- Subcommand Logic ---
 
 /// Handles the logic for inspecting a project's cache file.
+///
+/// It resolves the path to the cache file using the metadata from the `GlobalIndex`,
+/// reads the binary data, decompresses it, deserializes it using `bincode`, and then
+/// pretty-prints it as JSON.
+///
+/// # Arguments
+/// * `uuid` - The UUID of the project whose cache is to be inspected.
+/// * `name` - The qualified name of the project, for display purposes.
+/// * `index` - An immutable reference to the `GlobalIndex`.
 fn inspect_cache(uuid: uuid::Uuid, name: &str, index: &GlobalIndex) -> Result<()> {
     println!(
         "\nInspecting cache for project '{}' ({})",
@@ -123,6 +155,16 @@ fn inspect_cache(uuid: uuid::Uuid, name: &str, index: &GlobalIndex) -> Result<()
 }
 
 /// Handles the logic for clearing a project's cache.
+///
+/// This is a mutable operation that performs two actions:
+/// 1.  It attempts to delete the binary cache file from the filesystem.
+/// 2.  It removes the `config_hash` and `cache_dir` fields from the project's
+///     `IndexEntry` in the `GlobalIndex`.
+///
+/// # Arguments
+/// * `uuid` - The UUID of the project whose cache is to be cleared.
+/// * `name` - The qualified name of the project, for display purposes.
+/// * `index` - A mutable reference to the `GlobalIndex`.
 fn clear_cache(uuid: uuid::Uuid, name: &str, index: &mut GlobalIndex) -> Result<()> {
     println!("\nClearing cache for project '{}' ({})", name.cyan(), uuid);
 

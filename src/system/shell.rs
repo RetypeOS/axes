@@ -1,3 +1,25 @@
+//! # Interactive Shell Session Management
+//!
+//! This module is responsible for the logic behind the `axes start` command. It orchestrates
+//! the entire lifecycle of a project-specific interactive shell session, including setup,
+
+//! execution of lifecycle hooks (`at_start`, `at_exit`), and teardown.
+//!
+//! ## Core Logic
+//!
+//! 1.  **Shell Resolution**: Determines which shell to use based on the project's configuration
+//!     and the central `shells.toml` file.
+//! 2.  **Init Script Generation**: Dynamically creates a temporary shell script (`.bat` or `.sh`)
+//!     that sets up the session environment. This script includes:
+//!     - Exporting all environment variables defined in the project's hierarchy.
+//!     - Executing the commands from the `at_start` hook.
+//!     - Customizing the shell prompt, if configured.
+//! 3.  **Process Spawning**: Spawns the chosen shell as a new child process, passing the generated
+//!     init script to it for execution. The new shell inherits the project's working directory
+//!     and special `AXES_*` environment variables.
+//! 4.  **Cleanup**: Once the user exits the interactive shell, it executes the `at_exit` hook
+//!     and ensures that the temporary init script is deleted.
+
 use crate::{
     core::{parameters::ArgResolver, task_executor},
     models::{CommandAction, ResolvedConfig, Task},
@@ -10,22 +32,31 @@ use std::{fs, process::Command, sync::Arc};
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
+/// Represents errors specific to launching or managing a shell session.
 #[derive(Error, Debug)]
 pub enum ShellError {
+    /// A filesystem I/O error occurred.
     #[error("Filesystem Error: {0}")]
     Io(#[from] std::io::Error),
+    /// An error occurred while creating or persisting the temporary init script.
     #[error("Error with temporary file: {0}")]
     TempFile(#[from] tempfile::PersistError),
+    /// The main `axes` configuration directory could not be found.
     #[error("Could not find axes config directory.")]
     ConfigDirNotFound,
+    /// The shell specified in the project's options is not defined in `shells.toml`.
     #[error("Requested shell '{0}' is not defined in shells.toml.")]
     ShellNotDefined(String),
+    /// A default shell for the current operating system could not be determined.
     #[error("Could not determine a default shell for this operating system.")]
     NoDefaultShell,
+    /// The `shells.toml` file contains invalid TOML syntax.
     #[error("Failed to parse shells.toml: {0}")]
     TomlParse(#[from] toml::de::Error),
+    /// An error occurred while serializing the default `shells.toml` file.
     #[error("Failed to serialize shells config to TOML: {0}")]
     TomlSerialize(#[from] toml::ser::Error),
+    /// An error occurred while executing an `at_start` or `at_exit` task.
     #[error("Task execution failed: {0}")]
     TaskExecution(#[from] anyhow::Error),
 }
@@ -33,23 +64,21 @@ pub enum ShellError {
 /// Launches an interactive shell session for a project.
 ///
 /// This function orchestrates the entire session lifecycle:
-/// 1.  It lazily resolves the project's configuration to determine the correct shell and environment.
-/// 2.  It renders the `at_start` hook commands into a temporary initialization script.
-/// 3.  It spawns a new interactive shell process, configured to run the init script upon startup.
-///     This process inherits the project's environment variables.
+/// 1.  Resolves the project's configuration to determine the correct shell and environment.
+/// 2.  Renders the `at_start` hook commands into a temporary initialization script.
+/// 3.  Spawns a new interactive shell process, configured to run the init script upon startup.
 /// 4.  After the user exits the shell, it executes the `at_exit` hook.
 ///
 /// # Arguments
 /// * `config` - The lazy `ResolvedConfig` facade for the project.
-/// * `task_start` - An `Option<Arc<Task>>` for the `at_start` hook, obtained lazily by the `start` handler.
+/// * `task_start` - An `Option<Arc<Task>>` for the `at_start` hook.
 /// * `task_exit` - An `Option<Arc<Task>>` for the `at_exit` hook.
 /// * `resolver` - The `ArgResolver` for any parameters passed to the `axes start` command.
-/// * `index` - A mutable reference to the `GlobalIndex` for further lazy resolutions.
 pub fn launch_session(
     config: &ResolvedConfig,
     task_start: Option<Arc<Task>>,
     task_exit: Option<Arc<Task>>,
-    resolver: &ArgResolver,
+    resolver: &ArgResolver<'_>,
 ) -> Result<(), ShellError> {
     // 1. Determine which shell to use.
     let shells_config = shells_config::load_shells_config()?;
@@ -193,6 +222,17 @@ fn escape_for_cmd_set(value: &str) -> String {
         .replace('>', "^>")
         .replace('|', "^|")
 }
+
+/// Dynamically builds the content of the temporary initialization script.
+///
+/// This function generates shell-specific commands to export environment variables,
+/// run `at_start` hooks, and customize the shell prompt.
+///
+/// # Arguments
+/// * `config` - The resolved project configuration.
+/// * `at_start_commands` - A list of pre-rendered commands from the `at_start` hook.
+/// * `shell_name` - The name of the target shell (e.g., "bash", "cmd").
+/// * `prompt` - An optional pre-rendered string for the custom shell prompt.
 fn build_init_script(
     config: &ResolvedConfig,
     at_start_commands: &[String],

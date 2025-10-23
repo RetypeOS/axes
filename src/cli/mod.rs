@@ -1,9 +1,35 @@
+//! # Command-Line Interface (CLI) Module
+//!
+//! This module serves as the main entry point for parsing and defining the application's
+//! command-line interface. It uses the `clap` crate to define the top-level `Cli` struct
+//! and orchestrates the custom help message generation.
+//!
+//! ## Modules
+//!
+//! - **`dispatcher`**: Contains the core logic for parsing the application's "universal grammar"
+//!   and routing commands to the appropriate handlers.
+//! - **`handlers`**: A collection of sub-modules, each responsible for the logic of a specific
+//!   `axes` command (e.g., `run`, `init`, `tree`).
+//!
+//! ## Custom Help Message
+//!
+//! This module is responsible for building a dynamic, color-aware, and richly formatted
+//! help message. The `build_help_string()` function replaces simple placeholders in a
+//! template with ANSI color codes, providing a more user-friendly and readable output than
+//! the default `clap` help screen.
+
 use clap::Parser;
 
 pub mod dispatcher;
 pub mod handlers;
 
 /// Builds the dynamic, color-aware full help string at runtime.
+///
+/// This function acts as a mini-renderer for our semantic help template, which is defined
+/// in the localization files (e.g., `locales/en.toml`). It replaces placeholders like
+/// `<title>` and `<cmd>` with the appropriate ANSI escape codes for color and style, but
+/// only if color output is enabled for the terminal. This ensures a beautiful help
+/// message on supported terminals and a clean, readable one on others.
 fn build_help_string() -> &'static str {
     // This function acts as a mini-renderer for our semantic help template.
     // It replaces placeholders like `<title>` with colored/styled text.
@@ -42,10 +68,16 @@ fn build_help_string() -> &'static str {
     Box::leak(formatted_string.into_boxed_str())
 }
 
-/// axes: A high-performance, session-aware workflow orchestrator.
+/// The root of the command-line interface, defined using `clap`.
+///
+/// This struct captures all arguments passed to `axes` into a single `Vec<String>`.
+/// It intentionally avoids defining subcommands at this top level. Instead, the raw
+/// arguments are passed to the `dispatcher` module, which implements a more flexible,
+/// universal grammar for command parsing. This approach allows for context-sensitive
+/// commands and implicit actions (like `axes my-script` being a shortcut for `axes . run my-script`).
 #[derive(Parser, Debug)]
 #[command(
-    author,
+    //author,
     version,
     about,
     // Use `help_template` to take full control of the output.
@@ -57,13 +89,12 @@ fn build_help_string() -> &'static str {
         .literal(clap::builder::styling::AnsiColor::Cyan.on_default().bold())
         .placeholder(clap::builder::styling::AnsiColor::Green.on_default()),
 )]
-// We disable clap's default help subcommand (`help`) as we provide a complete template.
 #[command(disable_help_subcommand = true)]
 #[command(trailing_var_arg = true)]
 pub struct Cli {
-    /// The sequence of arguments passed to axes.
-    /// This argument is now "invisible" in the help output, which is what we want.
-    /// Its presence is only for clap's internal parsing.
+    /// A catch-all for the entire sequence of arguments passed to `axes`.
+    /// This vector is passed directly to the dispatcher for parsing according to the
+    /// application's universal grammar.
     #[arg()]
     pub args: Vec<String>,
 }

@@ -6,12 +6,16 @@ use colored::*;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-/// Options to control the appearance of the rendered tree.
-#[derive(Default)]
+/// Options to control the appearance of the rendered project tree.
+#[derive(Default, Debug)]
 pub struct DisplayOptions {
+    /// If true, display the absolute filesystem path for each project.
     pub show_paths: bool,
+    /// If true, display the UUID for each project.
     pub show_uuids: bool,
+    /// An optional limit on the depth of the tree to display.
     pub max_depth: Option<usize>,
+    /// If true, check if each project's path exists on the filesystem and show a warning if not.
     pub show_health: bool,
 }
 

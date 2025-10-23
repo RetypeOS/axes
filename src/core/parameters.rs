@@ -1,3 +1,21 @@
+//! # Script Parameter Parsing and Resolution
+//!
+//! This module is responsible for the entire lifecycle of script parameter handling, from
+//! parsing definitions in `axes.toml` to resolving them against user-provided CLI arguments.
+//! It is divided into two main phases:
+//!
+//! 1.  **Definition Parsing (`ParameterDef`)**: Functions like `parse_parameter_token` are used
+//!     by the compiler (`compiler.rs`) to transform parameter tokens (e.g., `<params::0(required)>`)
+//!     into a structured `ParameterDef`. This captures the contract of the script.
+//!
+//! 2.  **Argument Resolution (`ArgResolver`)**: At runtime, the `ArgResolver` is instantiated.
+//!     It takes the script's `ParameterDef`s and the user's CLI arguments. It then parses the
+//!     CLI input, matches arguments to definitions, validates requirements, applies defaults,
+//!     and prepares the final string values for substitution into the command.
+//!
+//! The system is designed for high performance, operating on string slices and avoiding
+//! allocations wherever possible.
+
 use crate::{
     core::commons::wrap_value,
     models::{ParameterDef, ParameterKind, ParameterModifiers},
@@ -21,38 +39,63 @@ lazy_static! {
 // --- DATA STRUCTS ---
 
 /// A preliminary, intermediate representation of a token found during the initial parsing pass.
-/// This distinguishes between different token types before the recursive expansion begins.
+///
+/// This enum is used internally by the compiler to distinguish between different token types
+/// before the full, recursive expansion and compilation into `TemplateComponent`s begins.
+/// It operates on borrowed string slices (`&'a str`) for maximum performance during the initial
+/// tokenization phase.
 #[derive(Debug)]
 pub enum PreComponent<'a> {
+    /// A static, literal part of the command string.
     Literal(&'a str),
+    /// A reference to a variable, e.g., `<vars::my_var>`. The value is the variable name.
     Var(&'a str),
+    /// A reference to another script, e.g., `<scripts::build>`. The value is the script name.
     Script(&'a str),
-    RunScript(&'a str),
+    /// A command to be executed whose output is substituted, e.g., `<run('...')>`.
     RunLiteral(&'a str),
-    Param { full_match: &'a str, spec: &'a str },
+    /// A user-defined parameter token, e.g., `<params::0(required)>`.
+    Param {
+        /// The full original token match, e.g., `<params::0(required)>`.
+        full_match: &'a str,
+        /// The inner content of the token, e.g., `0(required)`.
+        spec: &'a str,
+    },
+    /// The generic parameters token, `<params>`.
     GenericParams,
 }
 
-/// Representa un único argumento de la CLI con su estado de consumo.
+/// Represents a single CLI argument and its consumption state.
 #[derive(Debug, Clone, Copy)]
 pub struct CliArgument<'a> {
+    /// The string value of the argument, if it has one (e.g., for `--key value`).
     pub value: Option<&'a str>,
+    /// A flag indicating whether this argument has been claimed by a `ParameterDef`.
     pub consumed: bool,
 }
 
-/// Contiene y gestiona el estado de todos los argumentos pasados por la CLI.
-/// Esta estructura es mutable y se modifica durante el proceso de resolución.
+/// Contains and manages the state of all arguments passed via the CLI for a given script.
+/// This struct is mutable and is consumed during the parameter resolution process.
 #[derive(Debug, Clone)]
 pub struct CliInputState<'a> {
+    /// A vector of positional arguments in the order they appeared.
     positional: Vec<CliArgument<'a>>,
+    /// A map of named arguments (flags), where the key is the flag itself (e.g., `"--verbose"`).
     named: HashMap<&'a str, CliArgument<'a>>,
 }
 
-/// El orquestador que valida y resuelve los parámetros.
+/// An orchestrator that validates CLI arguments against parameter definitions and resolves their final values.
+///
+/// An instance of `ArgResolver` is created for each script execution. Its constructor performs all
+/// the validation and resolution logic upfront. The rest of the application can then query it for
+/// the final string values to be substituted into commands, without needing to know the details
+/// of the resolution process.
 #[derive(Debug)]
 pub struct ArgResolver<'a> {
-    /// Mapa del token original a su valor final resuelto.
+    /// A map from the original parameter token (e.g., `<params::0>`) to its final, resolved string value.
     resolved_values: HashMap<String, String>,
+    /// A vector of all arguments that were not claimed by any specific `ParameterDef`. These are
+    /// intended for the generic `<params>` token.
     unclaimed_args: Vec<&'a str>,
 }
 
@@ -159,9 +202,14 @@ pub fn parse_parameter_modifiers_from_str(s: &str) -> Result<ParameterModifiers>
 // --- IMPLEMENTACIÓN DEL ESTADO DE LA CLI (FASE 2) ---
 
 impl<'a> CliInputState<'a> {
-    /// Parses a raw string slice from the CLI and builds the initial state.
-    /// This parser is "greedy" and performs zero string allocations.
-    /// It stores flag keys exactly as they appear (e.g., "--verbose" or "-v").
+    /// Parses CLI arguments into a structured, mutable state for consumption.
+    ///
+    /// This function handles basic parsing of positional arguments and named flags (both with and
+    /// without values). It is highly optimized to work with string slices (`&str`) and performs
+    /// zero heap allocations.
+    ///
+    /// # Arguments
+    /// * `cli_params` - A slice of strings representing the arguments passed by the user for the script.
     pub fn new(cli_params: &'a [String]) -> Result<Self> {
         let mut positional = Vec::new();
         let mut named = HashMap::new();
@@ -195,7 +243,13 @@ impl<'a> CliInputState<'a> {
         Ok(Self { positional, named })
     }
 
-    /// Tries to consume a positional argument by its index, returning a `&str`.
+    /// Consumes the next available positional argument.
+    ///
+    /// # Arguments
+    /// * `index` - The zero-based index of the positional argument to consume (e.g., `0` for the first one).
+    ///
+    /// # Returns
+    /// `Some(&str)` containing the argument's value if found, or `None` otherwise.
     pub fn consume_positional(&mut self, index: usize) -> Option<&'a str> {
         // Find the n-th positional (unconsumed) argument.
         let mut positional_count = 0;
@@ -211,7 +265,17 @@ impl<'a> CliInputState<'a> {
         None
     }
 
-    /// Tries to consume a named argument, considering its alias.
+    /// Consumes a named argument (flag), checking both its long name and its alias.
+    ///
+    /// # Arguments
+    /// * `name` - The long name of the flag (e.g., "verbose" for `--verbose`).
+    /// * `alias` - An optional short name for the flag (e.g., "-v").
+    ///
+    /// # Returns
+    /// - `Ok(Some(Some(value)))` if the flag was present and had a value.
+    /// - `Ok(Some(None))` if the flag was present but had no value.
+    /// - `Ok(None)` if the flag was not present.
+    /// - `Err` if both the name and its alias were provided.
     pub fn consume_named(
         &mut self,
         name: &str,          // e.g., "verbose"
@@ -257,7 +321,11 @@ impl<'a> CliInputState<'a> {
         Ok(None)
     }
 
-    /// Collects all unconsumed arguments into a `Vec<&'a str>`, preserving their original form.
+    /// Collects all arguments that were not consumed by `consume_positional` or `consume_named`.
+    ///
+    /// # Returns
+    /// A tuple containing a vector of the unconsumed argument strings and a boolean indicating
+    /// if there were any.
     pub fn get_unconsumed_values(&self) -> (Vec<&'a str>, bool) {
         let mut parts = Vec::new();
         let mut had_unconsumed = false;
@@ -284,14 +352,17 @@ impl<'a> CliInputState<'a> {
 }
 
 impl<'a> ArgResolver<'a> {
-    /// The constructor validates the entire user input against the script's contract (definitions)
-    /// and pre-calculates the final string value for every parameter token.
+    /// Creates a new `ArgResolver` by validating CLI arguments against script definitions.
     ///
-    /// # Performance
-    /// This implementation is heavily optimized to avoid string allocations. It operates on string
-    /// slices (`&'a str`) borrowed from the original command-line arguments. It only allocates new
-    /// strings when a default value is used, or when formatting is required (e.g., for `map` or literal wrapping).
-    /// The `Cow<'a, str>` enum is used extensively to handle values that can be either borrowed or owned.
+    /// This constructor is the main entry point for the resolution phase. It orchestrates the
+    /// entire process of parsing CLI input, matching it against the script's contract
+    /// (`definitions`), checking for required parameters, applying defaults, and preparing
+    /// the final substitution values.
+    ///
+    /// # Arguments
+    /// * `definitions` - A slice of `ParameterDef`s that define the script's expected arguments.
+    /// * `cli_params` - The raw string arguments provided by the user for the script.
+    /// * `has_generic_params` - A flag indicating if the script contains a generic `<params>` token.
     pub fn new(
         definitions: &[ParameterDef],
         cli_params: &'a [String],

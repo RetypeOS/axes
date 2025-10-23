@@ -13,7 +13,7 @@ use crate::{
         TomlVarValue,
     },
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use lazy_static::lazy_static;
 use lz4_flex;
 use regex::Regex;

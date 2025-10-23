@@ -1,3 +1,29 @@
+//! # Handler for the `start` command
+//!
+//! This module provides the logic for the `axes start` command, which initiates an
+//! interactive shell session within a project's context. It is responsible for setting up
+//! the session, running lifecycle hooks (`at_start`, `at_exit`), and managing parameters.
+//!
+//! ## Core Logic
+//!
+//! 1.  **Argument Parsing & Pre-flight Checks**: It parses arguments like the target `context`,
+//!     the `--dry-run` flag, and any trailing parameters for the hooks. It also prevents
+//!     the creation of nested sessions.
+//! 2.  **Configuration & Hook Resolution**: It resolves the project's full configuration to
+//!     obtain the `at_start` and `at_exit` tasks defined in the `[options]` table.
+//! 3.  **Task Flattening**: Crucially, it flattens both the `at_start` and `at_exit` tasks.
+//!     This resolves any script compositions (`<scripts::...>`) within the hooks before
+//!     parameters are processed.
+//! 4.  **Unified Parameter Resolution**: It collects all parameter definitions (`<params::...>`)
+//!     from *both* the start and exit hooks. This allows a single set of parameters passed to
+//!     `axes start` to be used in both hooks, creating a consistent session context. An
+//!     `ArgResolver` is then built from this unified contract.
+//! 5.  **Dispatch**:
+//!     - If `--dry-run` is used, it calls `dry_run_session` to print the resolved execution
+//!       plan for both hooks without running them.
+//!     - Otherwise, it delegates the entire session lifecycle management (init script
+//!       generation, shell spawning, cleanup) to the `system::shell::launch_session` function.
+
 use crate::{
     cli::handlers::commons,
     core::{parameters::ArgResolver, task_executor},
@@ -30,7 +56,22 @@ struct StartArgs {
 
 // --- Main Handler ---
 
-pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGuard) -> Result<()> {
+/// The main handler for the `start` command.
+///
+/// It orchestrates the entire process of setting up a project session, from resolving
+/// configuration and hooks to building a unified argument resolver and dispatching to
+//  either a dry run or a live session.
+///
+/// # Arguments
+/// * `context` - The project context for the session, provided by the dispatcher.
+/// * `args` - Command-specific arguments (e.g., `--dry-run`, and parameters for the hooks).
+/// * `index` - A mutable guard to the application state. **Note**: `index` is the parameter name
+///   due to a macro limitation and should be treated as `state_guard`.
+pub fn handle(
+    context: Option<String>,
+    args: Vec<String>,
+    index: &mut AppStateGuard<'_>,
+) -> Result<()> {
     // 1. Parse args and perform pre-flight checks.
     let start_args = StartArgs::try_parse_from(&args)?;
 
@@ -107,12 +148,19 @@ pub fn handle(context: Option<String>, args: Vec<String>, index: &mut AppStateGu
 
 // --- Subcommand Logic ---
 
-/// Displays the execution plan for session hooks without running them.
+/// Displays the fully-resolved execution plan for the `at_start` and `at_exit` hooks
+/// without actually executing them.
+///
+/// # Arguments
+/// * `config` - The resolved configuration of the project.
+/// * `task_start` - The flattened `at_start` task.
+/// * `task_exit` - The flattened `at_exit` task.
+/// * `resolver` - The unified argument resolver for the session.
 fn dry_run_session(
     config: &ResolvedConfig,
     task_start: Option<Arc<Task>>,
     task_exit: Option<Arc<Task>>,
-    resolver: &ArgResolver,
+    resolver: &ArgResolver<'_>,
 ) -> Result<()> {
     println!(
         "\n📋 Dry-run for session in '{}'",
@@ -125,12 +173,18 @@ fn dry_run_session(
     Ok(())
 }
 
-/// Helper for `dry_run_session` to display the plan for a single hook.
+/// A helper for `dry_run_session` that displays the execution plan for a single hook.
+///
+/// # Arguments
+/// * `hook_name` - The name of the hook being displayed (e.g., "at_start").
+/// * `task` - The flattened `Task` for the hook.
+/// * `config` - The resolved configuration of the project.
+/// * `resolver` - The unified argument resolver.
 fn display_hook_plan(
     hook_name: &str,
     task: Option<Arc<Task>>,
     config: &ResolvedConfig,
-    resolver: &ArgResolver,
+    resolver: &ArgResolver<'_>,
 ) -> Result<()> {
     println!("\n--- Hook: [{}] ---", hook_name.yellow());
 

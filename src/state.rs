@@ -147,7 +147,7 @@ impl<'a> AppStateGuard<'a> {
     ///
     /// It performs read-only checks first and only requests mutable access if the new
     /// data is different from the existing data, preventing unnecessary state clones.
-        ///
+    ///
     /// # Arguments
     ///
     /// * `uuid` - The UUID of the project to update.
