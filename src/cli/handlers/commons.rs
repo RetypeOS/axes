@@ -194,7 +194,7 @@ pub fn prepare_operation_plan(
 }
 
 /// Checks for potential name collisions when reparenting children.
-/// Returns a tuple of (warnings_for_automatic_renames, hard_conflicts).
+/// Returns a tuple of (`warnings_for_automatic_renames`, `hard_conflicts`).
 fn check_reparent_collisions(
     index: &GlobalIndex,
     old_parent_uuid: Uuid,

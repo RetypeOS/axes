@@ -308,7 +308,7 @@ pub(crate) fn find_task_source(
     Ok(config.qualified_name.clone()) // Fallback to current project name
 }
 
-/// Selects the appropriate command template for the current platform from a PlatformExecution block.
+/// Selects the appropriate command template for the current platform from a `PlatformExecution` block.
 fn get_template_for_platform<'a>(
     plat_exec: &'a PlatformExecution,
     config: &'a ResolvedConfig,

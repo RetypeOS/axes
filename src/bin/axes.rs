@@ -33,7 +33,7 @@ fn main() {
 
     #[cfg(debug_assertions)]
     {
-        env_logger::init();
+        //env_logger::init();
     }
 
     // --- Application Logic Execution ---

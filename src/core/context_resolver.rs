@@ -339,7 +339,7 @@ fn find_project_from_path(
     }
 }
 
-/// Finds the UUID of a child by its name (logic moved from config_resolver).
+/// Finds the UUID of a child by its name (logic moved from `config_resolver`).
 ///
 /// # Arguments
 ///

@@ -22,13 +22,13 @@ pub mod config_loader;
 /// The context_resolver module, which resolves the current context of the application.
 pub mod context_resolver;
 
-/// The graph_display module, which provides utilities for displaying graphs.
+/// The `graph_display` module, which provides utilities for displaying graphs.
 pub mod graph_display;
 
-/// The index_manager module, which manages the global index of projects.
+/// The `index_manager` module, which manages the global index of projects.
 pub mod index_manager;
 
-/// The onboarding_manager module, which manages the onboarding process for new users.
+/// The `onboarding_manager` module, which manages the onboarding process for new users.
 pub mod onboarding_manager;
 
 /// The parameters module, which handles the parsing and resolution of parameters.
