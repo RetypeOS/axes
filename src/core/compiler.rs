@@ -691,6 +691,7 @@ fn write_cached_layer(path: &std::path::Path, layer: &CachedProjectConfig) -> Re
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::panic)]
     use super::*;
     use crate::models::{TemplateComponent, TomlScriptExtended, TomlVarExtended, TomlVarValue};
 
@@ -699,9 +700,13 @@ mod tests {
     #[test]
     fn test_compile_simple_script_with_prefixes() {
         let script = TomlScript::Simple("@-echo 'hello'".to_string());
-        let task = compile_script(script).unwrap();
+        let task = compile_script(script).expect("Compiling a simple script should succeed");
         assert_eq!(task.commands.len(), 1);
-        let exec = task.commands[0].default.as_ref().unwrap();
+        let exec = task
+            .commands
+            .first()
+            .and_then(|c| c.default.as_ref())
+            .expect("Task should have one default command");
         assert!(exec.silent_mode);
         assert!(exec.ignore_errors);
         assert!(!exec.run_in_parallel);
@@ -718,13 +723,20 @@ mod tests {
                 ..Default::default()
             }),
         ]);
-        let task = compile_script(script).unwrap();
+        let task = compile_script(script).expect("Compiling a simple script should succeed");
         assert_eq!(task.commands.len(), 2);
 
-        let first_cmd = task.commands[0].default.as_ref().unwrap();
+        let first_cmd = task
+            .commands
+            .first()
+            .and_then(|c| c.default.as_ref())
+            .expect("Task should have a first command");
         assert!(matches!(first_cmd.action, CommandAction::Print(_)));
 
-        let second_cmd = &task.commands[1];
+        let second_cmd = task
+            .commands
+            .get(1)
+            .expect("Task should have a second command");
         assert!(second_cmd.windows.is_some());
         assert!(second_cmd.default.is_some());
         assert!(second_cmd.linux.is_none());
@@ -739,7 +751,7 @@ mod tests {
                 TomlCommand::Simple("cmd2".to_string()),
             ])),
         });
-        let task = compile_script(script).unwrap();
+        let task = compile_script(script).expect("Compiling a simple script should succeed");
         assert_eq!(task.desc.as_deref(), Some("A complex script"));
         assert_eq!(task.commands.len(), 2);
     }
@@ -753,11 +765,23 @@ mod tests {
                 ..Default::default()
             },
         });
-        let task = compile_script(script).unwrap();
+        let task = compile_script(script).expect("Compiling a simple script should succeed");
         assert_eq!(task.desc.as_deref(), Some("Platform direct"));
         assert_eq!(task.commands.len(), 1);
-        assert!(task.commands[0].windows.is_some());
-        assert!(task.commands[0].default.is_none());
+        assert!(
+            task.commands
+                .first()
+                .expect("Task should have one command")
+                .windows
+                .is_some()
+        );
+        assert!(
+            task.commands
+                .first()
+                .expect("Task should have one command")
+                .default
+                .is_none()
+        );
     }
 
     // --- Variable Compilation Tests ---
@@ -765,19 +789,19 @@ mod tests {
     #[test]
     fn test_compile_simple_var_no_prefixes() {
         let var = TomlVar::Simple("@-my-value".to_string());
-        let cached_var = compile_var(var).unwrap();
-        let exec = cached_var.value.default.as_ref().unwrap();
+        let cached_var = compile_var(var).expect("Variable compilation should succeed in test");
+        let exec = cached_var
+            .value
+            .default
+            .as_ref()
+            .expect("Variable should have a default value");
 
-        // CRITICAL: Prefixes must be ignored for variables.
         assert!(!exec.silent_mode);
         assert!(!exec.ignore_errors);
 
         if let CommandAction::Execute(tpl) = &exec.action {
-            if let TemplateComponent::Literal(s) = &tpl[0] {
-                assert_eq!(s, "@-my-value");
-            } else {
-                panic!("Expected literal");
-            }
+            let component = tpl.first().expect("Template should have one component");
+            assert!(matches!(component, TemplateComponent::Literal(s) if s == "@-my-value"));
         } else {
             panic!("Expected Execute action");
         }
@@ -793,7 +817,7 @@ mod tests {
                 ..Default::default()
             }),
         });
-        let cached_var = compile_var(var).unwrap();
+        let cached_var = compile_var(var).expect("Test var compilation should succeed");
         assert_eq!(cached_var.desc.as_deref(), Some("Path to binary"));
         assert!(cached_var.value.windows.is_some());
         assert!(cached_var.value.default.is_some());
@@ -804,39 +828,49 @@ mod tests {
     #[test]
     fn test_tokenizer_handles_escaped_tokens_and_merges_literals() {
         let text = r"echo '\<hello> world <name>'";
-        let components = tokenize_string(text).unwrap();
+        let components = tokenize_string(text).expect("Tokenizing static string should succeed");
         assert_eq!(components.len(), 3);
         assert!(
-            matches!(&components[0], TemplateComponent::Literal(s) if s == "echo '<hello> world ")
+            matches!(components.first(), Some(TemplateComponent::Literal(s)) if s == "echo '<hello> world ")
         );
-        assert!(matches!(&components[1], TemplateComponent::Name));
-        assert!(matches!(&components[2], TemplateComponent::Literal(s) if s == "'"));
+        assert!(matches!(components.get(1), Some(TemplateComponent::Name)));
+        assert!(matches!(components.get(2), Some(TemplateComponent::Literal(s)) if s == "'"));
     }
 
     #[test]
     fn test_tokenizer_with_complex_tokens() {
         let text = r"<run('git status')> <params::0(required)> <#red>ERROR<#reset>";
-        let components = tokenize_string(text).unwrap();
+        let components = tokenize_string(text).expect("Tokenizing static string should succeed");
         assert_eq!(components.len(), 7);
-        assert!(matches!(&components[0], TemplateComponent::Run(_)));
-        assert!(matches!(&components[1], TemplateComponent::Literal(s) if s == " "));
-        assert!(matches!(&components[2], TemplateComponent::Parameter(_)));
-        assert!(matches!(&components[3], TemplateComponent::Literal(s) if s == " "));
+        assert!(matches!(
+            components.first(),
+            Some(TemplateComponent::Run(_))
+        ));
+        assert!(matches!(components.get(1), Some(TemplateComponent::Literal(s)) if s == " "));
+        assert!(matches!(
+            components.get(2),
+            Some(TemplateComponent::Parameter(_))
+        ));
+        assert!(matches!(components.get(3), Some(TemplateComponent::Literal(s)) if s == " "));
         assert!(
-            matches!(&components[4], TemplateComponent::Color(c) if *c == crate::models::AnsiStyle::Red)
+            matches!(components.get(4), Some(TemplateComponent::Color(c)) if *c == crate::models::AnsiStyle::Red)
         );
-        assert!(matches!(&components[5], TemplateComponent::Literal(s) if s == "ERROR"));
+        assert!(matches!(components.get(5), Some(TemplateComponent::Literal(s)) if s == "ERROR"));
         assert!(
-            matches!(&components[6], TemplateComponent::Color(c) if *c == crate::models::AnsiStyle::Reset)
+            matches!(components.get(6), Some(TemplateComponent::Color(c)) if *c == crate::models::AnsiStyle::Reset)
         );
     }
 
     #[test]
     fn test_empty_script_compiles_to_empty_task() {
         let script = TomlScript::Simple("".to_string());
-        let task = compile_script(script).unwrap();
+        let task = compile_script(script).expect("Compiling a simple script should succeed");
         assert_eq!(task.commands.len(), 1); // An empty command is still a command
-        let exec = task.commands[0].default.as_ref().unwrap();
+        let exec = task
+            .commands
+            .first()
+            .and_then(|c| c.default.as_ref())
+            .expect("Task should have one default command");
         if let CommandAction::Execute(tpl) = &exec.action {
             assert!(tpl.is_empty());
         } else {
@@ -853,7 +887,9 @@ mod tests {
         // FIX: We are testing the `TomlScriptExtended` struct directly.
         let result: Result<TomlScriptExtended, _> = toml::from_str(toml_str);
         assert!(result.is_err(), "Should fail due to unknown field 'runs'");
-        let error_msg = result.unwrap_err().to_string();
+        let error_msg = result
+            .expect_err("Deserialization should fail due to unknown field")
+            .to_string();
         assert!(
             error_msg.contains("unknown field `runs`"),
             "Error message was: {}",
@@ -870,7 +906,9 @@ mod tests {
         // FIX: We are testing the `TomlVarExtended` struct directly.
         let result: Result<TomlVarExtended, _> = toml::from_str(toml_str);
         assert!(result.is_err(), "Should fail due to unknown field 'val'");
-        let error_msg = result.unwrap_err().to_string();
+        let error_msg = result
+            .expect_err("Deserialization should fail due to unknown field")
+            .to_string();
         assert!(
             error_msg.contains("unknown field `val`"),
             "Error message was: {}",
