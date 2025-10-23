@@ -185,9 +185,15 @@ pub fn register_project(
     let mut registered_count = 0;
     for candidate in candidates {
         let (uuid, name, parent_uuid) = (
-            candidate.resolved_uuid.unwrap(),
-            candidate.resolved_name.unwrap(),
-            candidate.resolved_parent_uuid.unwrap(),
+            candidate
+                .resolved_uuid
+                .expect("Candidate should have a resolved UUID at this stage"),
+            candidate
+                .resolved_name
+                .expect("Candidate should have a resolved name at this stage"),
+            candidate
+                .resolved_parent_uuid
+                .expect("Candidate should have a resolved parent UUID at this stage"),
         );
 
         let new_entry = IndexEntry {
@@ -273,154 +279,191 @@ fn resolve_candidates(
     state_guard: &mut AppStateGuard<'_>,
     options: &OnboardingOptions,
 ) -> OnboardingResult<()> {
-    // This prevents two new projects in the same batch from colliding with each other.
+    // This set tracks (parent_uuid, name) tuples for projects being added in this batch
+    // to prevent internal collisions.
     let mut pending_names: HashSet<(Uuid, String)> = HashSet::new();
 
-    for i in 0..candidates.len() {
-        if !candidates[i].should_register {
+    // --- Phase 1: Resolve all identities first ---
+    // We do this in a separate loop to ensure all `resolved_uuid` fields are populated
+    // before we try to validate parent links in the next phase.
+    for candidate in candidates.iter_mut() {
+        if candidate.should_register {
+            resolve_candidate_identity(candidate, state_guard.index(), options)?;
+        }
+    }
+
+    // --- Pre-computation Step ---
+    // Collect all UUIDs of candidates that are still valid for registration.
+    // This avoids the mutable/immutable borrow conflict in the main loop.
+    let valid_candidate_uuids: HashSet<Uuid> = candidates
+        .iter()
+        .filter_map(|c| {
+            if c.should_register {
+                c.resolved_uuid
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // --- Phase 2: Resolve parents and check for collisions ---
+    for candidate in candidates.iter_mut() {
+        if !candidate.should_register {
             continue;
         }
 
-        // --- Phase 2.1: Resolve UUID and Name ---
-        {
-            let candidate = &mut candidates[i];
-            match &candidate.identity_source {
-                IdentitySource::ProjectRef(pref) => {
-                    if let Some(existing) = state_guard.index().projects.get(&pref.self_uuid) {
-                        if existing.path != candidate.path {
-                            return Err(OnboardingError::UuidCollision(
-                                pref.self_uuid,
-                                existing.path.display().to_string(),
-                            ));
-                        } else {
-                            // Project is already registered at the correct path. Mark to skip.
-                            candidate.should_register = false;
-                        }
-                    }
-                    if candidate.should_register {
-                        candidate.resolved_uuid = Some(pref.self_uuid);
-                        candidate.resolved_name = Some(pref.name.clone());
-                    }
-                }
-                IdentitySource::TomlOnly => {
-                    if options.autosolve {
-                        candidate.should_register = false;
-                        println!("{}", format!("Warning: Project at '{}' has no identity and was skipped in --autosolve mode.", candidate.path.display()).yellow());
-                    } else {
-                        println!(
-                            "{}",
-                            format!(
-                                "\nProject at '{}' has no identity.",
-                                candidate.path.display()
-                            )
-                            .yellow()
-                        );
-                        let name_prompt = t!("register.prompt.name_for_identityless");
-                        let default_name = candidate
-                            .path
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .to_string();
+        // Resolve the parent, now passing the pre-computed set of valid UUIDs.
+        let parent_uuid =
+            resolve_candidate_parent(candidate, &valid_candidate_uuids, state_guard, options)?;
+        candidate.resolved_parent_uuid = Some(parent_uuid);
 
-                        // Loop to validate the name interactively
-                        loop {
-                            let input_name = Input::with_theme(&ColorfulTheme::default())
-                                .with_prompt(name_prompt)
-                                .default(default_name.clone())
-                                .interact_text()?;
+        // --- Final Collision Check ---
+        let name = candidate
+            .resolved_name
+            .as_ref()
+            .expect("Candidate name should be resolved at this stage");
 
-                            match commons::validate_project_name(&input_name) {
-                                Ok(name) => {
-                                    candidate.resolved_name = Some(name);
-                                    break;
-                                }
-                                Err(e) => println!("{}", format!("  Error: {}", e).red()),
-                            }
-                        }
-                        candidate.resolved_uuid = Some(Uuid::new_v4());
-                    }
-                }
-                _ => {
-                    candidate.should_register = false;
-                }
-            }
+        // Check for collision with projects already in the global index.
+        if index_manager::is_sibling_name_taken(state_guard.index(), parent_uuid, name, None) {
+            return Err(OnboardingError::NameCollision(name.clone()));
         }
 
-        if !candidates[i].should_register {
-            continue;
+        // Check for collision with other projects being onboarded in this same batch.
+        if !pending_names.insert((parent_uuid, name.clone())) {
+            return Err(OnboardingError::NameCollision(name.clone()));
         }
+    }
 
-        // --- Phase 2.2: Resolve Parent UUID ---
-        let pref_parent_uuid = if let IdentitySource::ProjectRef(p) = &candidates[i].identity_source
-        {
-            p.parent_uuid
-        } else {
-            None
-        };
+    Ok(())
+}
 
-        let is_pref_parent_valid = if let Some(p_uuid) = pref_parent_uuid {
-            state_guard.index().projects.contains_key(&p_uuid)
-                || candidates
-                    .iter()
-                    .any(|c| c.should_register && c.resolved_uuid == Some(p_uuid))
-        } else {
-            false
-        };
+/// Helper function to resolve the identity (UUID and name) of a single candidate.
+/// Modifies the candidate in place.
+fn resolve_candidate_identity(
+    candidate: &mut OnboardingCandidate,
+    index: &GlobalIndex,
+    options: &OnboardingOptions,
+) -> OnboardingResult<()> {
+    match &candidate.identity_source {
+        IdentitySource::ProjectRef(pref) => {
+            if let Some(existing) = index.projects.get(&pref.self_uuid) {
+                if existing.path != candidate.path {
+                    return Err(OnboardingError::UuidCollision(
+                        pref.self_uuid,
+                        existing.path.display().to_string(),
+                    ));
+                }
+                // Project is already registered at the correct path. Mark to skip.
+                candidate.should_register = false;
+                return Ok(());
+            }
+            candidate.resolved_uuid = Some(pref.self_uuid);
+            candidate.resolved_name = Some(pref.name.clone());
+        }
+        IdentitySource::TomlOnly => {
+            if options.autosolve {
+                candidate.should_register = false;
+                println!("{}", format!("Warning: Project at '{}' has no identity and was skipped in --autosolve mode.", candidate.path.display()).yellow());
+                return Ok(());
+            }
 
-        let valid_pref_parent = if is_pref_parent_valid {
-            pref_parent_uuid
-        } else {
-            None
-        };
+            println!(
+                "{}",
+                format!(
+                    "\nProject at '{}' has no identity.",
+                    candidate.path.display()
+                )
+                .yellow()
+            );
+            let name_prompt = t!("register.prompt.name_for_identityless");
+            let default_name = candidate
+                .path
+                .file_name()
+                .expect("Path should have a filename")
+                .to_string_lossy()
+                .to_string();
 
-        let final_parent_uuid = match (options.suggested_parent_uuid, valid_pref_parent) {
-            (Some(p), _) => Some(p),
-            (None, Some(p)) => Some(p),
-            _ => {
-                if options.autosolve {
-                    Some(GLOBAL_PROJECT_UUID)
-                } else {
-                    if pref_parent_uuid.is_some() {
-                        println!(
-                            "{}",
-                            format!(
-                                t!("register.warning.invalid_parent"),
-                                path = candidates[i].path.display()
-                            )
-                            .yellow()
-                        );
+            // Loop to validate the name interactively
+            loop {
+                let input_name = Input::with_theme(&ColorfulTheme::default())
+                    .with_prompt(name_prompt)
+                    .default(default_name.clone())
+                    .interact_text()?;
+
+                match commons::validate_project_name(&input_name) {
+                    Ok(name) => {
+                        candidate.resolved_name = Some(name);
+                        break;
                     }
-                    Some(commons::choose_parent_interactive(state_guard)?)
+                    Err(e) => println!("{}", format!("  Error: {}", e).red()),
                 }
             }
-        };
-
-        // --- Phase 2.3: Final Collision Check & Write ---
-        {
-            let candidate = &mut candidates[i];
-            candidate.resolved_parent_uuid = final_parent_uuid;
-
-            let name = candidate.resolved_name.as_ref().unwrap();
-            let parent = candidate.resolved_parent_uuid.unwrap();
-
-            // Check for collision with projects already in the index.
-            if state_guard
-                .index()
-                .projects
-                .values()
-                .any(|p| p.parent == Some(parent) && &p.name == name)
-            {
-                return Err(OnboardingError::NameCollision(name.clone()));
-            }
-
-            // ROBUSTNESS: Check for collision with projects in the current onboarding batch.
-            if !pending_names.insert((parent, name.clone())) {
-                return Err(OnboardingError::NameCollision(name.clone()));
-            }
+            candidate.resolved_uuid = Some(Uuid::new_v4());
+        }
+        IdentitySource::NotFound => {
+            candidate.should_register = false;
         }
     }
     Ok(())
+}
+
+/// Helper function to determine the parent UUID for a single candidate.
+/// This function is now read-only with respect to the `candidate` itself.
+fn resolve_candidate_parent(
+    candidate: &OnboardingCandidate, // <-- Ahora es una referencia inmutable
+    valid_candidate_uuids: &HashSet<Uuid>, // <-- Recibe el set pre-calculado
+    state_guard: &mut AppStateGuard<'_>,
+    options: &OnboardingOptions,
+) -> OnboardingResult<Uuid> {
+    // Check for a parent suggested via command-line flag first.
+    if let Some(suggested_parent) = options.suggested_parent_uuid {
+        return Ok(suggested_parent);
+    }
+
+    // Check if the parent from its `project_ref.bin` is valid.
+    if let Some(pref_parent_uuid) = candidate
+        .identity_source
+        .as_project_ref()
+        .and_then(|p| p.parent_uuid)
+    {
+        // A parent is valid if it's already in the index OR it's in our pre-computed set.
+        let is_valid = state_guard.index().projects.contains_key(&pref_parent_uuid)
+            || valid_candidate_uuids.contains(&pref_parent_uuid);
+
+        if is_valid {
+            return Ok(pref_parent_uuid);
+        }
+
+        // If the parent from the ref file is invalid, warn the user if interactive.
+        if !options.autosolve {
+            println!(
+                "{}",
+                format!(
+                    t!("register.warning.invalid_parent"),
+                    path = candidate.path.display()
+                )
+                .yellow()
+            );
+        }
+    }
+
+    // Fallback: Use autosolve default or launch interactive selection.
+    if options.autosolve {
+        Ok(GLOBAL_PROJECT_UUID)
+    } else {
+        Ok(commons::choose_parent_interactive(state_guard)?)
+    }
+}
+
+// We can add a small helper on IdentitySource to make the code cleaner.
+impl IdentitySource {
+    fn as_project_ref(&self) -> Option<&ProjectRef> {
+        if let Self::ProjectRef(pref) = self {
+            Some(pref)
+        } else {
+            None
+        }
+    }
 }
 
 // --- Phase 3: Confirmation ---
@@ -432,8 +475,13 @@ fn present_plan_and_confirm(
 ) -> OnboardingResult<()> {
     println!("\n{}", t!("register.info.plan_header").bold());
     for candidate in candidates {
-        let name = candidate.resolved_name.as_ref().unwrap();
-        let parent_uuid = candidate.resolved_parent_uuid.unwrap();
+        let name = candidate
+            .resolved_name
+            .as_ref()
+            .expect("Candidate to be registered must have a name");
+        let parent_uuid = candidate
+            .resolved_parent_uuid
+            .expect("Candidate to be registered must have a parent");
         let parent_name =
             index_manager::build_qualified_name(parent_uuid, index).unwrap_or_default();
         println!(

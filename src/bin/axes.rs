@@ -69,7 +69,9 @@ fn main() {
     // --- State Saving Logic (Now highly efficient) ---
     // We only acquire the lock once at the very end.
     let state_arc = get_app_state();
-    let state_guard = state_arc.lock().unwrap();
+    let state_guard = state_arc
+        .lock()
+        .expect("The main AppState mutex is poisoned, indicating a catastrophic failure.");
 
     // The MutexGuard allows us to access the methods of the inner AppState directly.
     // We call AppState::needs_saving() via the guard.

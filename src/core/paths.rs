@@ -46,7 +46,9 @@ pub enum PathError {
 /// Returns the path to the global index file (e.g., `~/.config/axes/index.bin`).
 /// This is the main persistence file for the application's state.
 pub fn get_axes_config_dir() -> Result<PathBuf, PathError> {
-    let mut cached_path_guard = AXES_CONFIG_DIR.lock().unwrap();
+    let mut cached_path_guard = AXES_CONFIG_DIR
+        .lock()
+        .expect("Config dir mutex should not be poisoned");
     if let Some(path) = &*cached_path_guard {
         return Ok(path.clone());
     }
@@ -109,7 +111,11 @@ pub fn get_default_cache_root() -> Result<PathBuf> {
         let local_app_data = std::env::var("LOCALAPPDATA")
             .map(PathBuf::from)
             // Fallback to a subdir in the config dir if LOCALAPPDATA is not set
-            .unwrap_or_else(|_| get_axes_config_dir().unwrap().join("cache_fallback"));
+            .unwrap_or_else(|_| {
+                get_axes_config_dir()
+                    .expect("Axes config dir should be resolvable")
+                    .join("cache_fallback")
+            });
         Ok(local_app_data.join("axes").join("cache"))
     } else {
         let home_dir = dirs::home_dir().ok_or_else(|| anyhow!("Could not find home directory"))?;

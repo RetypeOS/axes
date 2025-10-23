@@ -70,7 +70,11 @@ pub fn calculate_validation_data(path: &Path) -> Result<CacheValidationData> {
         if bytes_read == 0 {
             break;
         }
-        hasher.update(&buffer[..bytes_read]);
+        hasher.update(
+            buffer
+                .get(..bytes_read)
+                .expect("bytes_read should be within buffer bounds"),
+        );
     }
 
     let hash = hasher.finalize();

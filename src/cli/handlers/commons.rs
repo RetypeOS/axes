@@ -153,11 +153,9 @@ pub fn prepare_operation_plan(
         ));
 
         let final_parent_uuid = new_parent_uuid.unwrap_or(index_manager::GLOBAL_PROJECT_UUID);
-        let final_parent_entry = state_guard
-            .index()
-            .projects
-            .get(&final_parent_uuid)
-            .unwrap(); // Safe
+        let final_parent_entry = state_guard.index().projects.get(&final_parent_uuid).expect(
+            "Parent UUID is guaranteed to exist as it's either resolved or the global UUID",
+        );
 
         plan.summary_lines.push(format!(
             t!("plan.summary.reparent_to"),
@@ -165,7 +163,7 @@ pub fn prepare_operation_plan(
         ));
 
         let (warnings, conflicts) =
-            check_reparent_collisions(state_guard.index(), config.uuid, final_parent_uuid)?;
+            check_reparent_collisions(state_guard.index(), config.uuid, final_parent_uuid);
         if !conflicts.is_empty() {
             return Err(anyhow!(
                 t!("plan.error.reparent_collision"),
@@ -199,11 +197,15 @@ fn check_reparent_collisions(
     index: &GlobalIndex,
     old_parent_uuid: Uuid,
     new_parent_uuid: Uuid,
-) -> Result<(Vec<String>, Vec<String>)> {
+) -> (Vec<String>, Vec<String>) {
     let mut warnings = Vec::new();
     let mut conflicts = Vec::new();
 
-    let old_parent_name = &index.projects.get(&old_parent_uuid).unwrap().name;
+    let old_parent_name = &index
+        .projects
+        .get(&old_parent_uuid)
+        .expect("Old parent UUID must exist in the index for this function to be called")
+        .name;
     let children_to_move: Vec<_> = index
         .projects
         .values()
@@ -211,7 +213,7 @@ fn check_reparent_collisions(
         .collect();
 
     if children_to_move.is_empty() {
-        return Ok((warnings, conflicts));
+        return (warnings, conflicts);
     }
 
     let new_sibling_names: HashSet<_> = index
@@ -241,7 +243,7 @@ fn check_reparent_collisions(
         }
     }
 
-    Ok((warnings, conflicts))
+    (warnings, conflicts)
 }
 
 /// Presents an interactive, multi-modal UI for selecting a parent project.
@@ -250,8 +252,8 @@ fn check_reparent_collisions(
 /// 1.  Entering a context path directly.
 /// 2.  Visually browsing the project tree.
 /// 3.  Choosing the "global" project as the parent.
-/// It ensures a consistent and user-friendly experience for any command that needs to
-/// ask the user for a project context (e.g., `init`, `register`).
+///     It ensures a consistent and user-friendly experience for any command that needs to
+///     ask the user for a project context (e.g., `init`, `register`).
 ///
 /// # Arguments
 /// * `state_guard` - A mutable guard to the application state, needed for context resolution
@@ -419,8 +421,14 @@ pub fn validate_project_name(raw_name: &str) -> Result<String> {
     }
 
     // --- Soft, Non-Blocking Warnings ---
-    let first_char = name.chars().next().unwrap(); // Safe due to is_empty check
-    let last_char = name.chars().last().unwrap();
+    let first_char = name
+        .chars()
+        .next()
+        .expect("String is guaranteed not to be empty here");
+    let last_char = name
+        .chars()
+        .last()
+        .expect("String is guaranteed not to be empty here");
 
     if !first_char.is_alphanumeric() {
         println!(

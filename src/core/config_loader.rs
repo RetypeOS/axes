@@ -100,7 +100,9 @@ impl<'a> ConfigLoader<'a> {
         let index_ref: &GlobalIndex = self.index;
 
         hierarchy.par_iter().for_each(|&layer_uuid| {
-            let promise = layer_promises.get(&layer_uuid).unwrap();
+            let promise = layer_promises
+                .get(&layer_uuid)
+                .expect("Layer UUID must be in the promises map");
             log::trace!("Executing load task for UUID: {}", layer_uuid);
 
             let task_result = compiler::load_layer_task(layer_uuid, index_ref);
@@ -108,7 +110,10 @@ impl<'a> ConfigLoader<'a> {
             let layer_result_for_promise = match task_result {
                 Ok((layer_arc, Some(update))) => {
                     // On a cache miss, we get a hash update.
-                    hash_updates.lock().unwrap().push(update);
+                    hash_updates
+                        .lock()
+                        .expect("Mutex should not be poisoned")
+                        .push(update);
                     Ok(layer_arc)
                 }
                 Ok((layer_arc, None)) => Ok(layer_arc), // Cache hit
@@ -121,7 +126,11 @@ impl<'a> ConfigLoader<'a> {
         });
 
         // --- 3. State Synchronization ---
-        let primary_entry = self.index.projects.get(&uuid).unwrap();
+        let primary_entry = self
+            .index
+            .projects
+            .get(&uuid)
+            .expect("Primary project UUID must exist in the index");
         let qualified_name = crate::core::index_manager::build_qualified_name(uuid, self.index)
             .unwrap_or_else(|| primary_entry.name.clone());
 
@@ -146,10 +155,14 @@ impl<'a> ConfigLoader<'a> {
         let updates_to_apply = Arc::try_unwrap(hash_updates)
             .expect("Mutex should not be locked elsewhere")
             .into_inner()
-            .unwrap();
+            .expect("Mutex should not be poisoned");
 
         // Step 3d: Apply updates to the in-memory index.
-        let entry = self.index.projects.get_mut(&uuid).unwrap();
+        let entry = self
+            .index
+            .projects
+            .get_mut(&uuid)
+            .expect("Primary project UUID must exist in the index");
         let mut cache_path_changed = false;
 
         if entry.cache_dir.as_ref() != Some(&final_cache_path) {
@@ -179,7 +192,10 @@ impl<'a> ConfigLoader<'a> {
                 .cache_dir
                 .as_ref()
                 .map(PathBuf::from)
-                .unwrap_or_else(|| paths::get_default_cache_dir_for_project(uuid).unwrap());
+                .unwrap_or_else(|| {
+                    paths::get_default_cache_dir_for_project(uuid)
+                        .expect("Default cache dir should always be resolvable")
+                });
 
             let old_path = old_cache_dir.join(&hash);
             let new_path = final_cache_path.join(&hash);
@@ -263,7 +279,10 @@ impl<'a> ConfigLoader<'a> {
 
         rayon::scope(|s| {
             for &layer_uuid in &hierarchy {
-                let promise = layer_promises.get(&layer_uuid).unwrap().clone();
+                let promise = layer_promises
+                    .get(&layer_uuid)
+                    .expect("Layer UUID from hierarchy must be in promises map")
+                    .clone();
 
                 let ephemeral_entry_clone = ephemeral_entry_arc.clone();
 
@@ -285,7 +304,9 @@ impl<'a> ConfigLoader<'a> {
                         Err(e) => Err(e),
                     };
 
-                    promise.set(layer_result_for_promise).unwrap();
+                    promise
+                        .set(layer_result_for_promise)
+                        .expect("Promise should only be set once");
                 });
             }
         });

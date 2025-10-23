@@ -148,7 +148,9 @@ fn list_available_scripts(config: &ResolvedConfig, index: &GlobalIndex) -> Resul
     sorted_keys.sort();
 
     for script_name in sorted_keys {
-        let task = scripts.get(script_name).unwrap();
+        let task = scripts
+            .get(script_name)
+            .expect("Script name should exist as we are iterating over map keys");
         print!("  - {}", script_name.green());
 
         let source_project_name =

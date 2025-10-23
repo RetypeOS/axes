@@ -86,9 +86,15 @@ pub fn handle(
 
     match alias_args.command.unwrap_or(AliasCommand::List) {
         AliasCommand::Set { name, context } => set_alias(&name, &context, state_guard),
-        AliasCommand::List => list_aliases(state_guard.index()),
+        AliasCommand::List => {
+            list_aliases(state_guard.index());
+            Ok(())
+        }
         AliasCommand::Remove { name } => remove_alias(&name, state_guard.index_mut()),
-        AliasCommand::Check => check_aliases(state_guard.index()),
+        AliasCommand::Check => {
+            check_aliases(state_guard.index());
+            Ok(())
+        }
     }
 }
 
@@ -115,7 +121,11 @@ fn set_alias(name: &str, context: &str, state_guard: &mut AppStateGuard<'_>) -> 
     // Check if the alias already exists to provide better user feedback.
     let is_update = state_guard.index().aliases.contains_key(&clean_name);
     if is_update {
-        let old_uuid = state_guard.index().aliases.get(&clean_name).unwrap(); // Safe to unwrap here.
+        let old_uuid = state_guard
+            .index()
+            .aliases
+            .get(&clean_name)
+            .expect("Alias key should exist as we are in the `is_update` block");
         let old_target = index_manager::build_qualified_name(*old_uuid, state_guard.index())
             .unwrap_or_else(|| t!("alias.info.broken_link").red().to_string());
         println!(
@@ -159,10 +169,10 @@ fn set_alias(name: &str, context: &str, state_guard: &mut AppStateGuard<'_>) -> 
 ///
 /// # Arguments
 /// * `index` - An immutable reference to the `GlobalIndex`.
-fn list_aliases(index: &GlobalIndex) -> Result<()> {
+fn list_aliases(index: &GlobalIndex) {
     if index.aliases.is_empty() {
         println!("\n{}", t!("alias.info.no_aliases"));
-        return Ok(());
+        return;
     }
 
     println!("\n{}:", t!("alias.info.header"));
@@ -189,7 +199,6 @@ fn list_aliases(index: &GlobalIndex) -> Result<()> {
 
         println!("  {}{} ->  {}", alias_display_colored, padding, target_name);
     }
-    Ok(())
 }
 
 /// Handles the logic for removing an alias.
@@ -227,10 +236,10 @@ fn remove_alias(name: &str, index: &mut GlobalIndex) -> Result<()> {
 ///
 /// # Arguments
 /// * `index` - An immutable reference to the `GlobalIndex`.
-fn check_aliases(index: &GlobalIndex) -> Result<()> {
+fn check_aliases(index: &GlobalIndex) {
     if index.aliases.is_empty() {
         println!("\n{}", t!("alias.info.no_aliases"));
-        return Ok(());
+        return;
     }
 
     println!("\n{}", t!("alias.info.checking_header"));
@@ -265,8 +274,6 @@ fn check_aliases(index: &GlobalIndex) -> Result<()> {
             format!(t!("alias.warning.found_broken"), count = broken_count).yellow()
         );
     }
-
-    Ok(())
 }
 
 // --- Helper Functions ---

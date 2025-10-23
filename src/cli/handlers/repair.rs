@@ -101,7 +101,7 @@ pub fn handle(
     );
 
     // --- Phase 1: Scan and Detect ---
-    let mismatches = scan_for_path_mismatches(&start_path, &repair_args, state_guard.index())?;
+    let mismatches = scan_for_path_mismatches(&start_path, &repair_args, state_guard.index());
 
     // --- Phase 2: Report and (Optionally) Fix ---
     if mismatches.is_empty() {
@@ -177,7 +177,7 @@ fn scan_for_path_mismatches(
     start_path: &PathBuf,
     args: &RepairArgs,
     index: &GlobalIndex,
-) -> Result<Vec<PathMismatch>> {
+) -> Vec<PathMismatch> {
     let mut mismatches = Vec::new();
     let mut walker = WalkDir::new(start_path);
 
@@ -226,5 +226,5 @@ fn scan_for_path_mismatches(
             // TODO: Add TOML validation logic here.
         }
     }
-    Ok(mismatches)
+    mismatches
 }

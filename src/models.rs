@@ -528,7 +528,10 @@ impl ResolvedConfig {
     /// # Arguments
     /// * `name` - The simple name of the script to find.
     pub fn get_script(&self, name: &str) -> Result<Option<Arc<Task>>> {
-        let mut guard = self.memoized_scripts.lock().unwrap();
+        let mut guard = self
+            .memoized_scripts
+            .lock()
+            .expect("Memoization mutex should not be poisoned");
         if let Some(cache) = &*guard
             && let Some(cached_result) = cache.get(name)
         {
@@ -557,7 +560,10 @@ impl ResolvedConfig {
     /// # Arguments
     /// * `name` - The name of the variable to find.
     pub fn get_var(&self, name: &str) -> Result<Option<Arc<CachedVar>>> {
-        let mut guard = self.memoized_vars.lock().unwrap();
+        let mut guard = self
+            .memoized_vars
+            .lock()
+            .expect("Memoization mutex should not be poisoned");
         if let Some(cache) = &*guard
             && let Some(cached_result) = cache.get(name)
         {
@@ -581,7 +587,10 @@ impl ResolvedConfig {
     /// Lazily merges and returns all environment variables from the entire hierarchy.
     /// The result is cached in an Arc for extremely fast subsequent calls.
     pub fn get_env(&self) -> Result<MemoizedEnv> {
-        let mut guard = self.memoized_env.lock().unwrap();
+        let mut guard = self
+            .memoized_env
+            .lock()
+            .expect("Memoization mutex should not be poisoned");
         if let Some(env_arc) = &*guard {
             return Ok(env_arc.clone());
         }
@@ -599,7 +608,10 @@ impl ResolvedConfig {
     /// Lazily finds and returns the project's version by searching up the hierarchy.
     /// The first non-empty `version` field found while traversing up the chain is returned.
     pub fn get_version(&self) -> Result<Option<String>> {
-        let mut guard = self.memoized_version.lock().unwrap();
+        let mut guard = self
+            .memoized_version
+            .lock()
+            .expect("Memoization mutex should not be poisoned");
         if let Some(version) = &*guard {
             return Ok(version.clone());
         }
@@ -618,7 +630,10 @@ impl ResolvedConfig {
     /// Lazily finds and returns the project's description by searching up the hierarchy.
     /// The first non-empty `description` field found is returned.
     pub fn get_description(&self) -> Result<Option<String>> {
-        let mut guard = self.memoized_description.lock().unwrap();
+        let mut guard = self
+            .memoized_description
+            .lock()
+            .expect("Memoization mutex should not be poisoned");
         if let Some(desc) = &*guard {
             return Ok(desc.clone());
         }
@@ -641,7 +656,10 @@ impl ResolvedConfig {
     /// 2. A reverse pass (parent-to-child) merges collections, allowing child definitions
     ///    to override parent definitions (e.g., `open_with` commands, `shell` value).
     pub fn get_options(&self) -> Result<ResolvedOptionsConfig> {
-        let mut guard = self.memoized_options.lock().unwrap();
+        let mut guard = self
+            .memoized_options
+            .lock()
+            .expect("Memoization mutex should not be poisoned");
         if let Some(options) = &*guard {
             return Ok(options.clone());
         }
@@ -841,7 +859,10 @@ impl ResolvedConfig {
             let maybe_composition =
                 self.select_platform_exec(plat_exec)
                     .and_then(|cmd_exec| match &cmd_exec.action {
-                        CommandAction::Execute(tpl) if tpl.len() == 1 => Some((&tpl[0], cmd_exec)),
+                        CommandAction::Execute(tpl) if tpl.len() == 1 => Some((
+                            tpl.first().expect("Template length is checked to be 1"),
+                            cmd_exec,
+                        )),
                         _ => None,
                     });
             if let Some((TemplateComponent::Script(name), parent_cmd_exec)) = maybe_composition {

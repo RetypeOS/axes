@@ -252,11 +252,12 @@ fn execute_parallel_batch(batch: &[(String, bool, bool)], config: &ResolvedConfi
             "{}",
             format!("┌─ Running {} commands in parallel...", batch.len()).dimmed()
         )
-        .unwrap();
+        .expect("Writing to a String buffer should not fail");
         let inter_arrow = ("├─>").dimmed();
         for (command_str, _, silent) in batch.iter() {
             if !*silent {
-                writeln!(header_block, "{} {}", inter_arrow, command_str.green()).unwrap();
+                writeln!(header_block, "{} {}", inter_arrow, command_str.green())
+                    .expect("Writing to a String buffer should not fail");
             }
         }
         print!("{}", header_block);
@@ -281,7 +282,9 @@ fn execute_parallel_batch(batch: &[(String, bool, bool)], config: &ResolvedConfi
     let mut errors = Vec::new();
     for (i, result) in results.into_iter().enumerate() {
         if let Err(e) = result {
-            let failed_command = &batch[i].0;
+            let (failed_command, _, _) = batch
+                .get(i)
+                .expect("Index must be valid in results enumeration");
             log::trace!(
                 "Parallel command failed: '{}' with error: {}",
                 failed_command,

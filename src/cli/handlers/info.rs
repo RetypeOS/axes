@@ -181,7 +181,9 @@ fn print_scripts_map(config: &ResolvedConfig, index: &GlobalIndex) -> Result<()>
     sorted_keys.sort();
 
     for script_name in sorted_keys {
-        let task = scripts.get(script_name).unwrap();
+        let task = scripts
+            .get(script_name)
+            .expect("Script name should exist as we are iterating over map keys");
         print!("    - {}", script_name.cyan());
 
         let source_project_name = find_task_source("scripts", script_name, config, index)?;
@@ -218,7 +220,9 @@ fn print_vars_map(config: &ResolvedConfig, index: &GlobalIndex) -> Result<()> {
     sorted_keys.sort();
 
     for var_name in sorted_keys {
-        let var = vars.get(var_name).unwrap();
+        let var = vars
+            .get(var_name)
+            .expect("Variable name should exist as we are iterating over map keys");
         print!("    - {}", var_name.cyan());
 
         let source_project_name = find_task_source("vars", var_name, config, index)?;
