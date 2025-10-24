@@ -1,5 +1,3 @@
-# .github/workflows/release.yml
-
 name: Release Binaries
 
 permissions:
@@ -88,7 +86,7 @@ jobs:
 
           mkdir -p "$PACKAGE_DIR"
           cp "target/${{ matrix.target }}/release/${{ matrix.binary_name }}" "$PACKAGE_DIR/"
-          cp LICENSE README.md "$PACKAGE_DIR/"
+          cp LICENSE README.md GETTING_STARTED.md ARG_PARSER.md AXES_TOML_GUIDE.md COMMAND.md "$PACKAGE_DIR/"
 
       - name: Create compressed package
         shell: bash
@@ -155,7 +153,21 @@ jobs:
             --repo ${{ github.repository }} \
             --clobber
 
-      - name: Publish the release (remove draft status)
+      - name: Publish the release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit "${{ needs.create_release.outputs.version }}" --draft=false
+        run: |
+          VERSION="${{ needs.create_release.outputs.version }}"
+          PRERELEASE=""
+
+          shopt -s nocasematch
+
+          if [[ "$VERSION" =~ [._-]?(beta|alpha|rc|dev)[0-9]*$ ]]; then
+            PRERELEASE="--prerelease"
+          fi
+
+          shopt -u nocasematch
+
+          gh release edit "$VERSION" --draft=false $PRERELEASE
+
+
