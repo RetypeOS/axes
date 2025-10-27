@@ -98,7 +98,7 @@ jobs:
           fi
 
       - name: Upload package as workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: release-assets-${{ matrix.target }}
           path: ${{ steps.prep.outputs.ASSET_NAME }}
