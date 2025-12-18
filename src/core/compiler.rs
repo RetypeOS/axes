@@ -5,13 +5,12 @@
 //! platform-agnostic, optimized Abstract Syntax Tree (AST) that can be cached and executed efficiently.
 
 use crate::{
-    core::{cache, color, parameters, paths},
-    models::{
+    core::{cache, color, parameters, paths}, dev_utils::{self, BlockTimer}, models::{
         CachedOpenWithConfig, CachedOptionsConfig, CachedProjectConfig, CachedVar, CommandAction,
         CommandExecution, GlobalIndex, IndexEntry, IndexUpdate, PlatformCommand, PlatformExecution,
         ProjectConfig, RunSpec, Task, TemplateComponent, TomlCommand, TomlScript, TomlVar,
         TomlVarValue,
-    },
+    }
 };
 use anyhow::{Context, Result, anyhow};
 use lazy_static::lazy_static;
@@ -261,6 +260,7 @@ pub fn load_layer_task(
     uuid: Uuid,
     index: &GlobalIndex,
 ) -> Result<(std::sync::Arc<CachedProjectConfig>, Option<IndexUpdate>)> {
+    let _timer = dev_utils::BlockTimer::new(format!("        ----> load_layer_task (UUID: {})", uuid));
     log::debug!("Executing load task for UUID: {}", uuid);
     let entry = index
         .projects
@@ -269,6 +269,7 @@ pub fn load_layer_task(
 
     let config_path = entry.path.join(".axes").join("axes.toml");
     let current_toml_hash = if config_path.exists() {
+        let _timer_vh = dev_utils::BlockTimer::new("          -----> Cache Validation (Hashing)");
         cache::calculate_validation_data(&config_path)?.content_hash
     } else {
         // Use a consistent hash for non-existent or empty files.
@@ -293,6 +294,7 @@ pub fn load_layer_task(
         && saved_hash == &current_toml_hash
     {
         let cache_file_path = cache_dir_to_check.join(saved_hash);
+        let _timer_cr = dev_utils::BlockTimer::new("          -----> Cache Hit (Read & Decompress)");
         if let Ok(cached_layer) = read_cached_layer(&cache_file_path) {
             log::debug!(
                 "Cache HIT for layer '{}' at '{}'.",
@@ -310,7 +312,8 @@ pub fn load_layer_task(
     // --- CACHE MISS: RECOMPILE ---
     log::debug!("Cache MISS for layer '{}'. Recompiling.", entry.name);
 
-    let new_layer = load_and_compile_layer(entry)?;
+    let _timer_cm = dev_utils::BlockTimer::new("          -----> Cache Miss (Compile & Write)");
+    let new_layer = {let _timer_c = dev_utils::BlockTimer::new("            ------> Compile Layer");load_and_compile_layer(entry)?};
 
     // We just return an IndexUpdate with the new hash. The ConfigLoader will handle the rest.
     let update = IndexUpdate {
@@ -322,6 +325,7 @@ pub fn load_layer_task(
 
     // We still need to write the new cache file somewhere. We'll use the path we checked.
     let new_cache_file_path = cache_dir_to_check.join(&update.new_hash);
+    let _timer_w = dev_utils::BlockTimer::new("            ------> Write Cache");
     write_cached_layer(&new_cache_file_path, &new_layer)?;
 
     Ok((std::sync::Arc::new(new_layer), Some(update)))
@@ -606,9 +610,13 @@ fn compile_string_to_command_execution(
 /// A `Result` containing the deserialized `CachedProjectConfig` on success, or an error if the file
 /// cannot be read or deserialized.
 fn read_cached_layer(path: &std::path::Path) -> Result<CachedProjectConfig> {
+    let _timer_total = BlockTimer::new("            ------> read_cached_layer (Total)");
     // 1. Read the compressed bytes from disk.
-    let compressed_bytes = fs::read(path)
-        .with_context(|| format!("Failed to read cache file at '{}'", path.display()))?;
+    
+    let compressed_bytes = {
+        let _timer_io = BlockTimer::new("              -------> 1. Filesystem Read");
+        fs::read(path)
+        .with_context(|| format!("Failed to read cache file at '{}'", path.display()))?};
 
     // ROBUSTNESS: Handle empty file case gracefully.
     if compressed_bytes.is_empty() {
@@ -622,19 +630,23 @@ fn read_cached_layer(path: &std::path::Path) -> Result<CachedProjectConfig> {
         "Decompressing cache layer from {} bytes.",
         compressed_bytes.len()
     );
-    let decompressed_bytes =
+    
+    let decompressed_bytes ={
+        let _timer_lz4 = BlockTimer::new("              -------> 2. LZ4 Decompression");
         lz4_flex::decompress_size_prepended(&compressed_bytes).map_err(|e| {
             anyhow!(
                 "Failed to decompress cache file: {}. It might be corrupt.",
                 e
             )
-        })?;
+        })?};
     log::trace!("Decompressed to {} bytes.", decompressed_bytes.len());
 
     // 3. Deserialize the raw bytes using bincode.
     let (cached_layer, _): (CachedProjectConfig, usize) =
-        bincode::serde::decode_from_slice(&decompressed_bytes, bincode::config::standard())
-            .context("Failed to deserialize cache data after decompression. The cache is likely from an incompatible version of `axes`.")?;
+        {
+            let _timer_bincode = BlockTimer::new("              -------> 3. Bincode Deserialization");
+            bincode::serde::decode_from_slice(&decompressed_bytes, bincode::config::standard())
+            .context("Failed to deserialize cache data after decompression. The cache is likely from an incompatible version of `axes`.")?};
 
     Ok(cached_layer)
 }

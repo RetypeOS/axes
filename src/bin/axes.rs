@@ -19,25 +19,24 @@
 
 use anyhow::Result;
 use axes::{
-    cli::{Cli, dispatcher},
-    core::index_manager,
-    state::get_app_state,
-    system::executor,
+    cli::{dispatcher, Cli}, core::index_manager, dev_utils, state::get_app_state, system::executor
 };
 use clap::Parser;
 use colored::*;
 
 /// The main entry point of the `axes` application.
 fn main() {
+    let _timer_total = dev_utils::BlockTimer::new("Total Execution");
     let cli = Cli::parse();
 
     #[cfg(debug_assertions)]
     {
-        //env_logger::init();
+        env_logger::init();
     }
 
     // --- Application Logic Execution ---
     // The core logic is now encapsulated and called here.
+    let _timer_logic = dev_utils::BlockTimer::new("Core App Logic");
     if let Err(e) = run_app(cli) {
         // --- Graceful Error Handling (Unchanged) ---
         if let Some(clap_err) = e.downcast_ref::<clap::Error>()
@@ -76,6 +75,7 @@ fn main() {
     // The MutexGuard allows us to access the methods of the inner AppState directly.
     // We call AppState::needs_saving() via the guard.
     if state_guard.needs_saving() {
+        let _timer_save = dev_utils::BlockTimer::new("State Saving");
         // We call AppState::index() via the guard to get a reference to the GlobalIndex
         // that index_manager::save_global_index expects.
         if let Err(e) = index_manager::save_global_index(state_guard.index()) {

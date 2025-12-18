@@ -4,8 +4,7 @@
 //! of configuration layers for a project hierarchy. It handles both registered and ephemeral projects,
 //! leveraging parallel processing and caching to ensure high performance.
 use crate::{
-    core::{compiler, index_manager, paths},
-    models::{GlobalIndex, IndexEntry, LayerPromise, ResolvedConfig},
+    core::{compiler, index_manager, paths}, dev_utils, models::{GlobalIndex, IndexEntry, LayerPromise, ResolvedConfig}
 };
 use anyhow::{Result, anyhow};
 use log;
@@ -72,10 +71,12 @@ impl<'a> ConfigLoader<'a> {
     ///
     /// A `Result` containing the `ResolvedConfig` on success, or an error if resolution fails.
     pub fn resolve(&mut self, uuid: Uuid) -> Result<ResolvedConfig> {
+        let _timer = dev_utils::BlockTimer::new("    --> ConfigLoader::resolve");
         log::debug!("ConfigLoader resolving UUID: {}", uuid);
 
         // --- 1. Hierarchy Discovery ---
         let mut hierarchy = Vec::new();
+        let _timer_h = dev_utils::BlockTimer::new("      ---> Hierarchy Discovery");
         let mut current_uuid = Some(uuid);
         while let Some(id) = current_uuid {
             hierarchy.push(id);
@@ -99,6 +100,7 @@ impl<'a> ConfigLoader<'a> {
         let hash_updates = Arc::new(Mutex::new(Vec::new()));
         let index_ref: &GlobalIndex = self.index;
 
+        let _timer_pl = dev_utils::BlockTimer::new("      ---> Parallel Layer Loading");
         hierarchy.par_iter().for_each(|&layer_uuid| {
             let promise = layer_promises
                 .get(&layer_uuid)

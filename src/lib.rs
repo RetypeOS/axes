@@ -28,3 +28,7 @@ pub mod state;
 
 /// The system module, which provides an interface to the underlying operating system.
 pub mod system;
+
+/// Only for tests
+#[cfg(debug_assertions)]
+pub mod dev_utils;

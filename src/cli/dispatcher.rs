@@ -27,8 +27,7 @@
 use anyhow::Result;
 
 use crate::{
-    cli::handlers::{self, run::parse_script_path},
-    state::AppStateGuard,
+    cli::handlers::{self, run::parse_script_path}, dev_utils, state::AppStateGuard
 };
 
 // --- Command Definition and Registry ---
@@ -126,6 +125,7 @@ fn find_command(name: &str) -> Option<&'static CommandDefinition> {
 
 /// The main application dispatcher implementing the new universal grammar.
 pub fn dispatch(all_args: Vec<String>, index: &mut AppStateGuard<'_>) -> Result<()> {
+    let _timer_dispatch = dev_utils::BlockTimer::new("Command Dispatch");
     log::debug!("Dispatching args: {:?}", all_args);
 
     if all_args.is_empty() {
@@ -140,6 +140,7 @@ pub fn dispatch(all_args: Vec<String>, index: &mut AppStateGuard<'_>) -> Result<
 
     // --- Dispatch Logic Cascade (Moved from main.rs) ---
     let (command_def, context, handler_args) = if let Some(arg2_val) = arg2 {
+        let _timer_grammar = dev_utils::BlockTimer::new("Grammar Resolution");
         if arg2_val == "--" {
             // Rule 1 (Escape Hatch): `axes <script_path> -- [params...]`
             let (ctx_part, script_part) = parse_script_path(arg1);
@@ -183,5 +184,6 @@ pub fn dispatch(all_args: Vec<String>, index: &mut AppStateGuard<'_>) -> Result<
     };
 
     // --- Dispatch to Handler ---
+    let _timer_handler = dev_utils::BlockTimer::new(format!("Handler: {}", command_def.name));
     (command_def.handler)(context, handler_args, index)
 }

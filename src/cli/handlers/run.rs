@@ -28,10 +28,7 @@
 //!       run the prepared task.
 
 use crate::{
-    cli::handlers::commons,
-    core::{parameters::ArgResolver, task_executor},
-    models::{CommandAction, GlobalIndex, PlatformSpecializedTask, ResolvedConfig},
-    state::AppStateGuard,
+    cli::handlers::commons, core::{parameters::ArgResolver, task_executor}, dev_utils, models::{CommandAction, GlobalIndex, PlatformSpecializedTask, ResolvedConfig}, state::AppStateGuard
 };
 use anyhow::{Result, anyhow};
 use clap::Parser;
@@ -91,6 +88,7 @@ pub fn handle(
         Some(args.remove(0))
     };
     let script_params = args;
+    let _timer = dev_utils::BlockTimer::new("  -> resolve_config_for_context");
     let config = commons::resolve_config_for_context(context, state_guard)?;
 
     match script_name_opt {
@@ -105,12 +103,15 @@ pub fn handle(
                 )
             })?;
 
+            let _timer = dev_utils::BlockTimer::new("  -> flatten_task");
             let task_flattened = config.flatten_task(&task_universal)?;
 
+            let _timer = dev_utils::BlockTimer::new("  -> build_resolver_for_task");
             let resolver = commons::build_resolver_for_task(&task_flattened, &final_params)?;
-
+            
             let task_specialized = config.specialize_task_for_platform(&task_flattened);
 
+            let _timer_exec = dev_utils::BlockTimer::new("  -> task_executor::execute_task");
             if is_dry_run {
                 dry_run_script(&script_name, &task_specialized, &config, &resolver)
             } else {
