@@ -131,7 +131,7 @@ jobs:
           cat SHA256SUMS
 
       - name: Import GPG Signing Key
-        uses: crazy-max/ghaction-import-gpg@v6
+        uses: crazy-max/ghaction-import-gpg@v7
         with:
           gpg_private_key: ${{ secrets.GPG_BOT_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
