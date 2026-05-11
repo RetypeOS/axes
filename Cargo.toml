@@ -24,7 +24,7 @@ dialoguer = "0.12.0"
 bincode = {version = "2.0.1", features = ["serde"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.145"
-toml = "0.9.5"
+toml = "1.1.2"
 hex = "0.4.3"
 
 # Error Handling
@@ -59,7 +59,7 @@ blake3 = "1.8.2"
 lz4_flex = "0.11.5"
 
 [build-dependencies]
-toml = "0.9.5"
+toml = "1.1.2"
 serde = { version = "1.0.219", features = ["derive"] }
 
 # Lint Rules
